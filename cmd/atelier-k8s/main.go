@@ -1,0 +1,42 @@
+// Command atelier-k8s is the singleton k9s popup tool.
+package main
+
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/vyrwu/atelier/internal/manifest"
+	"github.com/vyrwu/atelier/internal/toolmain"
+	"github.com/vyrwu/atelier/internal/tools/k8s"
+)
+
+var Manifest = &manifest.Manifest{
+	APIVersion:    manifest.APIVersion,
+	Name:          "k8s",
+	Description:   "Singleton k9s popup (picker on every open; respawns on context change)",
+	PrimaryInvoke: "open",
+	Binding: &manifest.Binding{
+		Style:  manifest.StyleFull,
+		Invoke: "open",
+	},
+	UI: &manifest.UI{
+		Icon:        "胡",
+		AccentColor: "110",
+		PopupTitle:  "Kubernetes",
+	},
+	Popup:       manifest.KindGlobal,
+	Requires:    []string{"k9s"},
+	Subcommands: []string{"open", "switch", "contexts"},
+	PickerBindings: []manifest.PickerBinding{
+		{Key: "Enter", Action: "Switch to the selected k8s context (respawns k9s)"},
+		{Key: "Esc", Action: "Dismiss"},
+	},
+}
+
+func main() {
+	toolmain.Run(Manifest, func(root *cobra.Command) {
+		root.AddCommand(k8s.OpenCommand())
+		root.AddCommand(k8s.SwitchCommand())
+		root.AddCommand(k8s.ContextsCommand())
+		root.AddCommand(k8s.LaunchCommand())
+	})
+}

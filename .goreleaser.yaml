@@ -1,0 +1,382 @@
+version: 2
+
+project_name: atelier
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: atelier
+    main: ./cmd/atelier
+    binary: atelier
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+
+  - id: atelier-popupshell
+    main: ./cmd/atelier-popupshell
+    binary: atelier-popupshell
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-lazygit
+    main: ./cmd/atelier-lazygit
+    binary: atelier-lazygit
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-claude
+    main: ./cmd/atelier-claude
+    binary: atelier-claude
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-k8s
+    main: ./cmd/atelier-k8s
+    binary: atelier-k8s
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-pg
+    main: ./cmd/atelier-pg
+    binary: atelier-pg
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-aws
+    main: ./cmd/atelier-aws
+    binary: atelier-aws
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-workspaces
+    main: ./cmd/atelier-workspaces
+    binary: atelier-workspaces
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-toolselector
+    main: ./cmd/atelier-toolselector
+    binary: atelier-toolselector
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+archives:
+  # One archive per binary so each Homebrew formula downloads only the
+  # binary it installs (vs. a bundle archive where every formula would
+  # have to extract one specific binary from the same tar). Naming
+  # convention: <bin>_<version>_<os>_<arch>.tar.gz, with darwin→macos
+  # and amd64→x86_64 substitution to match Homebrew's expectations.
+  - id: atelier
+    ids: [atelier]
+    name_template: >-
+      atelier_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+
+  - id: atelier-popupshell
+    ids: [atelier-popupshell]
+    name_template: >-
+      atelier-popupshell_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-lazygit
+    ids: [atelier-lazygit]
+    name_template: >-
+      atelier-lazygit_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-claude
+    ids: [atelier-claude]
+    name_template: >-
+      atelier-claude_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-k8s
+    ids: [atelier-k8s]
+    name_template: >-
+      atelier-k8s_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-pg
+    ids: [atelier-pg]
+    name_template: >-
+      atelier-pg_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-aws
+    ids: [atelier-aws]
+    name_template: >-
+      atelier-aws_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-workspaces
+    ids: [atelier-workspaces]
+    name_template: >-
+      atelier-workspaces_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-toolselector
+    ids: [atelier-toolselector]
+    name_template: >-
+      atelier-toolselector_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+# Homebrew tap publishing. Every release tag, goreleaser regenerates
+# the formula Ruby files and pushes them to vyrwu/homebrew-tap.
+# Honors the plugin model: each tool is an independent formula that
+# depends_on "vyrwu/tap/atelier" (the core). Users compose what they
+# want; third-party plugins coexist via PATH discovery.
+brews:
+  - name: atelier
+    ids: [atelier]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Terminal-centric agentic dev framework — engine
+    license: MIT
+    dependencies:
+      - name: tmux
+      - name: fzf
+    test: |
+      system "#{bin}/atelier", "version"
+    install: |
+      bin.install "atelier"
+
+  - name: atelier-popupshell
+    ids: [atelier-popupshell]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — popup shell
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+    install: |
+      bin.install "atelier-popupshell"
+
+  - name: atelier-lazygit
+    ids: [atelier-lazygit]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — lazygit launcher
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+      - name: lazygit
+    install: |
+      bin.install "atelier-lazygit"
+
+  - name: atelier-claude
+    ids: [atelier-claude]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — Claude Code integration
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+    install: |
+      bin.install "atelier-claude"
+
+  - name: atelier-k8s
+    ids: [atelier-k8s]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — k9s + EKS context switcher
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+      - name: k9s
+    install: |
+      bin.install "atelier-k8s"
+
+  - name: atelier-pg
+    ids: [atelier-pg]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — Postgres pgcli launcher
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+      - name: pgcli
+    install: |
+      bin.install "atelier-pg"
+
+  - name: atelier-aws
+    ids: [atelier-aws]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — AWS context switcher
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+      - name: awscli
+    install: |
+      bin.install "atelier-aws"
+
+  - name: atelier-workspaces
+    ids: [atelier-workspaces]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — workspace + worktree manager
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+    install: |
+      bin.install "atelier-workspaces"
+
+  - name: atelier-toolselector
+    ids: [atelier-toolselector]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — M-; tool picker
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+    install: |
+      bin.install "atelier-toolselector"
+
+checksum:
+  name_template: 'atelier_{{ .Version }}_checksums.txt'
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))?:'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))?:'
+      order: 1
+    - title: Refactors
+      regexp: '^.*?refactor(\(.+\))?:'
+      order: 2
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^docs(\(.+\))?:'
+      - '^test(\(.+\))?:'
+      - '^ci(\(.+\))?:'
+      - '^chore(\(.+\))?:'
+      - typo
+
+release:
+  github:
+    owner: vyrwu
+    name: atelier
+  prerelease: auto
+  header: |
+    ## atelier {{ .Tag }}
+
+    Terminal-centric agentic dev framework. Per-workspace tool clusters in tmux, driven by a Go engine with a plugin architecture.
+
+    See [README](https://github.com/vyrwu/atelier#install) for install instructions and [CONTRIBUTING](https://github.com/vyrwu/atelier/blob/main/CONTRIBUTING.md) for plugin authoring.
+
+  footer: |
+    ---
+
+    **Installing the binaries:**
+
+    1. Download the archive matching your OS + arch.
+    2. Extract: `tar -xzf atelier_*.tar.gz`
+    3. Move the binaries onto your PATH: `mv atelier* ~/.local/bin/`
+    4. Verify: `atelier doctor`
+    5. Wire into tmux: add `run-shell 'atelier init | tmux source-file -'` to your tmux.conf.
+
+    For checksums, see `atelier_{{ .Version }}_checksums.txt`.

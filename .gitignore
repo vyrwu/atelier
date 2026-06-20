@@ -1,0 +1,7 @@
+/bin/
+/dist/
+*.test
+*.out
+result
+result-*
+.direnv/

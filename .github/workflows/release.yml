@@ -1,0 +1,51 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install tmux + fzf (for `go test` hook in goreleaser)
+        run: sudo apt-get update && sudo apt-get install -y tmux fzf
+
+      - name: Verify build for all tool binaries
+        run: make build
+
+      - name: Run unit tests
+        run: make test
+
+      - name: Run e2e tests
+        run: |
+          export PATH="$PWD/bin:$PATH"
+          go test -tags=e2e ./...
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          # Keep in lockstep with the goreleaser-check version pinned
+          # in ci.yml. Bump both at the same time.
+          version: v2.5.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with write access to vyrwu/homebrew-tap (set up at:
+          # github.com/vyrwu/atelier → Settings → Secrets and variables).
+          # Used by goreleaser's brews: block to push the per-formula
+          # Ruby files into the tap repo on every release.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

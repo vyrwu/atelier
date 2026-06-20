@@ -1,0 +1,34 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosimple
+    - gofmt
+    - misspell
+
+  settings:
+    errcheck:
+      # Allow unchecked errors on intentional best-effort cleanups (tmux
+      # kill-server, popup cleanup hooks). The rest must be checked.
+      exclude-functions:
+        - (*github.com/vyrwu/atelier/internal/tmuxhost.Client).KillServer
+
+  exclusions:
+    rules:
+      # Tests can fmt.Print without errcheck noise.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt

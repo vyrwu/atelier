@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest    # linux/amd64
+          - ubuntu-24.04-arm # linux/arm64
+          - macos-13         # darwin/amd64 (intel)
+          - macos-latest     # darwin/arm64 (apple silicon)
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install tmux + fzf
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y tmux fzf
+          else
+            brew install tmux fzf
+          fi
+
+      - name: Verify versions
+        run: |
+          go version
+          tmux -V
+          fzf --version
+
+      - name: go mod verify
+        run: go mod verify
+
+      - name: Build all binaries
+        run: make build
+
+      - name: Unit tests
+        run: make test
+
+      - name: E2E tests
+        run: |
+          export PATH="$PWD/bin:$PATH"
+          go test -tags=e2e ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          # Pin to a specific release so a future golangci-lint change
+          # can't silently break CI. Bump deliberately when needed.
+          version: v1.62.2
+          args: --timeout=5m
+
+  goreleaser-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          # Pin so a future goreleaser release can't break this job.
+          # Bump deliberately when needed.
+          version: v2.5.0
+          args: check
