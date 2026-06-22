@@ -167,6 +167,7 @@ func TestThemeBlock_DistroGradeDefaults(t *testing.T) {
 		"repeat-time 0":                                 "kill chord-swallowing repeat window",
 		"atelier internal clipboard-copy":               "copy-mode yank pipes to system clipboard",
 		"copy-mode-vi y send -X copy-pipe-and-cancel":   "y binding wired to clipboard pipe",
+		"bind -T popup C-] copy-mode":                   "popup key-table needs an explicit copy-mode entry (prefix is unset there)",
 		"automatic-rename off":                          "window names persist across shell process changes",
 		"allow-rename off":                              "same",
 	}

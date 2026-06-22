@@ -848,25 +848,19 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 			continue
 		}
 
-		if err := workspace.LandOuter(h, "="+session, newWid); err != nil {
-			return err
-		}
-		// Log post-state so we can see where the client actually landed.
-		if v, err := h.DisplayMessage("#{client_name}|#{client_session}|#{window_id}|#{window_name}"); err == nil {
-			debuglog.Logf("runWorkspacePrompt: post-switch state=%q", v)
-		}
-
+		// Queue the Claude popup BEFORE LandOuter. LandOuter's
+		// detachStalePopups closes any `_atelier_*` popup scoped to a
+		// DIFFERENT (sid,wid) than the target — and `_prompt` is
+		// itself often running inside such a popup (e.g., user M-;'d
+		// from a Claude popup on the previous workspace). The
+		// deferred detach fires asynchronously and SIGHUPs our pty
+		// before we can queue the Claude popup if we wait. By queuing
+		// first, the `sleep 0.15 && display-popup -c <outerClient>`
+		// command is already in tmux's run-shell queue; it fires on
+		// the outer client regardless of whether our pty survives.
 		newSid, _ := h.DisplayMessageAt(newWid, "#{session_id}")
 		sidNum := strings.TrimPrefix(strings.TrimSpace(newSid), "$")
 		widNum := strings.TrimPrefix(newWid, "@")
-
-		// Defer the claude popup — we're still inside the creator
-		// popup, and tmux only allows one popup per client at a time.
-		// Pass explicit -e env so atelier-claude open computes the
-		// backing-session name `_atelier_claude_<sid>_<wid>` against
-		// the new window, not the stale outer-chain globals.
-		// `-c <outer-client>` ensures display-popup opens on the
-		// user's real client (matters when more than one is attached).
 		outerClient, _ := h.ShowGlobalOption("@atelier_outer_client")
 		clientArg := ""
 		if outerClient != "" {
@@ -876,6 +870,14 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 			`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -E '"+dispatch.ToolCmd("claude", "open")+"'`,
 			clientArg, sidNum, widNum)
 		_, _ = h.Run("run-shell", "-b", popupCmd)
+
+		if err := workspace.LandOuter(h, "="+session, newWid); err != nil {
+			return err
+		}
+		// Log post-state so we can see where the client actually landed.
+		if v, err := h.DisplayMessage("#{client_name}|#{client_session}|#{window_id}|#{window_name}"); err == nil {
+			debuglog.Logf("runWorkspacePrompt: post-switch state=%q", v)
+		}
 		return nil
 	}
 }
@@ -1071,16 +1073,18 @@ func runAutoSession(initialPrompt string) error {
 		if alreadyExists {
 			return workspace.LandOuter(h, "="+name, "="+name+":1")
 		}
-		if err := workspace.LandOuter(h, "="+name, "="+name+":1"); err != nil {
-			return err
-		}
 
-		// Canonical atelier full-popup style + canonical dispatch
-		// string. No hand-rolled display-popup args.
+		// Queue Claude popup BEFORE LandOuter — see runWorkspacePrompt
+		// for the race rationale. Canonical atelier full-popup style +
+		// canonical dispatch string.
 		popupCmd := fmt.Sprintf("sleep 0.15 && tmux display-popup %s -E '%s'",
 			initgen.PopupOptions(manifest.StyleFull, "Claude Code", false),
 			dispatch.ToolCmd("claude", "open"))
 		_, _ = h.Run("run-shell", "-b", popupCmd)
+
+		if err := workspace.LandOuter(h, "="+name, "="+name+":1"); err != nil {
+			return err
+		}
 		return nil
 	}
 }

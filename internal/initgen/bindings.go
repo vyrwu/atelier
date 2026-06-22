@@ -294,6 +294,10 @@ set -g set-clipboard on
 # tried in order; the first one available on PATH wins.
 unbind [
 bind ] copy-mode
+# Inside atelier popups the 'popup' key-table strips prefix-based
+# bindings (prefix is unset). Bind C-] directly so users can still
+# enter copy-mode on a popup's pane (e.g., to scroll Claude output).
+bind -T popup C-] copy-mode
 bind -T copy-mode-vi v send -X begin-selection
 bind -T copy-mode-vi y send -X copy-pipe-and-cancel "atelier internal clipboard-copy"
 bind -T copy-mode-vi Enter send -X copy-pipe-and-cancel "atelier internal clipboard-copy"
