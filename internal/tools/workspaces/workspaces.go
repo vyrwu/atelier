@@ -80,8 +80,9 @@ func SessionsCommand() *cobra.Command {
 				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"accept\"; fi"),
 				fzfstyle.WithBind("alt-s", "abort"),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
+				fzfstyle.WithBind("alt-l", "become("+dispatch.ToolCmd("workspaces", "list")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithFooter("M-x · delete  |  M-n · creator  |  M-u · clone url"),
+				fzfstyle.WithFooter("M-x · delete  |  M-n · creator  |  M-l · worktrees  |  M-u · clone url"),
 			)
 			if emptyHeader != "" {
 				args = append(args, "--header="+emptyHeader)
@@ -238,8 +239,8 @@ func PickCommand() *cobra.Command {
 				}
 			}
 
-			footerRepo := "M-a · auto mode  |  M-s · selector  |  M-u · clone url"
-			footerAuto := "M-a · repo mode  |  M-s · selector  |  M-u · clone url"
+			footerRepo := "M-a · auto mode  |  M-s · selector  |  M-l · worktrees  |  M-u · clone url"
+			footerAuto := "M-a · repo mode  |  M-s · selector  |  M-l · worktrees  |  M-u · clone url"
 
 			args := fzfstyle.Args("製 ", "New Workspace", "green",
 				fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,footer:103"),
@@ -247,6 +248,7 @@ func PickCommand() *cobra.Command {
 				fzfstyle.WithNth("2"),
 				fzfstyle.WithBind("alt-n", "abort"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-l", "become("+dispatch.ToolCmd("workspaces", "list")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 				fzfstyle.WithBind("alt-a", fmt.Sprintf(
 					`transform:if [[ "$FZF_PROMPT" == '製 ' ]]; then echo 'change-prompt(製? )+disable-search+change-footer(%s)'; else echo 'change-prompt(製 )+enable-search+change-footer(%s)'; fi`,
@@ -306,8 +308,9 @@ func CloneCommand() *cobra.Command {
 					fzfstyle.WithExpect("enter"),
 					fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 					fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
+					fzfstyle.WithBind("alt-l", "become("+dispatch.ToolCmd("workspaces", "list")+")"),
 					fzfstyle.WithHeader(header),
-					fzfstyle.WithFooter("M-s · selector  |  M-n · creator"),
+					fzfstyle.WithFooter("M-s · selector  |  M-n · creator  |  M-l · worktrees"),
 					fzfstyle.WithQuery(query),
 				)
 				res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -549,22 +552,214 @@ func CreateCommand() *cobra.Command {
 	return c
 }
 
+// ListCommand opens the M-l "List Workspaces" picker: every worktree
+// under WorktreeRoot (whether or not a live tmux session backs it),
+// with Enter to open and M-x to delete. Sibling to:
+//   - M-n (creator) — make a NEW worktree
+//   - M-s (sessions) — pick among LIVE tmux sessions
+// The three pickers cross-jump via M-n/M-s/M-l/M-u footer keys.
 func ListCommand() *cobra.Command {
-	return &cobra.Command{
+	var socket string
+	c := &cobra.Command{
 		Use:   "list",
-		Short: "List worktrees under WorktreeRoot",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			root := workspaceWorktreeRoot()
-			wts, err := listWorktrees(root)
+		Short: "Pick or delete an existing worktree (M-l)",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			lines, err := listPickerRows()
 			if err != nil {
 				return err
 			}
-			for _, w := range wts {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", w.repo, w.branch)
+			emptyHeader := ""
+			if len(lines) == 0 {
+				emptyHeader = "No worktrees on disk yet — press M-n to create one, or Esc to dismiss"
+			}
+
+			// Dracula-ish purple (256-color 141 ≈ #af87ff matches the
+			// theme's #bd93f9 closely). 史 = "history/record" — fits a
+			// crawl-the-filesystem-for-existing-worktrees picker.
+			args := fzfstyle.Args("史 ", "List Workspaces", "141",
+				fzfstyle.WithCustomColor("prompt:141:bold,pointer:141,query:141,hl:141,hl+:141:bold,label:103,border:103,footer:103"),
+				fzfstyle.WithDelimiter("\t"),
+				fzfstyle.WithNth("3"),
+				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_list-delete-prompt", "\"$FZF_PROMPT\"", "{}")),
+				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_list-delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_list-rows")+")+change-prompt(史 )\"; else echo \"put(y)\"; fi"),
+				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(史 )\"; else echo \"put(n)\"; fi"),
+				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(史 )\"; else echo \"abort\"; fi"),
+				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_list-delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_list-rows")+")+change-prompt(史 )\"; else echo \"accept\"; fi"),
+				fzfstyle.WithBind("alt-l", "abort"),
+				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
+				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
+				fzfstyle.WithFooter("M-x · delete  |  M-s · sessions  |  M-n · creator  |  M-u · clone url"),
+			)
+			if emptyHeader != "" {
+				args = append(args, "--header="+emptyHeader)
+			}
+
+			debuglog.Logf("workspaces.list: opening picker (%d worktrees)", len(lines))
+			picked, err := fzf.Pick(lines, args...)
+			if err != nil {
+				if errors.Is(err, fzf.ErrCancelled) {
+					debuglog.Logf("workspaces.list: cancelled")
+					return err
+				}
+				return err
+			}
+			if picked == "" {
+				return fzf.ErrCancelled
+			}
+			fields := strings.SplitN(picked, "\t", 3)
+			if len(fields) < 2 {
+				return fmt.Errorf("could not parse picked entry: %q", picked)
+			}
+			repo, branch := fields[0], fields[1]
+			return openWorktreeWorkspace(tmuxhost.New(socket), repo, branch)
+		},
+	}
+	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
+	return c
+}
+
+// listPickerRows shapes the on-disk worktree list into tab-separated
+// rows the fzf picker consumes. Format: `<repo>\t<branch>\t<display>`.
+// Display column is human-readable: dim repo + bold branch.
+func listPickerRows() ([]string, error) {
+	wts, err := listWorktrees(workspaceWorktreeRoot())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(wts))
+	for _, w := range wts {
+		display := fmt.Sprintf("\033[2m%s\033[0m  \033[1m%s\033[0m", w.repo, w.branch)
+		out = append(out, fmt.Sprintf("%s\t%s\t%s", w.repo, w.branch, display))
+	}
+	return out, nil
+}
+
+// ListRowsCommand emits text rows for the M-l picker's fzf --reload bind
+// (used after a delete to refresh the list).
+func ListRowsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:    "_list-rows",
+		Short:  "internal: emit M-l picker rows for fzf --reload",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			lines, err := listPickerRows()
+			if err != nil {
+				return err
+			}
+			for _, l := range lines {
+				fmt.Fprintln(cmd.OutOrStdout(), l)
 			}
 			return nil
 		},
 	}
+}
+
+// ListDeletePromptCommand is the M-l picker's M-x action. Mirrors the
+// sessions picker's _delete-prompt: flips the prompt to "Confirm? y/n"
+// so the user can press y/Enter to commit or n/Esc to cancel.
+func ListDeletePromptCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:    "_list-delete-prompt",
+		Short:  "internal: M-l picker M-x action",
+		Hidden: true,
+		Args:   cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prompt := args[0]
+			line := args[1]
+			out := cmd.OutOrStdout()
+			if strings.HasPrefix(prompt, "Confirm") {
+				return nil
+			}
+			fields := strings.SplitN(line, "\t", 3)
+			if len(fields) < 2 {
+				return nil
+			}
+			fmt.Fprintln(out, "change-prompt(Confirm? y/n: )")
+			return nil
+		},
+	}
+}
+
+// ListDeleteRowCommand actually removes the worktree and (if any) its
+// backing tmux window. Mirrors _delete-row for the worktree-on-disk
+// case; deletes statestore window entries too so restore doesn't bring
+// a deleted worktree back.
+func ListDeleteRowCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:    "_list-delete-row",
+		Short:  "internal: M-l picker delete (worktree removal + window kill)",
+		Hidden: true,
+		Args:   cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			line := args[0]
+			fields := strings.SplitN(line, "\t", 3)
+			if len(fields) < 2 {
+				return nil
+			}
+			repo, branch := fields[0], fields[1]
+			repoPath := filepath.Join(workspaceCodeRoot(), repo)
+			wtPath := filepath.Join(workspaceWorktreeRoot(), repo, branch)
+
+			h := tmuxhost.New("")
+			// Best-effort kill of any live tmux window for this worktree
+			// BEFORE removing the directory — otherwise the window's
+			// shell sits with a missing cwd.
+			if has, _ := h.HasSession(repo); has {
+				out, _ := h.Run("list-windows", "-t", "="+repo, "-F", "#{window_id}\t#W")
+				for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+					parts := strings.SplitN(ln, "\t", 2)
+					if len(parts) == 2 && parts[1] == branch {
+						_, _ = h.Run("kill-window", "-t", parts[0])
+						break
+					}
+				}
+			}
+			if err := removeWorktree(repoPath, wtPath); err != nil {
+				debuglog.LogErr(fmt.Sprintf("workspaces.list: remove %s", wtPath), err)
+			}
+			_ = statestore.RemoveWindow(repo, branch)
+			return hostpopup.CleanupOrphanedPopups(h)
+		},
+	}
+}
+
+// openWorktreeWorkspace ensures the repo's tmux session exists, ensures
+// the worktree's window exists in it (creating one if absent), then
+// LandOuter switches the user's outer client onto it.
+func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
+	repoPath := filepath.Join(workspaceCodeRoot(), repo)
+	wtPath := filepath.Join(workspaceWorktreeRoot(), repo, branch)
+	defaultBranch := DefaultBranch(repoPath)
+
+	created, err := workspace.EnsureSession(h, repo, repoPath, defaultBranch)
+	if err != nil {
+		return err
+	}
+	// If a window with `branch` name already exists, jump to it directly.
+	out, _ := h.Run("list-windows", "-t", "="+repo, "-F", "#{window_id}\t#W")
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 && parts[1] == branch {
+			return workspace.LandOuter(h, "="+repo, parts[0])
+		}
+	}
+	// Create the worktree window. KillDefaultBranch only when we JUST
+	// auto-created the session (matches the runWorkspaceName pattern).
+	spec := workspace.WorktreeWindowSpec{
+		Session:    repo,
+		WtPath:     wtPath,
+		WindowName: branch,
+		Kind:       "worktree",
+	}
+	if created {
+		spec.KillDefaultBranch = defaultBranch
+	}
+	newWid, err := workspace.CreateWorktreeWindow(h, spec)
+	if err != nil {
+		return err
+	}
+	return workspace.LandOuter(h, "="+repo, newWid)
 }
 
 // ============================================================================
@@ -597,11 +792,12 @@ func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
 				fzfstyle.WithExpect("enter"),
 				fzfstyle.WithBind("alt-n", "abort"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-l", "become("+dispatch.ToolCmd("workspaces", "list")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 				fzfstyle.WithBind("alt-a", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_prompt"),
 					repo, repoPath, defaultBranch)),
 				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-a · auto mode  |  M-s · selector  |  M-u · clone url"),
+				fzfstyle.WithFooter("M-a · auto mode  |  M-s · selector  |  M-l · worktrees  |  M-u · clone url"),
 				fzfstyle.WithQuery(query),
 			)
 			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -770,9 +966,10 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 				fzfstyle.WithBind("alt-a", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_name"),
 					repo, repoPath, defaultBranch)),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-l", "become("+dispatch.ToolCmd("workspaces", "list")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-a · manual name  |  M-s · selector  |  M-u · clone url"),
+				fzfstyle.WithFooter("M-a · manual name  |  M-s · selector  |  M-l · worktrees  |  M-u · clone url"),
 				fzfstyle.WithQuery(query),
 			)
 			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -994,8 +1191,9 @@ func runAutoSession(initialPrompt string) error {
 				fzfstyle.WithBind("alt-n", "abort"),
 				fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-l", "become("+dispatch.ToolCmd("workspaces", "list")+")"),
 				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-a · pick repo  |  M-s · selector"),
+				fzfstyle.WithFooter("M-a · pick repo  |  M-s · selector  |  M-l · worktrees"),
 				fzfstyle.WithQuery(query),
 			)
 			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -1154,51 +1352,65 @@ type wt struct {
 	repo, branch, path string
 }
 
+// listWorktrees walks the worktree root and returns every dir that has
+// a `.git` entry (file or directory) — that's the standard "this dir is
+// a git checkout" signal.
+//
+// Layout convention is `<root>/<owner>/<repo>/<branch>` where `<branch>`
+// can itself contain slashes (e.g. `feat/add-foo`), so we can't just
+// scan three levels deep. We walk until we hit `.git`, then derive
+// `repo = <owner>/<repo>` and `branch = <rest>`. For non-github-style
+// roots (no owner level) the same logic falls out by counting components.
 func listWorktrees(root string) ([]wt, error) {
 	var out []wt
-	owners, err := os.ReadDir(root)
-	if err != nil {
+	if _, err := os.Stat(root); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	for _, owner := range owners {
-		if !owner.IsDir() {
-			continue
-		}
-		ownerPath := filepath.Join(root, owner.Name())
-		children, err := os.ReadDir(ownerPath)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			continue
+			// Stat error on a child → skip the subtree silently; one
+			// permission error on an unrelated dir shouldn't fail the
+			// whole picker.
+			return filepath.SkipDir
 		}
-		hasNested := false
-		for _, child := range children {
-			if !child.IsDir() {
-				continue
-			}
-			nestedPath := filepath.Join(ownerPath, child.Name())
-			nested, err := os.ReadDir(nestedPath)
-			if err != nil {
-				continue
-			}
-			for _, br := range nested {
-				if !br.IsDir() {
-					continue
-				}
-				out = append(out, wt{owner.Name() + "/" + child.Name(), br.Name(), filepath.Join(nestedPath, br.Name())})
-				hasNested = true
-			}
+		if !d.IsDir() {
+			return nil
 		}
-		if hasNested {
-			continue
+		if path == root {
+			return nil
 		}
-		for _, br := range children {
-			if !br.IsDir() {
-				continue
-			}
-			out = append(out, wt{owner.Name(), br.Name(), filepath.Join(ownerPath, br.Name())})
+		if _, statErr := os.Stat(filepath.Join(path, ".git")); statErr != nil {
+			return nil
 		}
+		// path looks like `<root>/<owner>/<repo>/<branch parts...>`.
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return filepath.SkipDir
+		}
+		parts := strings.Split(rel, string(filepath.Separator))
+		var repo, branch string
+		switch {
+		case len(parts) >= 3:
+			// github-style: owner/repo/branch...
+			repo = parts[0] + "/" + parts[1]
+			branch = strings.Join(parts[2:], "/")
+		case len(parts) == 2:
+			// flat: repo/branch
+			repo = parts[0]
+			branch = parts[1]
+		default:
+			return filepath.SkipDir
+		}
+		out = append(out, wt{repo: repo, branch: branch, path: path})
+		// Don't descend further: nested .git inside a worktree (e.g.
+		// vendored submodules) shouldn't show up as separate entries.
+		return filepath.SkipDir
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].repo != out[j].repo {
