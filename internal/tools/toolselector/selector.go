@@ -135,6 +135,7 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 		"pgcenter",
 		"workspaces-selector", // virtual: "Select Workspace" from workspaces tool
 		"workspaces-creator",  // virtual: "New Workspace" from workspaces tool
+		"workspaces-recover",  // virtual: "Recover Workspace" from workspaces tool
 	}
 
 	seen := map[string]bool{"toolselector": true}
@@ -193,6 +194,19 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 					Plugin:      p,
 				})
 				seen["workspaces-creator"] = true
+				seen["workspaces"] = true
+			}
+		case "workspaces-recover":
+			if p, ok := byName["workspaces"]; ok && !seen["workspaces-recover"] {
+				entries = append(entries, entry{
+					Icon:        "復",
+					Name:        "Recover Workspace",
+					Description: "Pick or delete a past/present worktree",
+					AccentColor: "141",
+					Kind:        "workspaces:recover",
+					Plugin:      p,
+				})
+				seen["workspaces-recover"] = true
 				seen["workspaces"] = true
 			}
 		default:

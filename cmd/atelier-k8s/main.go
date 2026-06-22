@@ -21,7 +21,7 @@ var Manifest = &manifest.Manifest{
 	UI: &manifest.UI{
 		Icon:        "胡",
 		AccentColor: "110",
-		PopupTitle:  "Kubernetes",
+		PopupTitle:  "K9s",
 	},
 	Popup:       manifest.KindGlobal,
 	Requires:    []string{"k9s"},
