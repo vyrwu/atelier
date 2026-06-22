@@ -65,9 +65,10 @@ func TestInitAggregator_EmitsAllToolBlocks(t *testing.T) {
 		`bind -T root "M-;"`,
 		`bind -T root "M-n"`,
 		`bind -T root "M-s"`,
-		// M-q quit (core binding, no plugin).
-		`bind -T root  "M-q" kill-server`,
-		`bind -T popup "M-q" kill-server`,
+		// M-q quit (core binding, no plugin). FR-5.3: detach, not kill,
+		// so background popup agents survive across user sessions.
+		`bind -T root  "M-q" detach-client`,
+		`bind -T popup "M-q" run-shell -b 'atelier server quit'`,
 		// Popup-table bindings now use inline `display-popup` so the
 		// new popup nests on the current popup-client (the prior
 		// `run-shell -b 'atelier popup goto-tool ...'` form lost the

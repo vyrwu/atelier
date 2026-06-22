@@ -44,14 +44,15 @@ func BindingBlock(toolName string, m *manifest.Manifest) string {
 // tables).
 //
 //   M-?  cheatsheet popup
-//   M-q  quit — kill-server on the calling socket (workspaces restore
-//        on next launch via FR-5.2, so this is effectively "log out")
+//   M-q  detach the outer client (server stays alive, background
+//        agents survive). `atelier server kill` is the explicit force-
+//        quit when the user actually wants the server gone.
 //
 // Popup-table M-? uses inline display-popup (same nesting pattern as
 // M-; / M-n / M-s) so the cheatsheet overlays cleanly without
-// dismissing the origin popup. M-q fires kill-server directly — no
-// popup, no confirmation; the user asked for "quick quit" and restore
-// makes it reversible.
+// dismissing the origin popup. Popup-table M-q delegates to
+// `atelier server quit` so it detaches the OUTER client (from inside a
+// popup, bare `detach-client` would only close the popup pty).
 func CoreBindingsBlock() string {
 	return `# --- atelier core ---
 # M-? — show the atelier keybinding cheatsheet, aggregated across every
@@ -61,15 +62,14 @@ unbind -T popup "M-?"
 bind -T root  "M-?" display-popup -b rounded -S "fg=colour103" -T "#[align=centre] Atelier " -w60% -h60% -E 'atelier cheatsheet'
 bind -T popup "M-?" display-popup -b rounded -S "fg=colour103" -T "#[align=centre] Atelier " -w60% -h60% -E 'atelier cheatsheet'
 
-# M-q — quit atelier (kill tmux server on the calling socket).
-# No confirmation: workspaces are persisted (FR-5.2) and restore on
-# next launch. Active claude / k9s / lazygit sessions are not (their
-# in-memory state isn't persisted), but the workspaces they ran in
-# are recreated and the user can re-launch the tools.
+# M-q — detach (server keeps running). FR-5.3: explicit force-kill
+# moved to ` + "`atelier server kill`" + ` so long-running popup agents survive.
+# Root: bare detach-client (current client = outer). Popup: route via
+# ` + "`atelier server quit`" + ` so we detach the OUTER client, not the popup pty.
 unbind -T root  "M-q"
 unbind -T popup "M-q"
-bind -T root  "M-q" kill-server
-bind -T popup "M-q" kill-server
+bind -T root  "M-q" detach-client
+bind -T popup "M-q" run-shell -b 'atelier server quit'
 `
 }
 

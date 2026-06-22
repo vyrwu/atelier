@@ -6,17 +6,17 @@ import (
 	"testing"
 )
 
-// TestRenderCheatsheet_IncludesQuit locks in that the M-q quit
+// TestRenderCheatsheet_IncludesQuit locks in that the M-q exit
 // binding shows up in the M-? popup so users can discover it without
-// reading source.
+// reading source. FR-5.3: M-q now detaches; the label reflects that.
 func TestRenderCheatsheet_IncludesQuit(t *testing.T) {
 	var buf bytes.Buffer
 	renderCheatsheet(&buf)
 	if !strings.Contains(buf.String(), "M-q") {
 		t.Errorf("cheatsheet missing M-q row. full output:\n%s", buf.String())
 	}
-	if !strings.Contains(buf.String(), "Quit") {
-		t.Errorf("cheatsheet missing 'Quit' label for M-q. full output:\n%s", buf.String())
+	if !strings.Contains(buf.String(), "Detach") {
+		t.Errorf("cheatsheet missing 'Detach' label for M-q. full output:\n%s", buf.String())
 	}
 }
 

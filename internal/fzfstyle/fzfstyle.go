@@ -49,14 +49,17 @@ func Args(prompt, label, accentColor string, opts ...Opt) []string {
 		"--border-label= " + label + " ",
 		"--border-label-pos=0",
 		// Global M-q quit binding INSIDE every fzf picker. Tmux's
-		// popup-table `bind -T popup "M-q" kill-server` doesn't reach
-		// fzf because `display-popup -E` hands raw stdin to the
-		// spawned process — tmux only intercepts a few specific keys
-		// for the popup table. Without this fzf-level bind, M-q
-		// inside any picker (M-s sessions, M-; tool selector, etc.)
-		// is a no-op. `kill-server` tears down the whole tmux server,
-		// fzf included, so no explicit fzf exit is needed.
-		"--bind=alt-q:execute-silent(tmux kill-server)",
+		// popup-table `bind -T popup "M-q" ...` doesn't reach fzf
+		// because `display-popup -E` hands raw stdin to the spawned
+		// process — tmux only intercepts a few specific keys for the
+		// popup table. Without this fzf-level bind, M-q inside any
+		// picker (M-s sessions, M-; tool selector, etc.) is a no-op.
+		//
+		// FR-5.3: delegate to `atelier server quit` rather than
+		// `kill-server` so background agents survive. The command
+		// detaches the OUTER client (read from @atelier_outer_client),
+		// which closes the popup naturally and exits atelier.
+		"--bind=alt-q:execute-silent(atelier server quit)",
 	}
 	for _, o := range opts {
 		args = o(args)

@@ -32,7 +32,8 @@ const probeTimeout = 2 * time.Second
 // Why a dedicated socket: full isolation from any tmux server the
 // user may already be running. The atelier server lives at
 // `tmux -L atelier ...`; the user's regular `tmux` server is
-// untouched. `M-q` (kill-server) only kills the atelier server.
+// untouched. `M-q` detaches; `atelier server kill` (explicit) is the
+// only path that tears down the atelier server.
 //
 // Why `new-session -A`: idempotent reattach. Running `atelier` from
 // a second terminal joins the existing session rather than spawning
@@ -58,7 +59,8 @@ terminal to it.
 This is the default behavior of the bare ` + "`atelier`" + ` command — running
 ` + "`atelier`" + ` and ` + "`atelier run`" + ` are equivalent. The dedicated socket
 isolates atelier from any other tmux server you may already be
-running; M-q (quit) only kills this server.
+running; M-q detaches this client. Use ` + "`atelier server kill`" + ` to
+force-quit the server (background agents are terminated).
 
 Idempotent: a second invocation attaches to the existing session
 rather than spawning a duplicate.`,

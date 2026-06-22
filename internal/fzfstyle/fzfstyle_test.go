@@ -29,11 +29,13 @@ func TestArgs_BaseStructure(t *testing.T) {
 // contract. Without this fzf bind, tmux's popup-table M-q binding
 // never reaches the running fzf process (display-popup -E hands raw
 // stdin to the spawned command), so M-q is silently dropped in every
-// picker — exactly the bug the user hit.
+// picker — exactly the bug the user hit. FR-5.3: detach via
+// `atelier server quit` rather than kill-server, so background popup
+// agents survive across user sessions.
 func TestArgs_GlobalQuitBindPresent(t *testing.T) {
 	args := Args("⌘ ", "Any", "172")
 	flat := strings.Join(args, "\n")
-	if !strings.Contains(flat, "--bind=alt-q:execute-silent(tmux kill-server)") {
+	if !strings.Contains(flat, "--bind=alt-q:execute-silent(atelier server quit)") {
 		t.Errorf("missing global M-q bind in:\n%s", flat)
 	}
 }

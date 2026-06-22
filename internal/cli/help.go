@@ -59,7 +59,7 @@ type bindingRow struct{ key, action, source string }
 func topLevelBindings() []bindingRow {
 	rows := []bindingRow{
 		{"M-?", "Cheatsheet (this popup)", "atelier"},
-		{"M-q", "Quit atelier (kill tmux server)", "atelier"},
+		{"M-q", "Detach (server keeps running)", "atelier"},
 	}
 	res, err := plugin.Discover()
 	if err == nil {
