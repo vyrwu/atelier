@@ -874,8 +874,8 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 		// being bound to the new window's popup-session. Symptom: user
 		// selects workspace B, Claude opens in workspace A's worktree.
 		popupCmd := fmt.Sprintf(
-			`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '"+dispatch.ToolCmd("claude", "open")+"'`,
-			clientArg, sidNum, widNum, wtPath)
+			`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'`,
+			clientArg, sidNum, widNum, wtPath, dispatch.ToolCmd("claude", "open"))
 		_, _ = h.Run("run-shell", "-b", popupCmd)
 
 		if err := workspace.LandOuter(h, "="+session, newWid); err != nil {
