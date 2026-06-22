@@ -44,6 +44,10 @@ func ServerCommand() *cobra.Command {
 // When invoked from a regular pane (root M-q binding), @atelier_outer_client
 // may be empty / stale; we fall back to bare `detach-client` which
 // detaches whatever client called us — i.e. the user's outer terminal.
+//
+// tmux's detach-client uses `-t <target-client>` to select the client by
+// name (-c is for switch-client / display-popup origin-client — different
+// flag for a different purpose).
 func serverQuitCmd() *cobra.Command {
 	var socket string
 	c := &cobra.Command{
@@ -55,7 +59,7 @@ func serverQuitCmd() *cobra.Command {
 			outer = strings.TrimSpace(outer)
 			args := []string{"detach-client"}
 			if outer != "" {
-				args = append(args, "-c", outer)
+				args = append(args, "-t", outer)
 			}
 			_, err := h.Run(args...)
 			return err
