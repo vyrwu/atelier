@@ -224,6 +224,15 @@ func checkStatuslineFormat(h *tmuxhost.Client) CheckResult {
 	out := string(v)
 	hasFresh := strings.Contains(out, "atelier status freshness")
 	hasAttn := strings.Contains(out, "atelier status attention")
+	hasW := strings.Contains(out, "#W")
+	// FR-2.4: window-status-format containing atelier's freshness but no
+	// #W produces a bare floating icon per inactive window (the "phantom
+	// second checkmark" bug). Catch this regardless of other segments.
+	if hasFresh && !hasW {
+		return CheckResult{Name: "statusline segments", Status: StatusFail,
+			Detail:      "window-status-format has freshness segment but no #W (bare icon, no window name)",
+			Remediation: "set window-status-format to include `#W` (e.g. \" #W \") and re-source so stamp-statusline can inject at the anchor"}
+	}
 	switch {
 	case hasFresh && hasAttn:
 		return CheckResult{Name: "statusline segments", Status: StatusPass,

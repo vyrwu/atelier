@@ -136,10 +136,20 @@ func TestInjectAfterWindowName(t *testing.T) {
 			want:      `#W #[default]`,
 		},
 		{
-			name:      "fallback to append when #W absent",
+			// FR-2.4: no #W → no inject. Prior behavior was to append,
+			// which produced a free-floating freshness icon per inactive
+			// window (the "phantom second checkmark" bug). Skipping the
+			// inject leaves the user's format intact; doctor flags it.
+			name:      "no inject when #W absent",
 			format:    `just #I:status`,
 			injection: `<X>`,
-			want:      `just #I:status<X>`,
+			want:      `just #I:status`,
+		},
+		{
+			name:      "no inject when format is empty",
+			format:    ``,
+			injection: `<X>`,
+			want:      ``,
 		},
 		{
 			name: "the user's actual format: freshness lands after the powerline arrow",

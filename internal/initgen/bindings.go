@@ -317,7 +317,12 @@ set -g status-left-length 100
 set -g status-right-length 50
 set -g status-left " #S "
 set -g status-right " %H:%M "
-set -g window-status-format ""
+# window-status-format MUST contain #W. stamp-statusline injects the
+# atelier freshness segment AFTER the #W anchor; with an empty / #W-less
+# format the injection falls through to append, producing a bare
+# floating icon for every inactive window in the bar (the "phantom
+# second checkmark" bug).
+set -g window-status-format " #W "
 set -g window-status-separator ""
 set -g window-status-current-format "#[bold] #W #[nobold]"
 

@@ -303,7 +303,12 @@ func stampStatusline(h *tmuxhost.Client) error {
 // of `#[...]` color directives. Whatever's left (user helpers, other
 // formats) gets pushed after our injection.
 //
-// If the format has no `#W` placeholder, fall back to appending.
+// If the format has no `#W` placeholder, RETURN THE FORMAT UNCHANGED.
+// The prior behavior was to append the segment, but that produces a
+// free-floating freshness icon — for every inactive window — when the
+// user's window-status-format is empty or doesn't include the window
+// name. Skipping injection lets the user / atelier theme fix the
+// format (add #W) and re-source; doctor flags the no-anchor case.
 //
 // Examples (atelier segments simplified to <X>):
 //
@@ -311,14 +316,15 @@ func stampStatusline(h *tmuxhost.Client) error {
 //	→ `#[bg=blue] #W #[fg=blue]#[bg=red]<X>#(stuff)`
 //
 //	`#W #(stuff)` → `#W <X>#(stuff)`
-//	`#I: only`   → `#I: only<X>`   (no #W → append)
+//	`#I: only`   → `#I: only`      (no #W → no inject)
+//	``           → ``              (no #W → no inject)
 func injectAfterWindowName(format, injection string) string {
 	if injection == "" {
 		return format
 	}
 	loc := injectAnchorRe.FindStringIndex(format)
 	if loc == nil {
-		return format + injection
+		return format
 	}
 	return format[:loc[1]] + injection + format[loc[1]:]
 }
