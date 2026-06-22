@@ -866,9 +866,16 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 		if outerClient != "" {
 			clientArg = fmt.Sprintf(" -c '%s'", outerClient)
 		}
+		// TMUX_PARENT_PANE_PWD pins the popup's cwd to the NEW worktree
+		// path. Without it, popup.ResolveParentContext falls back to
+		// reading @atelier_outer_pane's pane_current_path — and that
+		// global was stamped by M-; on the user's PREVIOUS workspace
+		// pane, so Claude would launch in the wrong cwd while still
+		// being bound to the new window's popup-session. Symptom: user
+		// selects workspace B, Claude opens in workspace A's worktree.
 		popupCmd := fmt.Sprintf(
-			`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -E '"+dispatch.ToolCmd("claude", "open")+"'`,
-			clientArg, sidNum, widNum)
+			`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '"+dispatch.ToolCmd("claude", "open")+"'`,
+			clientArg, sidNum, widNum, wtPath)
 		_, _ = h.Run("run-shell", "-b", popupCmd)
 
 		if err := workspace.LandOuter(h, "="+session, newWid); err != nil {
@@ -1075,10 +1082,18 @@ func runAutoSession(initialPrompt string) error {
 		}
 
 		// Queue Claude popup BEFORE LandOuter — see runWorkspacePrompt
-		// for the race rationale. Canonical atelier full-popup style +
-		// canonical dispatch string.
-		popupCmd := fmt.Sprintf("sleep 0.15 && tmux display-popup %s -E '%s'",
+		// for the race rationale. Pin TMUX_PARENT_* so claude.Open
+		// resolves to the NEW session/window and starts in `base` —
+		// not in whatever pane the user pressed M-; on before this
+		// flow ran (which is what @atelier_outer_pane still points to).
+		newSid, _ := h.DisplayMessageAt("="+name+":1", "#{session_id}")
+		newWid, _ := h.DisplayMessageAt("="+name+":1", "#{window_id}")
+		sidNum := strings.TrimPrefix(strings.TrimSpace(newSid), "$")
+		widNum := strings.TrimPrefix(strings.TrimSpace(newWid), "@")
+		popupCmd := fmt.Sprintf(
+			"sleep 0.15 && tmux display-popup %s -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'",
 			initgen.PopupOptions(manifest.StyleFull, "Claude Code", false),
+			sidNum, widNum, base,
 			dispatch.ToolCmd("claude", "open"))
 		_, _ = h.Run("run-shell", "-b", popupCmd)
 
