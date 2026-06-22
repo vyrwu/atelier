@@ -23,7 +23,7 @@ var Manifest = &manifest.Manifest{
 	},
 	Bindings: []manifest.Binding{
 		{Key: "M-s", Title: "Select workspace", Style: manifest.StylePicker, Invoke: "sessions", AlsoInPopup: true},
-		{Key: "M-l", Title: "List worktrees", Style: manifest.StylePicker, Invoke: "list", AlsoInPopup: true},
+		{Key: "M-r", Title: "Recover Workspace", Style: manifest.StylePicker, Invoke: "recover", AlsoInPopup: true},
 	},
 	UI: &manifest.UI{
 		Icon:        "栽",
@@ -32,43 +32,43 @@ var Manifest = &manifest.Manifest{
 	},
 	Popup:       manifest.KindNone,
 	Requires:    []string{"git", "fzf"},
-	Subcommands: []string{"pick", "sessions", "create", "delete", "list", "clone"},
+	Subcommands: []string{"pick", "sessions", "create", "delete", "recover", "clone"},
 	PickerBindings: []manifest.PickerBinding{
 		// creator (repo picker)
 		{Picker: "creator", Key: "Enter", Action: "Accept repo (or submit prompt in auto-mode)"},
 		{Picker: "creator", Key: "M-a", Action: "Toggle repo / auto-mode prompt"},
 		{Picker: "creator", Key: "M-s", Action: "Jump to session picker"},
-		{Picker: "creator", Key: "M-l", Action: "Jump to list-worktrees picker"},
+		{Picker: "creator", Key: "M-r", Action: "Jump to recover workspace picker"},
 		{Picker: "creator", Key: "M-u", Action: "Jump to clone-from-URL picker"},
 		// name (manual branch-name picker)
 		{Picker: "name", Key: "Enter", Action: "Accept branch name (empty → default branch)"},
 		{Picker: "name", Key: "M-a", Action: "Switch to auto-mode prompt"},
 		{Picker: "name", Key: "M-s", Action: "Jump to session picker"},
-		{Picker: "name", Key: "M-l", Action: "Jump to list-worktrees picker"},
+		{Picker: "name", Key: "M-r", Action: "Jump to recover workspace picker"},
 		{Picker: "name", Key: "M-u", Action: "Jump to clone-from-URL picker"},
 		// prompt (auto-mode Claude-named)
 		{Picker: "prompt", Key: "Enter", Action: "Submit prompt → Claude generates branch name"},
 		{Picker: "prompt", Key: "M-a", Action: "Switch to manual-name mode"},
 		{Picker: "prompt", Key: "M-s", Action: "Jump to session picker"},
-		{Picker: "prompt", Key: "M-l", Action: "Jump to list-worktrees picker"},
+		{Picker: "prompt", Key: "M-r", Action: "Jump to recover workspace picker"},
 		{Picker: "prompt", Key: "M-u", Action: "Jump to clone-from-URL picker"},
 		// sessions (Select Workspace)
 		{Picker: "sessions", Key: "Enter", Action: "Switch to workspace / confirm action"},
 		{Picker: "sessions", Key: "M-x", Action: "Delete workspace (with confirm)"},
 		{Picker: "sessions", Key: "M-n", Action: "Jump to new-workspace creator"},
-		{Picker: "sessions", Key: "M-l", Action: "Jump to list-worktrees picker"},
+		{Picker: "sessions", Key: "M-r", Action: "Jump to recover workspace picker"},
 		{Picker: "sessions", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// list (List Workspaces — worktrees on disk)
-		{Picker: "list", Key: "Enter", Action: "Open the worktree / confirm action"},
-		{Picker: "list", Key: "M-x", Action: "Delete worktree (with confirm)"},
-		{Picker: "list", Key: "M-s", Action: "Jump to session picker"},
-		{Picker: "list", Key: "M-n", Action: "Jump to new-workspace creator"},
-		{Picker: "list", Key: "M-u", Action: "Jump to clone-from-URL picker"},
+		// recover (Recover Workspace — worktrees on disk)
+		{Picker: "recover", Key: "Enter", Action: "Open the worktree / confirm action"},
+		{Picker: "recover", Key: "M-x", Action: "Delete worktree (with confirm)"},
+		{Picker: "recover", Key: "M-s", Action: "Jump to session picker"},
+		{Picker: "recover", Key: "M-n", Action: "Jump to new-workspace creator"},
+		{Picker: "recover", Key: "M-u", Action: "Jump to clone-from-URL picker"},
 		// clone (URL picker)
 		{Picker: "clone", Key: "Enter", Action: "Validate URL + clone"},
 		{Picker: "clone", Key: "M-s", Action: "Jump to session picker"},
 		{Picker: "clone", Key: "M-n", Action: "Jump to new-workspace creator"},
-		{Picker: "clone", Key: "M-l", Action: "Jump to list-worktrees picker"},
+		{Picker: "clone", Key: "M-r", Action: "Jump to recover workspace picker"},
 	},
 }
 
@@ -78,15 +78,15 @@ func main() {
 		root.AddCommand(workspaces.SessionsCommand())
 		root.AddCommand(workspaces.CreateCommand())
 		root.AddCommand(workspaces.DeleteCommand())
-		root.AddCommand(workspaces.ListCommand())
+		root.AddCommand(workspaces.RecoverCommand())
 		root.AddCommand(workspaces.CloneCommand())
 		// Internal subcommands wired up by the fzf transforms in pickers.
 		root.AddCommand(workspaces.DeletePromptCommand())
 		root.AddCommand(workspaces.DeleteRowCommand())
 		root.AddCommand(workspaces.SessionListCommand())
-		root.AddCommand(workspaces.ListRowsCommand())
-		root.AddCommand(workspaces.ListDeletePromptCommand())
-		root.AddCommand(workspaces.ListDeleteRowCommand())
+		root.AddCommand(workspaces.RecoverRowsCommand())
+		root.AddCommand(workspaces.RecoverDeletePromptCommand())
+		root.AddCommand(workspaces.RecoverDeleteRowCommand())
 		root.AddCommand(workspaces.AutoSessionCommand())
 		root.AddCommand(workspaces.PromptCommand())
 		root.AddCommand(workspaces.NameCommand())
