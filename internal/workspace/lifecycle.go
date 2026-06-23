@@ -320,6 +320,14 @@ func LandOuter(h *tmuxhost.Client, sessionTarget, windowTarget string) error {
 	if _, err := h.Run(args...); err != nil {
 		return fmt.Errorf("workspace.LandOuter switch-client: %w", err)
 	}
+	// Re-stamp @atelier_outer_* against the workspace we just landed on.
+	// Without this, a popup tool opened BETWEEN this switch and the
+	// user's next M-; / M-n / M-s reads stale globals (the previous
+	// workspace's pane id) and renders against the wrong cwd — exactly
+	// the "open popup right after switching shows old workspace's dir"
+	// bug. The M-; binding captures pane_id at keypress time; LandOuter
+	// is the workspace-change event that those globals must reflect.
+	restampOuterGlobals(h, sessionTarget, windowTarget)
 	// Dismiss popup-clients for OTHER workspaces. Without this, a
 	// Claude/k9s/etc. popup the user had open on workspace A stays
 	// visually on top after they M-s to workspace B (the popup lives
@@ -330,6 +338,43 @@ func LandOuter(h *tmuxhost.Client, sessionTarget, windowTarget string) error {
 	// already on shouldn't dismiss your live Claude session.
 	detachStalePopups(h, sessionTarget, windowTarget)
 	return nil
+}
+
+// restampOuterGlobals updates @atelier_outer_session / _window / _pane
+// to point at the workspace LandOuter just switched to. Best-effort —
+// errors are logged, not returned, because the switch itself is the
+// load-bearing action; stale globals are a soft regression that the
+// next M-; / M-n / M-s press would correct anyway.
+func restampOuterGlobals(h *tmuxhost.Client, sessionTarget, windowTarget string) {
+	sessionRef := stripEqualsPrefix(sessionTarget)
+	windowRef := windowTarget
+	if windowRef == "" {
+		windowRef = sessionRef
+	} else {
+		windowRef = stripEqualsPrefix(windowRef)
+	}
+	sid, err := h.DisplayMessageAt(sessionRef, "#{session_id}")
+	if err != nil || strings.TrimSpace(sid) == "" {
+		debuglog.LogErr("LandOuter restamp: session_id", err)
+		return
+	}
+	wid, err := h.DisplayMessageAt(windowRef, "#{window_id}")
+	if err != nil || strings.TrimSpace(wid) == "" {
+		debuglog.LogErr("LandOuter restamp: window_id", err)
+		return
+	}
+	pid, err := h.DisplayMessageAt(windowRef, "#{pane_id}")
+	if err != nil || strings.TrimSpace(pid) == "" {
+		debuglog.LogErr("LandOuter restamp: pane_id", err)
+		return
+	}
+	sid = strings.TrimSpace(sid)
+	wid = strings.TrimSpace(wid)
+	pid = strings.TrimSpace(pid)
+	_ = h.SetGlobalOption("@atelier_outer_session", sid)
+	_ = h.SetGlobalOption("@atelier_outer_window", wid)
+	_ = h.SetGlobalOption("@atelier_outer_pane", pid)
+	debuglog.Logf("LandOuter restamp: session=%s window=%s pane=%s", sid, wid, pid)
 }
 
 // detachStalePopups closes popup overlays whose backing session is
