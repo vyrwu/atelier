@@ -736,12 +736,21 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 	if err != nil {
 		return err
 	}
-	// If a window with `branch` name already exists, jump to it directly.
+	// If a window with `branch` name already exists, jump to it.
+	// LandOuter alone leaves the shell wherever the user last `cd`'d
+	// — recover semantics promise the shell lands IN the worktree, so
+	// also fire `cd <wtPath>\n` into the active pane when its
+	// pane_current_path doesn't already match.
 	out, _ := h.Run("list-windows", "-t", "="+repo, "-F", "#{window_id}\t#W")
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		parts := strings.SplitN(line, "\t", 2)
 		if len(parts) == 2 && parts[1] == branch {
-			return workspace.LandOuter(h, "="+repo, parts[0])
+			wid := parts[0]
+			if err := workspace.LandOuter(h, "="+repo, wid); err != nil {
+				return err
+			}
+			ensurePaneCwd(h, wid, wtPath)
+			return nil
 		}
 	}
 	// Create the worktree window. KillDefaultBranch only when we JUST
@@ -760,6 +769,31 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 		return err
 	}
 	return workspace.LandOuter(h, "="+repo, newWid)
+}
+
+// ensurePaneCwd sends `cd <wtPath>\n` to the active pane of `windowID`
+// if its pane_current_path is anything other than `wtPath` (or a
+// subdirectory of it). Best-effort: errors are logged, not returned —
+// landing on the window is the load-bearing action; cd is the
+// nice-to-have.
+//
+// Subdirs of `wtPath` are accepted so a user who's `cd src/`'d inside
+// the worktree doesn't get yanked back to the root on every M-r.
+func ensurePaneCwd(h *tmuxhost.Client, windowID, wtPath string) {
+	cur, err := h.DisplayMessageAt(windowID, "#{pane_current_path}")
+	if err != nil {
+		debuglog.LogErr("ensurePaneCwd: pane_current_path", err)
+		return
+	}
+	cur = strings.TrimSpace(cur)
+	if cur == wtPath || strings.HasPrefix(cur, wtPath+"/") {
+		return
+	}
+	debuglog.Logf("ensurePaneCwd: cwd=%q != wtPath=%q — sending cd", cur, wtPath)
+	// shellQuote the path so spaces / special chars survive the shell parse.
+	if _, err := h.Run("send-keys", "-t", windowID, fmt.Sprintf("cd %q", wtPath), "Enter"); err != nil {
+		debuglog.LogErr("ensurePaneCwd: send-keys", err)
+	}
 }
 
 // ============================================================================
