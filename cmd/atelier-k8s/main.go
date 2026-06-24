@@ -18,6 +18,13 @@ var Manifest = &manifest.Manifest{
 		Style:  manifest.StyleFull,
 		Invoke: "open",
 	},
+	Bindings: []manifest.Binding{
+		// M-c reopens the context picker so the user can switch context
+		// from inside K9s (or anywhere — root and popup tables). The
+		// switch subcommand respawns the K9s popup-session on a real
+		// context change; same-context is a no-op + attach.
+		{Key: "M-c", Title: "Switch K9s context", Style: manifest.StylePicker, Invoke: "switch", AlsoInPopup: true},
+	},
 	UI: &manifest.UI{
 		Icon:        "胡",
 		AccentColor: "110",
