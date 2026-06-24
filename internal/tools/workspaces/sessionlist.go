@@ -136,7 +136,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 
 		recapStr := ""
 		if isClaude && recap != "" {
-			recapStr = fmt.Sprintf("  \033[3;38;5;103m· %s\033[0m", recap)
+			recapStr = fmt.Sprintf(" \033[3;38;5;103m· %s\033[0m", recap)
 		}
 
 		// Bold weight for current.
