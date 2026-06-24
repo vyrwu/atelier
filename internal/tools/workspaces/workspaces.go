@@ -746,6 +746,7 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 		parts := strings.SplitN(line, "\t", 2)
 		if len(parts) == 2 && parts[1] == branch {
 			wid := parts[0]
+			spawnClaudeResume(h, repo, wid)
 			if err := workspace.LandOuter(h, "="+repo, wid); err != nil {
 				return err
 			}
@@ -768,7 +769,46 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 	if err != nil {
 		return err
 	}
+	spawnClaudeResume(h, repo, newWid)
 	return workspace.LandOuter(h, "="+repo, newWid)
+}
+
+// spawnClaudeResume queues a Claude popup for `repo:windowID` when the
+// window has either (a) a live popup-backing session already, or (b) a
+// persisted `@ai_active_session_id` — same triggers as the sessions
+// picker's auto-resume. The popup launches with `--resume <id>` when
+// only the option is present (popup-session reborn fresh) or attaches
+// to the existing pty when the session is already live.
+//
+// Best-effort: errors don't abort the workspace open. Queued via
+// `run-shell -b` with a 0.2s sleep so the popup fires AFTER LandOuter
+// and the user is visually on the new workspace.
+func spawnClaudeResume(h *tmuxhost.Client, repo, windowID string) {
+	sid, err := h.DisplayMessageAt(repo, "#{session_id}")
+	if err != nil {
+		return
+	}
+	sid = strings.TrimSpace(sid)
+	wid := strings.TrimSpace(windowID)
+	if sid == "" || wid == "" {
+		return
+	}
+	claudeSession := claudePopupSessionName(sid, wid)
+	hasPopup, _ := h.HasSession(claudeSession)
+	resumeID, _ := h.GetWindowOption(wid,
+		statestore.MetadataKeyToOptionName("ai.active_session_id"))
+	if !hasPopup && resumeID == "" {
+		return
+	}
+	sidNum := strings.TrimPrefix(sid, "$")
+	widNum := strings.TrimPrefix(wid, "@")
+	popupOpts := initgen.PopupOptions(manifest.StyleFull, "Claude Code", false)
+	popupCmd := fmt.Sprintf(
+		`sleep 0.2 && tmux display-popup %s -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -E '%s'`,
+		popupOpts, sidNum, widNum, dispatch.ToolCmd("claude", "open"))
+	_, _ = h.Run("run-shell", "-b", popupCmd)
+	debuglog.Logf("openWorktreeWorkspace: queued claude resume for %s:%s (hasPopup=%v resumeID=%q)",
+		sid, wid, hasPopup, resumeID)
 }
 
 // ensurePaneCwd sends `cd <wtPath>\n` to the active pane of `windowID`
