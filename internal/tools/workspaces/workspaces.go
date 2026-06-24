@@ -1186,6 +1186,23 @@ func NameCommand() *cobra.Command {
 
 var conventionalBranchRe = regexp.MustCompile(`^(feat|fix|chore|refactor|docs|test|perf|style)/[a-z0-9-]+$`)
 
+// branchPromptMaxChars caps the user's intent text we send to Claude for
+// branch/session-name generation. Naming only needs the gist —
+// dumping a 2000-char Sentry alert (URLs, stack traces, emoji codes)
+// just slows the model down and produces lower-quality names. 400 chars
+// holds 60-80 words, enough context for any reasonable name.
+const branchPromptMaxChars = 400
+
+// truncateForBranchPrompt clamps the intent text to branchPromptMaxChars
+// runes. Truncation adds a `…` so the model knows there was more.
+func truncateForBranchPrompt(s string) string {
+	r := []rune(s)
+	if len(r) <= branchPromptMaxChars {
+		return s
+	}
+	return string(r[:branchPromptMaxChars-1]) + "…"
+}
+
 const branchNamingSysPrompt = `You generate git branch names following conventional commits.
 Output exactly ONE line in the format <type>/<short-kebab-description>.
 Allowed types: feat, fix, chore, refactor, docs, test, perf, style.
@@ -1207,9 +1224,13 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 		sp = noopReporter{}
 	}
 	sp.SetStatus("Inferring branch name...")
+	// haiku (claudegen default) is ~5-10x faster than sonnet for the
+	// 2-5-word kebab output we want and follows the type-prefix grammar
+	// reliably. The earlier sonnet override blew past the 90s timeout on
+	// long prompts (Sentry alerts, stack traces) because sonnet rate-of-
+	// generation scales much worse with input length.
 	gen := claudegen.New()
-	gen.Model = "sonnet"
-	raw, err := gen.RunWithSystemPrompt(branchNamingSysPrompt, prompt)
+	raw, err := gen.RunWithSystemPrompt(branchNamingSysPrompt, truncateForBranchPrompt(prompt))
 	if err != nil {
 		return "", "", err
 	}
@@ -1296,8 +1317,7 @@ func runAutoSession(initialPrompt string) error {
 		err := sp.Run(func() error {
 			sp.SetStatus("Asking Claude for a session name...")
 			gen := claudegen.New()
-			gen.Model = "sonnet"
-			raw, e := gen.RunWithSystemPrompt(sessionNamingSysPrompt, prompt)
+			raw, e := gen.RunWithSystemPrompt(sessionNamingSysPrompt, truncateForBranchPrompt(prompt))
 			if e != nil {
 				return e
 			}
