@@ -31,13 +31,18 @@ func TestEnsure_WritesCanonicalJSON_WithStopHook(t *testing.T) {
 	if got.AtelierVersion != schemaVersion {
 		t.Errorf("version=%d want %d", got.AtelierVersion, schemaVersion)
 	}
-	stop, ok := got.Hooks["Stop"]
-	if !ok || len(stop) == 0 || len(stop[0].Hooks) == 0 {
-		t.Fatalf("missing Stop hook: %+v", got.Hooks)
-	}
-	cmd := stop[0].Hooks[0].Command
-	if cmd != "atelier tools claude notify-attention" {
-		t.Errorf("Stop command=%q want 'atelier tools claude notify-attention'", cmd)
+	// Both Stop (response complete) and Notification (selector /
+	// permission / idle prompt) must route to notify-attention so
+	// waiting-for-user states flag the parent window.
+	for _, ev := range []string{"Stop", "Notification"} {
+		groups, ok := got.Hooks[ev]
+		if !ok || len(groups) == 0 || len(groups[0].Hooks) == 0 {
+			t.Fatalf("missing %s hook: %+v", ev, got.Hooks)
+		}
+		cmd := groups[0].Hooks[0].Command
+		if cmd != "atelier tools claude notify-attention" {
+			t.Errorf("%s command=%q want 'atelier tools claude notify-attention'", ev, cmd)
+		}
 	}
 }
 

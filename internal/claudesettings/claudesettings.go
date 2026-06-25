@@ -22,12 +22,20 @@ import (
 
 // schemaVersion lets future atelier releases force a rewrite when the
 // embedded hooks change. Bump when modifying the canonical settings.
-const schemaVersion = 1
+const schemaVersion = 2
 
-// canonical is the settings JSON atelier guarantees. Stop hook routes
-// every Claude task completion to `atelier tools claude notify-attention`,
-// which (a) flags the parent workspace window with @needs_attention,
-// (b) backgrounds a recap generator that stamps @attention_recap.
+// canonical is the settings JSON atelier guarantees.
+//
+//   - Stop hook fires when Claude FINISHES a response → routes to
+//     `atelier tools claude notify-attention`.
+//   - Notification hook fires when Claude is WAITING on the user
+//     (option selector, permission prompt, idle-after-60s) → same
+//     notify-attention command. Without this, selectors silently
+//     stall Claude without flagging the parent window.
+//
+// notify-attention is idempotent for the same window so wiring two
+// events is safe — the first to fire wins; subsequent calls are
+// no-ops until the user clears attention by entering the window.
 //
 // Marker field `__atelier_version` is read on Ensure() to decide
 // whether to overwrite stale content.
@@ -46,15 +54,17 @@ type hookEntry struct {
 }
 
 func canonical() canonicalSettings {
+	notify := []hookGroup{
+		{Hooks: []hookEntry{{
+			Type:    "command",
+			Command: dispatch.ToolCmd("claude", "notify-attention"),
+		}}},
+	}
 	return canonicalSettings{
 		AtelierVersion: schemaVersion,
 		Hooks: map[string][]hookGroup{
-			"Stop": {
-				{Hooks: []hookEntry{{
-					Type:    "command",
-					Command: dispatch.ToolCmd("claude", "notify-attention"),
-				}}},
-			},
+			"Stop":         notify,
+			"Notification": notify,
 		},
 	}
 }
