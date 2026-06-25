@@ -21,11 +21,15 @@ import (
 // Session picker: delete flows
 // ---------------------------------------------------------------------------
 
-// TestSessionPicker_DeleteWorkspace_RemovesWorktreeAndWindow exercises
-// the bash `tmux_delete_workspace` flow: a non-default workspace row,
-// when confirmed via the picker's y-bind, removes the worktree from
-// disk AND kills the tmux window.
-func TestSessionPicker_DeleteWorkspace_RemovesWorktreeAndWindow(t *testing.T) {
+// TestSessionPicker_DeleteWorkspace_KillsWindow_KeepsWorktree locks
+// in the soft-close contract for M-s M-x: kill the tmux window so the
+// workspace leaves the live picker, but LEAVE the on-disk worktree
+// directory intact so M-r can restore the workspace if needed.
+// Permanent worktree deletion is reserved for the M-r picker's own
+// M-x (RecoverDeleteRowCommand) — that flow is the explicit "rm -rf"
+// gesture. Soft close is recoverable; one mis-press in M-s shouldn't
+// lose local-only work.
+func TestSessionPicker_DeleteWorkspace_KillsWindow_KeepsWorktree(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("main")
 	srv.SourceInit(t)
@@ -55,13 +59,14 @@ func TestSessionPicker_DeleteWorkspace_RemovesWorktreeAndWindow(t *testing.T) {
 		t.Fatalf("_delete-row: %v", err)
 	}
 
-	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
-		t.Errorf("expected worktree removed at %s, still exists (err=%v)", wtPath, err)
-	}
+	// Window gone, worktree dir preserved.
 	for _, w := range srv.WindowsIn("vyrwu/demo") {
 		if w == "feat-toremove" {
 			t.Errorf("expected window 'feat-toremove' killed, still present")
 		}
+	}
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Errorf("worktree dir at %s should still exist for M-r recovery, got err=%v", wtPath, err)
 	}
 }
 
