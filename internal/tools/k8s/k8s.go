@@ -178,6 +178,18 @@ func SwitchCommand() *cobra.Command {
 					return err
 				}
 			}
+			// When invoked from inside the K9s popup itself (M-c chord)
+			// the calling client is already attached to _atelier_k8s;
+			// setup's respawn-pane swapped its process in place, so the
+			// user is now looking at the new context. Calling Attach
+			// here would syscall.Exec tmux into the switch picker's
+			// popup pty, opening a SECOND popup-client on the same
+			// session — visible to the user as a duplicated K9s stack.
+			// Skip the attach when we're already inside.
+			curSession, _ := h.DisplayMessage("#{session_name}")
+			if strings.TrimSpace(curSession) == Spec.SessionName() {
+				return nil
+			}
 			return Spec.EnsureAndAttach(h)
 		},
 	}
