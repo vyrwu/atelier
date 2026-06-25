@@ -478,6 +478,13 @@ func DeleteRowCommand() *cobra.Command {
 			if repoPath != "" && window != defaultBranch {
 				wtPath := filepath.Join(workspaceWorktreeRoot(), session, window)
 				_ = removeWorktree(repoPath, wtPath)
+				// If the target window is the outer client's CURRENT
+				// window, killing it forces tmux to auto-switch which
+				// tears down the popup-client holding the sessions
+				// picker. Hop the outer to a safe sibling window
+				// (default-branch if present, else any other window)
+				// before the kill so the picker survives.
+				moveOuterAway(h, session, window, defaultBranch)
 				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
 				// Mirror the deletion to the persisted cache so restore
 				// doesn't resurrect the workspace the user just nuked.
@@ -492,6 +499,50 @@ func DeleteRowCommand() *cobra.Command {
 			return hostpopup.CleanupOrphanedPopups(h)
 		},
 	}
+}
+
+// moveOuterAway switches the outer client off `victimWindow` before it
+// gets killed, so the popup pty holding the sessions picker survives.
+// Tries `defaultBranch` first; falls back to any other window in the
+// session. No-op when the outer isn't on `victimWindow` to begin with.
+func moveOuterAway(h *tmuxhost.Client, session, victimWindow, defaultBranch string) {
+	outer, _ := h.ShowGlobalOption("@atelier_outer_client")
+	outer = strings.TrimSpace(outer)
+	if outer == "" {
+		return
+	}
+	curWin, _ := h.DisplayMessage("#{window_name}")
+	curSess, _ := h.DisplayMessage("#{session_name}")
+	if strings.TrimSpace(curSess) != session || strings.TrimSpace(curWin) != victimWindow {
+		return
+	}
+	// Pick a sibling. Prefer the session's default-branch window when
+	// it exists; otherwise the first non-victim window.
+	listOut, err := h.Run("list-windows", "-t", "="+session, "-F", "#W")
+	if err != nil {
+		return
+	}
+	candidates := strings.Split(strings.TrimSpace(string(listOut)), "\n")
+	target := ""
+	for _, w := range candidates {
+		w = strings.TrimSpace(w)
+		if w == "" || w == victimWindow {
+			continue
+		}
+		if w == defaultBranch {
+			target = w
+			break
+		}
+		if target == "" {
+			target = w
+		}
+	}
+	if target == "" {
+		return // sole window in session — kill-session path will handle this
+	}
+	_, _ = h.Run("select-window", "-t", "="+session+":"+target)
+	_, _ = h.Run("switch-client", "-c", outer, "-t", "="+session)
+	debuglog.Logf("_delete-row: hopped outer=%q off victim=%s/%s to sibling=%s", outer, session, victimWindow, target)
 }
 
 // SessionListCommand emits the workspace selector lines (for fzf --reload).
