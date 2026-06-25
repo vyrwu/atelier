@@ -14,8 +14,13 @@ var Manifest = &manifest.Manifest{
 	Name:          "k8s",
 	Description:   "Singleton k9s popup (picker on every open; respawns on context change)",
 	PrimaryInvoke: "open",
+	// The primary binding dispatches the CONTEXT PICKER, which is a
+	// small popup. The picker queues a separate full-size popup for the
+	// actual K9s TUI via the internal `_attach` subcommand. Without
+	// this split, M-; → K9s with no active context rendered the
+	// context list inside a 99%-tall popup.
 	Binding: &manifest.Binding{
-		Style:  manifest.StyleFull,
+		Style:  manifest.StylePicker,
 		Invoke: "open",
 	},
 	Bindings: []manifest.Binding{
@@ -45,5 +50,6 @@ func main() {
 		root.AddCommand(k8s.SwitchCommand())
 		root.AddCommand(k8s.ContextsCommand())
 		root.AddCommand(k8s.LaunchCommand())
+		root.AddCommand(k8s.AttachCommand())
 	})
 }

@@ -28,8 +28,11 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/vyrwu/atelier/internal/dispatch"
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
+	"github.com/vyrwu/atelier/internal/initgen"
+	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/popup"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
@@ -70,12 +73,22 @@ func LoadContexts(path string) ([]Context, error) {
 }
 
 // OpenCommand: picker → setup (respawn-if-changed) → attach.
+// OpenCommand runs in the small picker-style popup (the toolselector
+// dispatches k8s with Binding.Style=picker). It picks a context if
+// needed, then queues a separate full-size popup for the actual K9s
+// TUI via `_attach`. The user sees: small picker → small picker exits
+// → full K9s appears. Avoids the prior "context list rendered inside a
+// 99%-tall popup" eyesore.
+//
+// Fast-path: when a context is already active AND the K9s session is
+// alive, skip the picker entirely and queue the full popup directly.
+//
 // Bash equivalents: show_k8s_popup → tmux_k8s_picker → tmux_k8s_setup.
 func OpenCommand() *cobra.Command {
 	var socket string
 	c := &cobra.Command{
 		Use:   "open",
-		Short: "Pick a context, set up the k9s singleton, attach (bash-exact)",
+		Short: "Pick a k8s context (small popup); the K9s TUI opens after",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			h := tmuxhost.New(socket)
 			cfg, err := LoadConfig()
@@ -93,10 +106,11 @@ func OpenCommand() *cobra.Command {
 			active, _ := h.ShowGlobalOption(OptActiveContext)
 			has, _ := h.HasSession(Spec.SessionName())
 
-			// If session is already up on the active context, attach directly
-			// (matches bash: re-open without picker when session exists).
+			// Fast-path: K9s already running on a context → skip picker,
+			// just spawn the full popup to attach.
 			if has && active != "" {
-				return Spec.EnsureAndAttach(h)
+				queueFullK9sPopup(h)
+				return nil
 			}
 
 			picked, err := pickContext(contexts)
@@ -124,7 +138,38 @@ func OpenCommand() *cobra.Command {
 			if err := workspace.SetPersistedGlobal(h, OptActiveContext, ctx.Name); err != nil {
 				return err
 			}
-			return Spec.EnsureAndAttach(h)
+			queueFullK9sPopup(h)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
+	return c
+}
+
+// queueFullK9sPopup deferred-spawns a full-style popup running
+// `atelier tools k8s _attach`. The defer (run-shell -b + sleep 0.15)
+// lets the picker popup close cleanly before the full popup opens —
+// tmux only allows one popup per client at a time, so this ordering
+// matters.
+func queueFullK9sPopup(h *tmuxhost.Client) {
+	popupOpts := initgen.PopupOptions(manifest.StyleFull, "K9s", false)
+	cmd := fmt.Sprintf("sleep 0.15 && tmux display-popup %s -E '%s'",
+		popupOpts, dispatch.ToolCmd("k8s", "_attach"))
+	_, _ = h.Run("run-shell", "-b", cmd)
+}
+
+// AttachCommand is the internal entry point used by the deferred
+// display-popup queued in OpenCommand / SwitchCommand. Pure
+// EnsureAndAttach — context selection and setup already happened in
+// the picker popup.
+func AttachCommand() *cobra.Command {
+	var socket string
+	c := &cobra.Command{
+		Use:    "_attach",
+		Short:  "internal: attach to the k9s singleton (post-picker deferred entry)",
+		Hidden: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return Spec.EnsureAndAttach(tmuxhost.New(socket))
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
@@ -181,16 +226,18 @@ func SwitchCommand() *cobra.Command {
 			// When invoked from inside the K9s popup itself (M-c chord)
 			// the calling client is already attached to _atelier_k8s;
 			// setup's respawn-pane swapped its process in place, so the
-			// user is now looking at the new context. Calling Attach
-			// here would syscall.Exec tmux into the switch picker's
-			// popup pty, opening a SECOND popup-client on the same
-			// session — visible to the user as a duplicated K9s stack.
-			// Skip the attach when we're already inside.
+			// user is now looking at the new context. No further action
+			// needed — return so the M-c picker popup closes cleanly.
 			curSession, _ := h.DisplayMessage("#{session_name}")
 			if strings.TrimSpace(curSession) == Spec.SessionName() {
 				return nil
 			}
-			return Spec.EnsureAndAttach(h)
+			// M-c fired from OUTSIDE K9s (root binding, no popup open).
+			// Queue the full K9s popup the same way M-; → K9s does, so
+			// the picker popup closes cleanly first and the K9s TUI
+			// renders at full geometry.
+			queueFullK9sPopup(h)
+			return nil
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
