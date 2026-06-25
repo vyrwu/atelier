@@ -69,8 +69,14 @@ func SessionsCommand() *cobra.Command {
 			// Bash uses red accent + extra `hl:red,hl+:red:bold` in --color.
 			// fzfstyle.Args sets the standard palette; override with WithCustomColor
 			// to add the red hl variants. Same prompt as bash: "栽 ".
+			//
+			// bg+ / fg+ are explicit so the highlighted row is clearly
+			// distinct from the rest of the list — fzf's default `bg+`
+			// is a subtle reverse that vanishes against the dracula
+			// popup chrome. `#6272a4` matches dracula's "current window"
+			// purple; `#f8f8f2:bold` reads cleanly on it.
 			args := fzfstyle.Args("栽 ", "Select Workspace", "red",
-				fzfstyle.WithCustomColor("prompt:red:bold,pointer:red,query:red,hl:red,hl+:red:bold,label:103,border:103,footer:103"),
+				fzfstyle.WithCustomColor("prompt:red:bold,pointer:red,query:red,hl:red,hl+:red:bold,bg+:#6272a4,fg+:#f8f8f2:bold,label:103,border:103,footer:103"),
 				fzfstyle.WithDelimiter("\t"),
 				fzfstyle.WithNth("3"),
 				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_delete-prompt", "\"$FZF_PROMPT\"", "{}")),
