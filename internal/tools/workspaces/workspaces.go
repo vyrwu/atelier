@@ -540,8 +540,13 @@ func moveOuterAway(h *tmuxhost.Client, session, victimWindow, defaultBranch stri
 	if target == "" {
 		return // sole window in session — kill-session path will handle this
 	}
-	_, _ = h.Run("select-window", "-t", "="+session+":"+target)
-	_, _ = h.Run("switch-client", "-c", outer, "-t", "="+session)
+	// LandOuter handles the select-window + switch-client -c outer
+	// sequence correctly (and tests enforce that no inline switch-client
+	// lives in this file).
+	if err := workspace.LandOuter(h, "="+session, "="+session+":"+target); err != nil {
+		debuglog.LogErr("_delete-row: LandOuter to sibling", err)
+		return
+	}
 	debuglog.Logf("_delete-row: hopped outer=%q off victim=%s/%s to sibling=%s", outer, session, victimWindow, target)
 }
 
