@@ -131,8 +131,11 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 		"aws",
 		"lazygit",
 		"claude",
+		"ghdash",
+		"ghenhance",
 		"pgcli",   // pg subcommands surfaced separately
 		"pgcenter",
+		"ccusage",
 		"workspaces-selector", // virtual: "Select Workspace" from workspaces tool
 		"workspaces-creator",  // virtual: "New Workspace" from workspaces tool
 		"workspaces-recover",  // virtual: "Recover Workspace" from workspaces tool
