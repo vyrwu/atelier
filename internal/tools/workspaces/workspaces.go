@@ -480,10 +480,14 @@ func DeleteRowCommand() *cobra.Command {
 				defaultBranch = DefaultBranch(repoPath)
 			}
 
-			// If we're deleting a non-default window: just remove its worktree + kill window.
+			// M-s M-x is a SOFT close. It removes the workspace from the
+			// live picker (kill-window + statestore prune) but does NOT
+			// touch the on-disk worktree directory. M-r still sees it
+			// and the user can restore the workspace by picking it.
+			// Permanent worktree deletion (rm -rf the dir + branch) is
+			// reserved for the M-r picker's own M-x — that flow is
+			// explicit about "I really mean it".
 			if repoPath != "" && window != defaultBranch {
-				wtPath := filepath.Join(workspaceWorktreeRoot(), session, window)
-				_ = removeWorktree(repoPath, wtPath)
 				// If the target window is the outer client's CURRENT
 				// window, killing it forces tmux to auto-switch which
 				// tears down the popup-client holding the sessions
@@ -492,10 +496,6 @@ func DeleteRowCommand() *cobra.Command {
 				// before the kill so the picker survives.
 				moveOuterAway(h, session, window, defaultBranch)
 				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
-				// Mirror the deletion to the persisted cache so restore
-				// doesn't resurrect the workspace the user just nuked.
-				// RemoveWindow auto-removes the workspace when its last
-				// window goes — so both branches converge correctly.
 				_ = statestore.RemoveWindow(session, window)
 				return hostpopup.CleanupOrphanedPopups(h)
 			}
