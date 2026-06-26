@@ -151,10 +151,22 @@ func OpenCommand() *cobra.Command {
 // lets the picker popup close cleanly before the full popup opens —
 // tmux only allows one popup per client at a time, so this ordering
 // matters.
+//
+// `-c <outerClient>` is critical: without it, display-popup defaults
+// to whatever client is currently focused, which may be a sibling
+// popup (e.g. a Claude popup the user has open). The K9s popup then
+// nests on top of Claude — symptom: "K9s opened inside Claude". The
+// outer-client name is set by the M-; / M-n / M-s root bindings.
 func queueFullK9sPopup(h *tmuxhost.Client) {
 	popupOpts := initgen.PopupOptions(manifest.StyleFull, "K9s", false)
-	cmd := fmt.Sprintf("sleep 0.15 && tmux display-popup %s -E '%s'",
-		popupOpts, dispatch.ToolCmd("k8s", "_attach"))
+	outerClient, _ := h.ShowGlobalOption("@atelier_outer_client")
+	outerClient = strings.TrimSpace(outerClient)
+	clientArg := ""
+	if outerClient != "" {
+		clientArg = fmt.Sprintf(" -c '%s'", outerClient)
+	}
+	cmd := fmt.Sprintf("sleep 0.15 && tmux display-popup%s %s -E '%s'",
+		clientArg, popupOpts, dispatch.ToolCmd("k8s", "_attach"))
 	_, _ = h.Run("run-shell", "-b", cmd)
 }
 
