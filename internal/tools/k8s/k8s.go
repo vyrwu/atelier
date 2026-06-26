@@ -31,7 +31,7 @@ import (
 	"github.com/vyrwu/atelier/internal/dispatch"
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
-	"github.com/vyrwu/atelier/internal/initgen"
+	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/popup"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
@@ -146,28 +146,26 @@ func OpenCommand() *cobra.Command {
 	return c
 }
 
-// queueFullK9sPopup deferred-spawns a full-style popup running
-// `atelier tools k8s _attach`. The defer (run-shell -b + sleep 0.15)
-// lets the picker popup close cleanly before the full popup opens —
-// tmux only allows one popup per client at a time, so this ordering
-// matters.
+// queueFullK9sPopup opens a full-style K9s popup on the user's outer
+// (non-popup) client. Routes through hostpopup.OpenOnOuter which:
 //
-// `-c <outerClient>` is critical: without it, display-popup defaults
-// to whatever client is currently focused, which may be a sibling
-// popup (e.g. a Claude popup the user has open). The K9s popup then
-// nests on top of Claude — symptom: "K9s opened inside Claude". The
-// outer-client name is set by the M-; / M-n / M-s root bindings.
+//   - opens immediately on the outer when no inner popup-clients exist,
+//   - sets a one-shot client-detached hook then detaches inner popups
+//     first when they do (so the K9s popup doesn't try to nest on top
+//     of, e.g., a Claude popup the user has open),
+//   - passes `-c <outer>` so the new popup lands on the real workspace
+//     client regardless of which sibling popup happens to be focused.
+//
+// Without the inner-detach dance, tmux silently dropped the K9s popup
+// when the user invoked M-; → K9s with a Claude popup already open —
+// "K9s doesn't appear at all" — because tmux only allows one popup
+// per client and the outer client already had one.
 func queueFullK9sPopup(h *tmuxhost.Client) {
-	popupOpts := initgen.PopupOptions(manifest.StyleFull, "K9s", false)
-	outerClient, _ := h.ShowGlobalOption("@atelier_outer_client")
-	outerClient = strings.TrimSpace(outerClient)
-	clientArg := ""
-	if outerClient != "" {
-		clientArg = fmt.Sprintf(" -c '%s'", outerClient)
-	}
-	cmd := fmt.Sprintf("sleep 0.15 && tmux display-popup%s %s -E '%s'",
-		clientArg, popupOpts, dispatch.ToolCmd("k8s", "_attach"))
-	_, _ = h.Run("run-shell", "-b", cmd)
+	styleArgs := hostpopup.PopupStyleArgs(&manifest.Binding{
+		Style: manifest.StyleFull,
+		Title: "K9s",
+	})
+	_ = hostpopup.OpenOnOuter(h, styleArgs, dispatch.ToolCmd("k8s", "_attach"))
 }
 
 // AttachCommand is the internal entry point used by the deferred
