@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -137,10 +138,54 @@ func (c *Client) NewSession(name string, detached bool) error {
 	return err
 }
 
-// NewSessionWithCommand creates a detached session that runs the given shell command.
+// NewSessionWithCommand creates a detached session that runs the given
+// shell command. Sizes the new session to the outer client's terminal
+// when @atelier_outer_client is set — without -x/-y, tmux defaults
+// detached sessions to 80x24 and TUI tools (gh-dash, lazygit, k9s)
+// measure that initial size and lay themselves out for an 80-col
+// screen, leaving the rest of the popup empty even after the popup
+// attaches at full geometry and aggressive-resize fires.
+//
+// Best-effort: when the outer client can't be resolved, falls back to
+// the original (no-size-hint) form so legacy callers / tests still
+// work.
 func (c *Client) NewSessionWithCommand(name, shellCmd string) error {
-	_, err := c.Run("new-session", "-d", "-s", name, shellCmd)
+	args := []string{"new-session", "-d", "-s", name}
+	if w, h := c.outerClientSize(); w > 0 && h > 0 {
+		args = append(args, "-x", fmt.Sprintf("%d", w), "-y", fmt.Sprintf("%d", h))
+	}
+	args = append(args, shellCmd)
+	_, err := c.Run(args...)
 	return err
+}
+
+// outerClientSize returns the dimensions of the client recorded in
+// @atelier_outer_client (set by the M-; / M-n / M-s root binding).
+// Returns (0, 0) on any lookup failure so the caller can fall back to
+// tmux's default.
+func (c *Client) outerClientSize() (int, int) {
+	outerBytes, err := c.Run("show-options", "-gv", "@atelier_outer_client")
+	if err != nil {
+		return 0, 0
+	}
+	outer := strings.TrimSpace(string(outerBytes))
+	if outer == "" {
+		return 0, 0
+	}
+	wh, err := c.Run("display-message", "-p", "-t", outer, "#{client_width}x#{client_height}")
+	if err != nil {
+		return 0, 0
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(wh)), "x", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	w, errW := strconv.Atoi(parts[0])
+	h, errH := strconv.Atoi(parts[1])
+	if errW != nil || errH != nil {
+		return 0, 0
+	}
+	return w, h
 }
 
 // KillSession terminates the named session.

@@ -14,9 +14,23 @@ import (
 // Spec is the workspace-scoped popup descriptor. Each parent window
 // gets its own `_atelier_ghdash_<sid>_<wid>` session so state (cursor,
 // active section) persists per workspace.
+//
+// DefaultCmd captures stderr (where Bubble Tea writes panic traces)
+// to ~/.cache/atelier/ghdash.log AND, when gh-dash exits non-zero,
+// keeps the popup open so the user can see the failure tail instead
+// of "popup just closed silently". Without the trap, a gh-dash panic
+// closes the popup-session immediately and the trace disappears.
 var Spec = &popup.WorkspaceScoped{
-	Tool:        "ghdash",
-	DefaultCmd:  "gh-dash",
+	Tool: "ghdash",
+	DefaultCmd: `mkdir -p $HOME/.cache/atelier && ` +
+		`gh-dash 2>>$HOME/.cache/atelier/ghdash.log; status=$?; ` +
+		`if [ "$status" != 0 ]; then ` +
+		`echo "gh-dash exited $status (see ~/.cache/atelier/ghdash.log)"; ` +
+		`echo "--- last 20 stderr lines ---"; ` +
+		`tail -20 $HOME/.cache/atelier/ghdash.log; ` +
+		`echo "press any key to dismiss"; ` +
+		`read -n 1 -s; ` +
+		`fi`,
 	Description: "Per-workspace gh-dash popup (GitHub PRs/issues)",
 }
 

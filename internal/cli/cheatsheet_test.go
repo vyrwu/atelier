@@ -35,19 +35,22 @@ func TestRenderCheatsheet_IncludesAtelierMQuestion(t *testing.T) {
 }
 
 // TestRenderCheatsheet_NoMcCleanupAdvert locks the decommission of
-// the M-c "clean orphaned popups" affordance. Cleanup is fully
+// the OLD M-c "clean orphaned popups" affordance. Cleanup is fully
 // automatic now (window-unlinked + session-closed hooks + the
 // startup sweep wired in RestoreBlock), so advertising a manual
 // shortcut for it gives the user a chore for a problem they don't
-// have. If this test breaks, someone re-added a nag affordance —
-// fix the regression, don't relax the test.
+// have.
+//
+// (Note: M-c was later reused by the k8s tool as the "switch K9s
+// context" chord — that's a legit different binding and is allowed
+// to appear. The bans below target the cleanup text only.)
 func TestRenderCheatsheet_NoMcCleanupAdvert(t *testing.T) {
 	var buf bytes.Buffer
 	renderCheatsheet(&buf)
 	out := stripANSI(buf.String())
-	for _, banned := range []string{"M-c", "clean orphaned", "clean now"} {
+	for _, banned := range []string{"clean orphaned", "clean now"} {
 		if strings.Contains(out, banned) {
-			t.Errorf("cheatsheet still advertises decommissioned M-c affordance (%q). full output:\n%s",
+			t.Errorf("cheatsheet still advertises decommissioned cleanup affordance (%q). full output:\n%s",
 				banned, out)
 		}
 	}

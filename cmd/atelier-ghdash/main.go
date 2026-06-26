@@ -26,7 +26,7 @@ var Manifest = &manifest.Manifest{
 	UI: &manifest.UI{
 		Icon:        "表",
 		AccentColor: "87",
-		PopupTitle:  "PR Dashboard",
+		PopupTitle:  "GH Dash",
 	},
 	Requires:    []string{"gh-dash"},
 	Subcommands: []string{"open"},
