@@ -23,7 +23,7 @@ var Manifest = &manifest.Manifest{
 	UI: &manifest.UI{
 		Icon:        "舞",
 		AccentColor: "203",
-		PopupTitle:  "GH Actions",
+		PopupTitle:  "GH Enchance",
 	},
 	Requires:    []string{"gh-enhance"},
 	Subcommands: []string{"open"},

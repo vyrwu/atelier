@@ -47,7 +47,12 @@ build: $(BINARIES)
 list-binaries:
 	@for b in $(CMDS); do echo "$$b"; done
 
-$(BIN_DIR)/%: cmd/%
+# Depend on every .go file in the module so edits in internal/... force
+# a rebuild. Without this, the rule only watched cmd/<tool>/ and stale
+# binaries shipped silently after internal/tools/<tool>/ changes.
+GO_SOURCES := $(shell find cmd internal -type f -name '*.go' 2>/dev/null)
+
+$(BIN_DIR)/%: cmd/% $(GO_SOURCES) go.mod go.sum
 	@mkdir -p $(BIN_DIR)
 	go build -ldflags '$(LDFLAGS)' -o $@ ./cmd/$*
 
