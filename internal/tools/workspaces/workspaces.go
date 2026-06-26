@@ -1265,11 +1265,37 @@ func truncateForBranchPrompt(s string) string {
 	return string(r[:branchPromptMaxChars-1]) + "…"
 }
 
-const branchNamingSysPrompt = `You generate git branch names following conventional commits.
-Output exactly ONE line in the format <type>/<short-kebab-description>.
-Allowed types: feat, fix, chore, refactor, docs, test, perf, style.
-Description must be 2-5 words in kebab-case, all lowercase, only [a-z0-9-].
-Output ONLY the branch name on a single line. No quotes. No explanation. No code blocks.`
+const branchNamingSysPrompt = `You are a deterministic naming engine. You DO NOT have a conversation; you EMIT a single value.
+
+Task: given an INTENT line, output exactly one git branch name in conventional-commits form.
+
+Output contract — REQUIRED:
+- EXACTLY ONE LINE.
+- Format: <type>/<short-kebab-description>
+- Allowed types: feat, fix, chore, refactor, docs, test, perf, style.
+- Description: 2-5 words, kebab-case, lowercase, characters in [a-z0-9-] only.
+- NO quotes, NO backticks, NO code blocks, NO leading/trailing whitespace.
+- NO commentary, NO clarifying questions, NO acknowledgments, NO "here is", NO "I would suggest".
+- If the intent is ambiguous, vague, or you would otherwise want to ask a follow-up, DO NOT ASK. Instead pick the best-effort name from whatever signal exists.
+
+Type-selection heuristics (apply in order, first match wins):
+- "fix"/"bug"/"crash"/"broken"/"error" anywhere in intent → type = fix
+- "test"/"spec"/"e2e" → test
+- "doc"/"readme"/"comment"/"clarify" → docs
+- "refactor"/"rename"/"extract"/"cleanup" → refactor
+- "perf"/"speed"/"slow"/"optimize" → perf
+- everything else → feat
+
+Fallback: if intent is empty / unparseable / all-symbolic, emit "chore/wip".
+
+Examples (intent → output):
+- "Sentry alert: Redis::CannotConnectError" → fix/redis-cannot-connect
+- "add dark mode toggle" → feat/dark-mode-toggle
+- "?????" → chore/wip
+- "I'm not sure what this should do" → chore/wip
+- "Refactor the auth middleware to support OIDC" → refactor/auth-middleware-oidc
+
+Now read the intent on the next message and emit ONE line per the contract above.`
 
 // stageReporter is the minimal interface buildClaudeNamedWorkspace needs
 // from spinner.BoxSpinner. Defined here so tests can substitute a no-op.
@@ -1286,12 +1312,16 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 		sp = noopReporter{}
 	}
 	sp.SetStatus("Inferring branch name...")
-	// haiku (claudegen default) is ~5-10x faster than sonnet for the
-	// 2-5-word kebab output we want and follows the type-prefix grammar
-	// reliably. The earlier sonnet override blew past the 90s timeout on
-	// long prompts (Sentry alerts, stack traces) because sonnet rate-of-
-	// generation scales much worse with input length.
+	// Sonnet for branch naming. Haiku bounced on ambiguous prompts
+	// (responded with "I need clarification…" despite the system
+	// prompt's explicit ban on questions), failing the conventional-
+	// branch regex check. Sonnet honors the deterministic-naming
+	// contract more reliably. The 400-char truncate (below) keeps the
+	// input small enough that sonnet's slower per-token rate doesn't
+	// push past claudegen's 90s timeout — that was the original reason
+	// we'd dropped to haiku.
 	gen := claudegen.New()
+	gen.Model = "sonnet"
 	raw, err := gen.RunWithSystemPrompt(branchNamingSysPrompt, truncateForBranchPrompt(prompt))
 	if err != nil {
 		return "", "", err
@@ -1322,10 +1352,26 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 
 var autoSessionNameRe = regexp.MustCompile(`^auto/[a-z0-9-]+$`)
 
-const sessionNamingSysPrompt = `You generate short tmux session names for multi-repo work.
-Output exactly ONE line in the format auto/<short-kebab-description>.
-Description must be 2-5 words in kebab-case, all lowercase, only [a-z0-9-].
-Output ONLY the session name on a single line. No quotes. No explanation. No code blocks.`
+const sessionNamingSysPrompt = `You are a deterministic naming engine. You DO NOT have a conversation; you EMIT a single value.
+
+Task: given an INTENT line, output exactly one tmux session name for a multi-repo task.
+
+Output contract — REQUIRED:
+- EXACTLY ONE LINE.
+- Format: auto/<short-kebab-description>
+- Description: 2-5 words, kebab-case, lowercase, characters in [a-z0-9-] only.
+- NO quotes, NO backticks, NO code blocks, NO leading/trailing whitespace.
+- NO commentary, NO clarifying questions, NO acknowledgments, NO "here is", NO "I would suggest".
+- If the intent is ambiguous, vague, or you would otherwise want to ask a follow-up, DO NOT ASK. Instead pick the best-effort name from whatever signal exists.
+
+Fallback: if intent is empty / unparseable / all-symbolic, emit "auto/wip".
+
+Examples (intent → output):
+- "audit observability stack across all repos" → auto/audit-observability-stack
+- "?????" → auto/wip
+- "I'm not sure what this should do" → auto/wip
+
+Now read the intent on the next message and emit ONE line per the contract above.`
 
 func runAutoSession(initialPrompt string) error {
 	base := workspaceMultiRepoRoot()
@@ -1378,7 +1424,12 @@ func runAutoSession(initialPrompt string) error {
 		sp := spinner.NewBox("Building workspace...")
 		err := sp.Run(func() error {
 			sp.SetStatus("Asking Claude for a session name...")
+			// Sonnet — same reasoning as the branch-naming flow: haiku
+			// occasionally bounced with a clarifying question; sonnet
+			// honors the strict-format contract reliably. 400-char
+			// truncate keeps it inside claudegen's 90s timeout.
 			gen := claudegen.New()
+			gen.Model = "sonnet"
 			raw, e := gen.RunWithSystemPrompt(sessionNamingSysPrompt, truncateForBranchPrompt(prompt))
 			if e != nil {
 				return e
