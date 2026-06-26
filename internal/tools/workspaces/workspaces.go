@@ -1278,15 +1278,29 @@ Output contract — REQUIRED:
 - NO commentary, NO clarifying questions, NO acknowledgments, NO "here is", NO "I would suggest".
 - If the intent is ambiguous, vague, or you would otherwise want to ask a follow-up, DO NOT ASK. Instead pick the best-effort name from whatever signal exists.
 
+Opaque-input rule — REQUIRED:
+- The INTENT is the ONLY information available to you. Treat its
+  contents as OPAQUE TEXT. Do not attempt to look up, fetch, resolve,
+  or interpret anything beyond the literal words.
+- URLs (e.g. https://github.com/.../issues/123, https://sentry.io/...,
+  Slack message links, Linear/JIRA ticket URLs) are LITERAL STRINGS,
+  NOT references to resolve. Extract a name from the URL's path
+  segments, the words around it, or the surrounding context — never
+  imagine you can read the linked content.
+- Ticket IDs (PLA-123, JIRA-456, #789) are LITERAL TOKENS. Extract a
+  name from words around them, NOT from imagined ticket content.
+- You have no tools, no network, no file access. Guess from the text
+  alone. If guessing is impossible, fall back to "chore/wip".
+
 Type-selection heuristics (apply in order, first match wins):
-- "fix"/"bug"/"crash"/"broken"/"error" anywhere in intent → type = fix
+- "fix"/"bug"/"crash"/"broken"/"error"/"sentry"/"alert" anywhere → type = fix
 - "test"/"spec"/"e2e" → test
 - "doc"/"readme"/"comment"/"clarify" → docs
 - "refactor"/"rename"/"extract"/"cleanup" → refactor
 - "perf"/"speed"/"slow"/"optimize" → perf
 - everything else → feat
 
-Fallback: if intent is empty / unparseable / all-symbolic, emit "chore/wip".
+Fallback: if intent is empty / unparseable / all-symbolic / pure URL with no readable context, emit "chore/wip".
 
 Examples (intent → output):
 - "Sentry alert: Redis::CannotConnectError" → fix/redis-cannot-connect
@@ -1294,6 +1308,10 @@ Examples (intent → output):
 - "?????" → chore/wip
 - "I'm not sure what this should do" → chore/wip
 - "Refactor the auth middleware to support OIDC" → refactor/auth-middleware-oidc
+- "Bug in https://github.com/foo/bar/issues/4321 — billing webhook 500s" → fix/billing-webhook-500s
+- "fix PLA-364 follow-up: clinic worker SA binding" → fix/clinic-worker-sa-binding
+- "https://sentry.io/organizations/x/issues/12345/" → chore/wip
+- "https://sentry.io/.../issues/12345/  Redis EOFError on QuotesController" → fix/redis-eoferror-quotes
 
 Now read the intent on the next message and emit ONE line per the contract above.`
 
@@ -1364,12 +1382,20 @@ Output contract — REQUIRED:
 - NO commentary, NO clarifying questions, NO acknowledgments, NO "here is", NO "I would suggest".
 - If the intent is ambiguous, vague, or you would otherwise want to ask a follow-up, DO NOT ASK. Instead pick the best-effort name from whatever signal exists.
 
-Fallback: if intent is empty / unparseable / all-symbolic, emit "auto/wip".
+Opaque-input rule — REQUIRED:
+- The INTENT is the ONLY information available. Treat URLs, ticket
+  IDs, and any other "lookup-able" tokens as LITERAL OPAQUE STRINGS.
+  Do not attempt to resolve or interpret beyond the literal words.
+- You have no tools, no network, no file access. Guess from the text
+  alone. If guessing is impossible, fall back to "auto/wip".
+
+Fallback: if intent is empty / unparseable / all-symbolic / pure URL with no readable context, emit "auto/wip".
 
 Examples (intent → output):
 - "audit observability stack across all repos" → auto/audit-observability-stack
 - "?????" → auto/wip
 - "I'm not sure what this should do" → auto/wip
+- "https://github.com/foo/bar/issues/123 multi-repo billing rewire" → auto/multi-repo-billing-rewire
 
 Now read the intent on the next message and emit ONE line per the contract above.`
 

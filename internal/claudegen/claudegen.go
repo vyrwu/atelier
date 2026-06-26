@@ -64,10 +64,20 @@ func (g *Generator) RunWithSystemPrompt(systemPrompt, prompt string) (string, er
 	// auth checks, etc.), turning what should be a sub-2s name-generation
 	// call into a 30+ second cold-start that consistently times out.
 	// Bash's tmux_workspace_build uses the same flags.
+	//
+	// `--tools ""` disables every tool in the built-in set. claudegen's
+	// purpose is "ask Claude for a short structured string" — names and
+	// recaps. None of those need WebFetch / Bash / Read / Edit / etc.
+	// Without this, a prompt containing a URL would invite Claude to
+	// WebFetch it, which (a) leaks data, (b) slows generation by tens of
+	// seconds, (c) sometimes causes Claude to bounce with a clarifying
+	// question instead of the requested name. Hard-disable across the
+	// board.
 	args := []string{
 		"-p", "--output-format", "text",
 		"--model", model,
 		"--setting-sources", "project,local",
+		"--tools", "",
 	}
 	if systemPrompt != "" {
 		args = append(args, "--system-prompt", systemPrompt)
