@@ -756,11 +756,11 @@ func recoverPickerRows() ([]string, error) {
 		var badge string
 		switch {
 		case !w.softClosedAt.IsZero():
-			badge = fmt.Sprintf("\033[33m⏎ closed %s\033[0m  ", relativeAge(now.Sub(w.softClosedAt)))
+			badge = fmt.Sprintf("  \033[33m⏎ closed %s\033[0m", relativeAge(now.Sub(w.softClosedAt)))
 		case live[w.repo+"\t"+w.branch]:
-			badge = "\033[32m● live\033[0m  "
+			badge = "  \033[32m● live\033[0m"
 		}
-		display := fmt.Sprintf("%s\033[2m%s\033[0m  \033[1m%s\033[0m", badge, w.repo, w.branch)
+		display := fmt.Sprintf("\033[2m%s\033[0m  \033[1m%s\033[0m%s", w.repo, w.branch, badge)
 		out = append(out, fmt.Sprintf("%s\t%s\t%s", w.repo, w.branch, display))
 	}
 	return out, nil
