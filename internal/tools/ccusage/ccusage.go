@@ -20,9 +20,15 @@ import (
 // Why `npx ccusage`: ccusage is published as an npm package and many
 // users run it via npx rather than installing globally. npx caches
 // after the first run, so subsequent opens are fast.
+//
+// The `printf … Loading …` prefix gives the user immediate visual
+// feedback while npx + node + Claude-data scan run their ~5s cold
+// start. Without it, the popup looks blank — easy to mistake for
+// "broken" and dismiss.
 var Spec = &popup.SessionGlobal{
-	Tool:        "ccusage",
-	DefaultCmd:  "npx ccusage daily | less -R",
+	Tool: "ccusage",
+	DefaultCmd: `printf "Loading Claude Code usage (scanning ~/.claude/projects, ~5s)…\n\n"; ` +
+		`npx ccusage daily | less -R`,
 	Description: "Claude API token usage snapshot (singleton)",
 }
 

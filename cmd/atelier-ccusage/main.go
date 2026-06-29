@@ -20,7 +20,7 @@ var Manifest = &manifest.Manifest{
 		Invoke: "open",
 	},
 	UI: &manifest.UI{
-		Icon:        "銭",
+		Icon:        "金",
 		AccentColor: "220",
 		PopupTitle:  "Claude Usage",
 	},
