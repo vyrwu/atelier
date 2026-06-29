@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -497,6 +498,11 @@ func DeleteRowCommand() *cobra.Command {
 				moveOuterAway(h, session, window, defaultBranch)
 				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
 				_ = statestore.RemoveWindow(session, window)
+				// Stamp a soft-close marker so M-r ranks this
+				// workspace at the top of the recover list — the
+				// "I just M-x'd by accident, give it back" path
+				// shouldn't require alphabetical scanning.
+				touchSoftClosedMarker(filepath.Join(workspaceWorktreeRoot(), session, window))
 				return hostpopup.CleanupOrphanedPopups(h)
 			}
 			// Default branch with no other windows: kill whole session.
@@ -554,6 +560,51 @@ func moveOuterAway(h *tmuxhost.Client, session, victimWindow, defaultBranch stri
 		return
 	}
 	debuglog.Logf("_delete-row: hopped outer=%q off victim=%s/%s to sibling=%s", outer, session, victimWindow, target)
+}
+
+// softClosedMarker is the basename of the per-worktree file that
+// records the most recent M-s M-x soft-close timestamp. Its mtime is
+// the primary sort key in the M-r picker — recently-soft-closed
+// worktrees rank above untouched ones.
+const softClosedMarker = ".atelier-soft-closed"
+
+// touchSoftClosedMarker writes/updates the soft-close marker file at
+// the top of `wtPath`. The file's content is the epoch (for human
+// inspection); its mtime is what M-r's sort actually reads. Best-
+// effort: errors only log — the marker is a UX hint, not a load-
+// bearing invariant.
+func touchSoftClosedMarker(wtPath string) {
+	if wtPath == "" {
+		return
+	}
+	if _, err := os.Stat(wtPath); err != nil {
+		return // worktree no longer on disk (e.g. the rare case it was already wiped externally)
+	}
+	path := filepath.Join(wtPath, softClosedMarker)
+	now := time.Now()
+	if err := os.WriteFile(path, []byte(strconv.FormatInt(now.Unix(), 10)+"\n"), 0o644); err != nil {
+		debuglog.LogErr(fmt.Sprintf("touchSoftClosedMarker: write %s", path), err)
+		return
+	}
+	// Explicit Chtimes covers the case where the file already existed
+	// (re-soft-close) and write didn't bump mtime to "now" cleanly.
+	_ = os.Chtimes(path, now, now)
+}
+
+// readSoftClosedMarker returns the marker file's mtime when present,
+// zero time otherwise. Used by the M-r picker to rank entries.
+func readSoftClosedMarker(wtPath string) time.Time {
+	info, err := os.Stat(filepath.Join(wtPath, softClosedMarker))
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
+// clearSoftClosedMarker removes the marker so the entry stops
+// ranking at the top of M-r once the user has actually recovered it.
+func clearSoftClosedMarker(wtPath string) {
+	_ = os.Remove(filepath.Join(wtPath, softClosedMarker))
 }
 
 // SessionListCommand emits the workspace selector lines (for fzf --reload).
@@ -683,18 +734,43 @@ func RecoverCommand() *cobra.Command {
 
 // recoverPickerRows shapes the on-disk worktree list into tab-separated
 // rows the fzf picker consumes. Format: `<repo>\t<branch>\t<display>`.
-// Display column is human-readable: dim repo + bold branch.
+// Display column is human-readable: dim repo + bold branch, with a
+// "soft-closed Nm ago" prefix for entries that were just M-x'd in the
+// sessions picker — those rank at the top of the list (see the sort
+// in listWorktrees) so the user can hit Enter to undo the close.
 func recoverPickerRows() ([]string, error) {
 	wts, err := listWorktrees(workspaceWorktreeRoot())
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	out := make([]string, 0, len(wts))
 	for _, w := range wts {
-		display := fmt.Sprintf("\033[2m%s\033[0m  \033[1m%s\033[0m", w.repo, w.branch)
+		prefix := ""
+		if !w.softClosedAt.IsZero() {
+			// Yellow ⏎ badge + relative age — visible signal that this
+			// entry was soft-closed and can be brought back instantly.
+			prefix = fmt.Sprintf("\033[33m⏎ closed %s\033[0m  ", relativeAge(now.Sub(w.softClosedAt)))
+		}
+		display := fmt.Sprintf("%s\033[2m%s\033[0m  \033[1m%s\033[0m", prefix, w.repo, w.branch)
 		out = append(out, fmt.Sprintf("%s\t%s\t%s", w.repo, w.branch, display))
 	}
 	return out, nil
+}
+
+// relativeAge formats a duration as a compact "Nm" / "Nh" / "Nd" tag
+// for the M-r picker's soft-close badge.
+func relativeAge(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours())/24)
 }
 
 // RecoverRowsCommand emits text rows for the M-r picker's fzf --reload bind
@@ -793,6 +869,10 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 	repoPath := filepath.Join(workspaceCodeRoot(), repo)
 	wtPath := filepath.Join(workspaceWorktreeRoot(), repo, branch)
 	defaultBranch := DefaultBranch(repoPath)
+
+	// Recovering this worktree → drop the "soft-closed" marker so it
+	// stops ranking at the top of M-r on subsequent opens.
+	clearSoftClosedMarker(wtPath)
 
 	created, err := workspace.EnsureSession(h, repo, repoPath, defaultBranch)
 	if err != nil {
@@ -1583,6 +1663,12 @@ func splitWorktreePath(p, root string) (repoSlug, branch string) {
 
 type wt struct {
 	repo, branch, path string
+	// softClosedAt is the mtime of <path>/.atelier-soft-closed when
+	// present (set by M-s M-x soft-close). Zero time means the
+	// worktree is "untouched" — never soft-closed (or already
+	// recovered via M-r). The M-r picker uses this as the primary
+	// sort key so recently-closed worktrees rank at the top.
+	softClosedAt time.Time
 }
 
 // listWorktrees walks the worktree root and returns every dir that has
@@ -1637,7 +1723,12 @@ func listWorktrees(root string) ([]wt, error) {
 		default:
 			return filepath.SkipDir
 		}
-		out = append(out, wt{repo: repo, branch: branch, path: path})
+		out = append(out, wt{
+			repo:         repo,
+			branch:       branch,
+			path:         path,
+			softClosedAt: readSoftClosedMarker(path),
+		})
 		// Don't descend further: nested .git inside a worktree (e.g.
 		// vendored submodules) shouldn't show up as separate entries.
 		return filepath.SkipDir
@@ -1646,6 +1737,17 @@ func listWorktrees(root string) ([]wt, error) {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool {
+		// Recently soft-closed entries float to the top — newest first.
+		// This makes "I just M-x'd that, give it back" a single key
+		// press (Enter) in M-r without scanning the whole list.
+		iSC, jSC := !out[i].softClosedAt.IsZero(), !out[j].softClosedAt.IsZero()
+		if iSC != jSC {
+			return iSC
+		}
+		if iSC && jSC {
+			return out[i].softClosedAt.After(out[j].softClosedAt)
+		}
+		// Both untouched → alphabetical by repo + branch.
 		if out[i].repo != out[j].repo {
 			return out[i].repo < out[j].repo
 		}
