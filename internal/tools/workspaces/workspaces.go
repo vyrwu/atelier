@@ -734,28 +734,56 @@ func RecoverCommand() *cobra.Command {
 
 // recoverPickerRows shapes the on-disk worktree list into tab-separated
 // rows the fzf picker consumes. Format: `<repo>\t<branch>\t<display>`.
-// Display column is human-readable: dim repo + bold branch, with a
-// "soft-closed Nm ago" prefix for entries that were just M-x'd in the
-// sessions picker — those rank at the top of the list (see the sort
-// in listWorktrees) so the user can hit Enter to undo the close.
+// Display column is human-readable: dim repo + bold branch, plus a
+// soft-close / live-workspace badge.
+//
+// Badges:
+//   - yellow `⏎ closed Nm ago` — worktree was soft-closed in M-s
+//     recently. Ranks at the top (see listWorktrees sort) so it's
+//     one Enter-press away from recovery.
+//   - green `● live` — a tmux window for this worktree is already
+//     open in the M-s picker. Visual cue so the user doesn't try to
+//     "recover" something that's already active.
 func recoverPickerRows() ([]string, error) {
 	wts, err := listWorktrees(workspaceWorktreeRoot())
 	if err != nil {
 		return nil, err
 	}
+	live := liveWorktreeWindows(tmuxhost.New(""))
 	now := time.Now()
 	out := make([]string, 0, len(wts))
 	for _, w := range wts {
-		prefix := ""
-		if !w.softClosedAt.IsZero() {
-			// Yellow ⏎ badge + relative age — visible signal that this
-			// entry was soft-closed and can be brought back instantly.
-			prefix = fmt.Sprintf("\033[33m⏎ closed %s\033[0m  ", relativeAge(now.Sub(w.softClosedAt)))
+		var badge string
+		switch {
+		case !w.softClosedAt.IsZero():
+			badge = fmt.Sprintf("\033[33m⏎ closed %s\033[0m  ", relativeAge(now.Sub(w.softClosedAt)))
+		case live[w.repo+"\t"+w.branch]:
+			badge = "\033[32m● live\033[0m  "
 		}
-		display := fmt.Sprintf("%s\033[2m%s\033[0m  \033[1m%s\033[0m", prefix, w.repo, w.branch)
+		display := fmt.Sprintf("%s\033[2m%s\033[0m  \033[1m%s\033[0m", badge, w.repo, w.branch)
 		out = append(out, fmt.Sprintf("%s\t%s\t%s", w.repo, w.branch, display))
 	}
 	return out, nil
+}
+
+// liveWorktreeWindows returns the set of (session, window) pairs
+// currently open in tmux, formatted as keys "<session>\t<window>" so
+// recoverPickerRows can probe membership in O(1). Best-effort: any
+// tmux error returns an empty map — the badge is a UX hint, not a
+// correctness invariant.
+func liveWorktreeWindows(h *tmuxhost.Client) map[string]bool {
+	out, err := h.Run("list-windows", "-a", "-F", "#{session_name}\t#{window_name}")
+	if err != nil {
+		return map[string]bool{}
+	}
+	live := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		live[line] = true
+	}
+	return live
 }
 
 // relativeAge formats a duration as a compact "Nm" / "Nh" / "Nd" tag
