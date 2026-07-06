@@ -273,6 +273,14 @@ func (s *SessionGlobal) SessionName() string {
 }
 
 // Ensure creates the backing session if absent. Idempotent. Does not attach.
+//
+// On fresh creation, applies the canonical popup style (status off,
+// popup key-table, prefix off, aggressive-resize on) to the new
+// session — without this, SessionGlobal popups render the inner tmux
+// statusline at the bottom (visible "extra tmux statusline" bug).
+// k8s/pg used to call ApplyStyle themselves after their custom
+// new-session paths; new SessionGlobal tools that go through Ensure
+// get it for free here.
 func (s *SessionGlobal) Ensure(h Client) error {
 	name := s.SessionName()
 	has, err := h.HasSession(name)
@@ -286,7 +294,10 @@ func (s *SessionGlobal) Ensure(h Client) error {
 	if cmd == "" {
 		cmd = "$SHELL"
 	}
-	return h.NewSessionWithCommand(name, cmd)
+	if err := h.NewSessionWithCommand(name, cmd); err != nil {
+		return err
+	}
+	return ApplyStyle(h, name)
 }
 
 // EnsureAndAttach ensures the backing session, then exec()s into tmux attach.
