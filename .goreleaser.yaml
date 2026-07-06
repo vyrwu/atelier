@@ -82,6 +82,30 @@ builds:
     goarch: [amd64, arm64]
     ldflags: [-s, -w]
 
+  - id: atelier-ghdash
+    main: ./cmd/atelier-ghdash
+    binary: atelier-ghdash
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-ghenhance
+    main: ./cmd/atelier-ghenhance
+    binary: atelier-ghenhance
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+  - id: atelier-ccusage
+    main: ./cmd/atelier-ccusage
+    binary: atelier-ccusage
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
 archives:
   # One archive per binary so each Homebrew formula downloads only the
   # binary it installs (vs. a bundle archive where every formula would
@@ -166,6 +190,33 @@ archives:
     ids: [atelier-toolselector]
     name_template: >-
       atelier-toolselector_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-ghdash
+    ids: [atelier-ghdash]
+    name_template: >-
+      atelier-ghdash_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-ghenhance
+    ids: [atelier-ghenhance]
+    name_template: >-
+      atelier-ghenhance_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-ccusage
+    ids: [atelier-ccusage]
+    name_template: >-
+      atelier-ccusage_{{ .Version }}_
       {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
       {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
     formats: [tar.gz]
@@ -326,6 +377,63 @@ brews:
         version: '{{ .Version }}'
     install: |
       bin.install "atelier-toolselector"
+
+  # gh-dash isn't in homebrew-core (it's a gh extension). We depend on
+  # `gh` and expect the user to `gh extension install dlvhdr/gh-dash`
+  # separately — atelier doctor flags the missing binary.
+  - name: atelier-ghdash
+    ids: [atelier-ghdash]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — gh-dash PR dashboard launcher
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+      - name: gh
+    install: |
+      bin.install "atelier-ghdash"
+
+  - name: atelier-ghenhance
+    ids: [atelier-ghenhance]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — gh enhance-repo launcher
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+      - name: gh
+    install: |
+      bin.install "atelier-ghenhance"
+
+  # ccusage is an npm package invoked via `npx ccusage`. Depending on
+  # `node` gets npx onto PATH; ccusage itself lazy-installs on first
+  # run via npx's cache.
+  - name: atelier-ccusage
+    ids: [atelier-ccusage]
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Formula
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — Claude API usage snapshot popup
+    license: MIT
+    dependencies:
+      - name: atelier
+        version: '{{ .Version }}'
+      - name: node
+    install: |
+      bin.install "atelier-ccusage"
 
 checksum:
   name_template: 'atelier_{{ .Version }}_checksums.txt'
