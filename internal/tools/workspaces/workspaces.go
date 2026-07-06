@@ -1133,8 +1133,13 @@ func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
 			if err := runGit(repoPath, "fetch", "origin", defaultBranch); err != nil {
 				return err
 			}
-			sp.SetStatus("Building worktree...")
-			if err := runGit(repoPath, "worktree", "add", wtPath, "-b", name, "origin/"+defaultBranch); err != nil {
+			base, tracking := resolveWorktreeBase(repoPath, name, defaultBranch)
+			if tracking {
+				sp.SetStatus(fmt.Sprintf("Tracking origin/%s...", name))
+			} else {
+				sp.SetStatus("Building worktree...")
+			}
+			if err := runGit(repoPath, "worktree", "add", wtPath, "-b", name, base); err != nil {
 				return err
 			}
 			sp.SetStatus("Stamping tmux options...")
@@ -1465,8 +1470,13 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 	if err := runGit(repoPath, "fetch", "origin", defaultBranch); err != nil {
 		return name, "", fmt.Errorf("fetch: %w", err)
 	}
-	sp.SetStatus("Building worktree...")
-	if err := runGit(repoPath, "worktree", "add", wtPath, "-b", name, "origin/"+defaultBranch); err != nil {
+	base, tracking := resolveWorktreeBase(repoPath, name, defaultBranch)
+	if tracking {
+		sp.SetStatus(fmt.Sprintf("Tracking origin/%s...", name))
+	} else {
+		sp.SetStatus("Building worktree...")
+	}
+	if err := runGit(repoPath, "worktree", "add", wtPath, "-b", name, base); err != nil {
 		return name, "", fmt.Errorf("worktree add: %w", err)
 	}
 	return name, wtPath, nil
@@ -1811,6 +1821,34 @@ func runGitQuiet(dir string, args ...string) string {
 
 func branchExists(repoPath, branch string) bool {
 	return runGitQuiet(repoPath, "show-ref", "--verify", "refs/heads/"+branch) != ""
+}
+
+// remoteBranchExists checks whether origin has a branch with this name.
+// Authoritative — queries the remote (not the local refs/remotes/ cache),
+// so an out-of-date local fetch doesn't hide a branch that origin
+// actually has. Empty output → branch absent OR network/auth failure;
+// callers fall back to the default-branch path in either case.
+func remoteBranchExists(repoPath, branch string) bool {
+	return runGitQuiet(repoPath, "ls-remote", "--heads", "origin", branch) != ""
+}
+
+// resolveWorktreeBase chooses the git ref to base a new worktree on.
+// If origin has a branch with the same name as the worktree we're about
+// to create, fetch it and base the new tracking branch on origin/<name>
+// — otherwise the worktree would be empty (a fresh branch off main) and
+// the user's existing remote work would be invisible. Falls back to
+// origin/<defaultBranch> when the remote check fails or returns nothing.
+//
+// Returns the base ref string ("origin/<name>" or "origin/<defaultBranch>")
+// and a bool indicating whether the remote-tracking path was taken.
+func resolveWorktreeBase(repoPath, name, defaultBranch string) (string, bool) {
+	if !remoteBranchExists(repoPath, name) {
+		return "origin/" + defaultBranch, false
+	}
+	if err := runGit(repoPath, "fetch", "origin", name); err != nil {
+		return "origin/" + defaultBranch, false
+	}
+	return "origin/" + name, true
 }
 
 func worktreePathForBranch(repoPath, branch string) string {
