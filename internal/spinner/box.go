@@ -99,13 +99,30 @@ func (s *BoxSpinner) Run(fn func() error) error {
 	if boxWidth < 32 {
 		boxWidth = 32
 	}
+	// Initialise stage tracking BEFORE the fallback branch — both the
+	// box path and the inline fallback read s.status / s.stageStart
+	// via currentLabel(), so an uninitialised stageStart (zero-time)
+	// would surface as a nonsense elapsed suffix on the very first
+	// tick of the fallback path.
+	s.mu.Lock()
+	if s.status == "" {
+		s.status = s.Message
+	}
+	s.stageStart = time.Now()
+	s.mu.Unlock()
+
 	if !termOK || cols < boxWidth+4 || rows < 5 {
-		// Fallback: inline carriage-return spinner.
+		// Fallback: inline carriage-return spinner. Passes currentLabel
+		// as the live status source so stage updates via SetStatus stay
+		// visible; italic-purple LabelStyle marks this as a transient
+		// step (matches the tight spinner popup's border color 141).
 		return (&Spinner{
-			Message:  s.Message,
-			Writer:   s.Writer,
-			Frames:   s.Frames,
-			Interval: s.Interval,
+			Message:    s.Message,
+			Writer:     s.Writer,
+			Frames:     s.Frames,
+			Interval:   s.Interval,
+			Status:     s.currentLabel,
+			LabelStyle: "3;38;5;141",
 		}).Run(fn)
 	}
 	if boxWidth > cols-4 {
@@ -123,14 +140,6 @@ func (s *BoxSpinner) Run(fn func() error) error {
 	}()
 
 	drawBox(s.Writer, startRow, startCol, boxWidth, boxHeight)
-
-	// Initialise stage tracking — the initial Message counts as stage 0.
-	s.mu.Lock()
-	if s.status == "" {
-		s.status = s.Message
-	}
-	s.stageStart = time.Now()
-	s.mu.Unlock()
 
 	done := make(chan struct{})
 	var (

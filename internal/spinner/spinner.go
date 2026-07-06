@@ -22,6 +22,18 @@ type Spinner struct {
 	Writer   io.Writer
 	Frames   []string
 	Interval time.Duration
+
+	// Status, when set, is called on every tick and its return value is
+	// rendered instead of the static Message — used by BoxSpinner's
+	// fallback path so stage updates via SetStatus stay visible even
+	// when the popup is too small for the boxed layout.
+	Status func() string
+
+	// LabelStyle, when non-empty, is an ANSI SGR sequence prepended
+	// before the label (e.g. italic + purple) and closed with reset.
+	// Empty → plain text. Kept opt-in so plain-terminal callers stay
+	// unaffected.
+	LabelStyle string
 }
 
 // New returns a Spinner that writes to stderr by default. Stderr is chosen
@@ -62,13 +74,25 @@ func (s *Spinner) Run(fn func() error) error {
 	ticker := time.NewTicker(s.Interval)
 	defer ticker.Stop()
 	i := 0
+	render := func(frame string) {
+		label := s.Message
+		if s.Status != nil {
+			label = s.Status()
+		}
+		if s.LabelStyle != "" {
+			fmt.Fprintf(s.Writer, "\r\033[K%s \033[%sm%s\033[0m",
+				frame, s.LabelStyle, label)
+		} else {
+			fmt.Fprintf(s.Writer, "\r\033[K%s %s", frame, label)
+		}
+	}
 	for {
 		select {
 		case <-done:
 			fmt.Fprint(s.Writer, "\r\033[K")
 			return fnErr
 		case <-ticker.C:
-			fmt.Fprintf(s.Writer, "\r%s %s", s.Frames[i%len(s.Frames)], s.Message)
+			render(s.Frames[i%len(s.Frames)])
 			i++
 		}
 	}

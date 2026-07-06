@@ -1193,146 +1193,212 @@ func PromptCommand() *cobra.Command {
 
 func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) error {
 	session := repo
-	ensureSession := func() (created bool, err error) {
-		return workspace.EnsureSession(tmuxhost.New(""), session, repoPath, defaultBranch)
-	}
-
-	query := initialPrompt
-	errMsg := ""
-	prompt := initialPrompt
-	for {
-		if prompt == "" {
-			header := fmt.Sprintf("task description → auto branch · empty → open %s", defaultBranch)
-			if errMsg != "" {
-				header = errMsg
-			}
-			args := fzfstyle.Args("製? ", "Workspace in "+repo, "green",
-				fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,header:red,footer:103"),
-				fzfstyle.WithNoClear(),
-				fzfstyle.WithPrintQuery(),
-				fzfstyle.WithExpect("enter"),
-				fzfstyle.WithBind("alt-n", "abort"),
-				fzfstyle.WithBind("alt-a", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_name"),
-					repo, repoPath, defaultBranch)),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
-				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
-				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-a · manual name  |  M-s · selector  |  M-r · history  |  M-u · clone url"),
-				fzfstyle.WithQuery(query),
-			)
-			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
-			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
-					return err
-				}
-				return err
-			}
-			// fzf become() short-circuit: see TestCreator_PromptFlow_*
-			// and the inline comment in runWorkspaceName.
-			if res.Key == "" && res.Query == "" && res.Selection == "" {
-				debuglog.Logf("runWorkspacePrompt: fzf returned empty (likely become()) — exit silently")
-				return nil
-			}
-			prompt = strings.TrimSpace(res.Query)
-			if prompt == "" {
-				// Empty → open default branch (canonical primitive).
-				return workspace.OpenDefaultBranch(
-					tmuxhost.New(""), session, repoPath, defaultBranch,
-					ensureDefaultBranchWindow)
-			}
-		}
-
-		var name, wtPath, newWid string
-		h := tmuxhost.New("")
-		sp := spinner.NewBox("Building workspace...")
-		err := sp.Run(func() error {
-			n, w, e := buildClaudeNamedWorkspace(sp, prompt, repo, repoPath, defaultBranch)
-			name, wtPath = n, w
-			if e != nil {
-				return e
-			}
-			// Stamping stage: ensureSession + new-window + set-option.
-			// Kept inside the spinner so the FR-2.1 four-stage sequence
-			// renders cleanly. Visible client moves (select-window /
-			// switch-client) happen AFTER the spinner closes so the
-			// user isn't shown a transient view.
-			sp.SetStatus("Stamping tmux options...")
-			created, err := ensureSession()
-			if err != nil {
-				return err
-			}
-			spec := workspace.WorktreeWindowSpec{
-				Session:    session,
-				WtPath:     wtPath,
-				WindowName: name,
-				Kind:       "worktree",
-				// TODO(plugins-refactor): the prompt + workspace-kind
-				// metadata writes are AI-plugin concerns — workspaces is
-				// hardcoding the AI namespace. When task #75 lands, the
-				// AI plugin should contribute these via a "before-create"
-				// hook instead of workspaces knowing about ai.* keys.
-				Metadata: map[string]string{
-					"ai.prompt":         prompt,
-					"ai.workspace_kind": "worktree",
-				},
-			}
-			if created {
-				spec.KillDefaultBranch = defaultBranch
-			}
-			newWid, err = workspace.CreateWorktreeWindow(h, spec)
-			return err
-		})
+	prompt := strings.TrimSpace(initialPrompt)
+	// Skip fzf when a caller (Ctrl-A from _name, tests supplying the
+	// prompt arg) already provided the prompt — the picker only exists
+	// to elicit the task description from the user.
+	if prompt == "" {
+		header := fmt.Sprintf("task description → auto branch · empty → open %s", defaultBranch)
+		args := fzfstyle.Args("製? ", "Workspace in "+repo, "green",
+			fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,header:red,footer:103"),
+			fzfstyle.WithNoClear(),
+			fzfstyle.WithPrintQuery(),
+			fzfstyle.WithExpect("enter"),
+			fzfstyle.WithBind("alt-n", "abort"),
+			fzfstyle.WithBind("alt-a", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_name"),
+				repo, repoPath, defaultBranch)),
+			fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+			fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
+			fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
+			fzfstyle.WithHeader(header),
+			fzfstyle.WithFooter("M-a · manual name  |  M-s · selector  |  M-r · history  |  M-u · clone url"),
+			fzfstyle.WithQuery(initialPrompt),
+		)
+		res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
 		if err != nil {
-			errMsg = fmt.Sprintf("✗ build failed: %v — refine prompt", err)
-			// Surface via tmux display-message too so the user sees it
-			// even if the popup tears down before the re-prompt header
-			// renders fully.
-			_, _ = tmuxhost.New("").Run("display-message", errMsg)
-			query = prompt
-			prompt = ""
-			continue
-		}
-
-		// Queue the Claude popup BEFORE LandOuter. LandOuter's
-		// detachStalePopups closes any `_atelier_*` popup scoped to a
-		// DIFFERENT (sid,wid) than the target — and `_prompt` is
-		// itself often running inside such a popup (e.g., user M-;'d
-		// from a Claude popup on the previous workspace). The
-		// deferred detach fires asynchronously and SIGHUPs our pty
-		// before we can queue the Claude popup if we wait. By queuing
-		// first, the `sleep 0.15 && display-popup -c <outerClient>`
-		// command is already in tmux's run-shell queue; it fires on
-		// the outer client regardless of whether our pty survives.
-		newSid, _ := h.DisplayMessageAt(newWid, "#{session_id}")
-		sidNum := strings.TrimPrefix(strings.TrimSpace(newSid), "$")
-		widNum := strings.TrimPrefix(newWid, "@")
-		outerClient, _ := h.ShowGlobalOption("@atelier_outer_client")
-		clientArg := ""
-		if outerClient != "" {
-			clientArg = fmt.Sprintf(" -c '%s'", outerClient)
-		}
-		// TMUX_PARENT_PANE_PWD pins the popup's cwd to the NEW worktree
-		// path. Without it, popup.ResolveParentContext falls back to
-		// reading @atelier_outer_pane's pane_current_path — and that
-		// global was stamped by M-; on the user's PREVIOUS workspace
-		// pane, so Claude would launch in the wrong cwd while still
-		// being bound to the new window's popup-session. Symptom: user
-		// selects workspace B, Claude opens in workspace A's worktree.
-		popupCmd := fmt.Sprintf(
-			`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'`,
-			clientArg, sidNum, widNum, wtPath, dispatch.ToolCmd("claude", "open"))
-		_, _ = h.Run("run-shell", "-b", popupCmd)
-
-		if err := workspace.LandOuter(h, "="+session, newWid); err != nil {
+			if errors.Is(err, fzf.ErrCancelled) {
+				return err
+			}
 			return err
 		}
-		// Log post-state so we can see where the client actually landed.
-		if v, err := h.DisplayMessage("#{client_name}|#{client_session}|#{window_id}|#{window_name}"); err == nil {
-			debuglog.Logf("runWorkspacePrompt: post-switch state=%q", v)
+		// fzf become() short-circuit: see TestCreator_PromptFlow_*
+		// and the inline comment in runWorkspaceName.
+		if res.Key == "" && res.Query == "" && res.Selection == "" {
+			debuglog.Logf("runWorkspacePrompt: fzf returned empty (likely become()) — exit silently")
+			return nil
 		}
-		return nil
+		prompt = strings.TrimSpace(res.Query)
+		if prompt == "" {
+			// Empty → open default branch (canonical primitive).
+			return workspace.OpenDefaultBranch(
+				tmuxhost.New(""), session, repoPath, defaultBranch,
+				ensureDefaultBranchWindow)
+		}
 	}
+
+	// Test hook: e2e tests need `_prompt → build → state` to be
+	// synchronous so their assertions don't race the deferred
+	// display-popup. Set ATELIER_SYNC_BUILD=1 (only meaningful in
+	// tests) to bypass the deferred spinner popup and run the build
+	// inline in this pty.
+	if os.Getenv("ATELIER_SYNC_BUILD") == "1" {
+		return runWorkspaceBuild(prompt, repo, repoPath, defaultBranch)
+	}
+
+	// Defer the build into a spinner-sized popup so the M-n picker
+	// popup fully closes first — otherwise the picker's rectangle sits
+	// behind the spinner as an empty "carved shadow" on the outer
+	// terminal (the popup pty stays open until this process exits, and
+	// the spinner draws inside that oversized picker geometry). Writing
+	// the prompt to a tmp file avoids shell-escaping any special chars
+	// the user typed; other args are shell-safe repo/path/branch names.
+	specPath, err := writeBuildSpec(prompt)
+	if err != nil {
+		return err
+	}
+	invoke := fmt.Sprintf("%s --spec-file=%s --repo=%s --repo-path=%s --default-branch=%s",
+		dispatch.ToolCmd("workspaces", "_build"),
+		specPath, repo, repoPath, defaultBranch)
+	return hostpopup.OpenOnOuter(
+		tmuxhost.New(""),
+		hostpopup.SpinnerStyleArgs("Building workspace"),
+		invoke,
+	)
+}
+
+// writeBuildSpec persists the prompt to a temp file so `_build` can read
+// it without shell-escaping concerns. Caller is `_build`, which removes
+// the file after reading.
+func writeBuildSpec(prompt string) (string, error) {
+	f, err := os.CreateTemp("", "atelier-build-*.txt")
+	if err != nil {
+		return "", fmt.Errorf("write build spec: %w", err)
+	}
+	if _, err := f.WriteString(prompt); err != nil {
+		_ = f.Close()
+		return "", fmt.Errorf("write build spec: %w", err)
+	}
+	_ = f.Close()
+	return f.Name(), nil
+}
+
+// BuildCommand is the deferred entry point invoked from a spinner-sized
+// popup queued by runWorkspacePrompt. Runs the actual workspace build
+// (fetch → worktree → stamp → LandOuter → queue Claude popup) inside
+// its own popup so the picker's larger popup rectangle isn't visible as
+// empty background around the spinner.
+func BuildCommand() *cobra.Command {
+	var specFile, repo, repoPath, defaultBranch string
+	c := &cobra.Command{
+		Use:    "_build",
+		Short:  "internal: workspace build stage (spawned in spinner popup by _prompt)",
+		Hidden: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			promptBytes, err := os.ReadFile(specFile)
+			if err != nil {
+				return fmt.Errorf("read spec: %w", err)
+			}
+			_ = os.Remove(specFile)
+			return runWorkspaceBuild(string(promptBytes), repo, repoPath, defaultBranch)
+		},
+	}
+	c.Flags().StringVar(&specFile, "spec-file", "", "path to prompt spec file (deleted after read)")
+	c.Flags().StringVar(&repo, "repo", "", "repo (owner/name)")
+	c.Flags().StringVar(&repoPath, "repo-path", "", "absolute path to repo")
+	c.Flags().StringVar(&defaultBranch, "default-branch", "", "repo's default branch")
+	return c
+}
+
+func runWorkspaceBuild(prompt, repo, repoPath, defaultBranch string) error {
+	session := repo
+	h := tmuxhost.New("")
+
+	var name, wtPath, newWid string
+	sp := spinner.NewBox("Building workspace...")
+	err := sp.Run(func() error {
+		n, w, e := buildClaudeNamedWorkspace(sp, prompt, repo, repoPath, defaultBranch)
+		name, wtPath = n, w
+		if e != nil {
+			return e
+		}
+		// Stamping stage: ensureSession + new-window + set-option.
+		// Kept inside the spinner so the FR-2.1 four-stage sequence
+		// renders cleanly. Visible client moves (select-window /
+		// switch-client) happen AFTER the spinner closes so the
+		// user isn't shown a transient view.
+		sp.SetStatus("Stamping tmux options...")
+		created, err := workspace.EnsureSession(h, session, repoPath, defaultBranch)
+		if err != nil {
+			return err
+		}
+		spec := workspace.WorktreeWindowSpec{
+			Session:    session,
+			WtPath:     wtPath,
+			WindowName: name,
+			Kind:       "worktree",
+			// TODO(plugins-refactor): the prompt + workspace-kind
+			// metadata writes are AI-plugin concerns — workspaces is
+			// hardcoding the AI namespace. When task #75 lands, the
+			// AI plugin should contribute these via a "before-create"
+			// hook instead of workspaces knowing about ai.* keys.
+			Metadata: map[string]string{
+				"ai.prompt":         prompt,
+				"ai.workspace_kind": "worktree",
+			},
+		}
+		if created {
+			spec.KillDefaultBranch = defaultBranch
+		}
+		newWid, err = workspace.CreateWorktreeWindow(h, spec)
+		return err
+	})
+	if err != nil {
+		// The picker popup is already gone by the time _build runs,
+		// so no re-prompt loop is possible from here. Surface the
+		// failure via display-message (visible on the outer client's
+		// statusline) and exit; user re-invokes M-n to retry.
+		_, _ = h.Run("display-message", fmt.Sprintf("✗ workspace build failed: %v", err))
+		return err
+	}
+
+	// Queue the Claude popup BEFORE LandOuter. LandOuter's
+	// detachStalePopups closes any `_atelier_*` popup scoped to a
+	// DIFFERENT (sid,wid) than the target — and `_build` is
+	// itself running inside such a popup (the spinner popup queued
+	// by `_prompt`). The deferred detach fires asynchronously and
+	// SIGHUPs our pty before we can queue the Claude popup if we
+	// wait. By queuing first, the `sleep 0.15 && display-popup -c
+	// <outerClient>` command is already in tmux's run-shell queue;
+	// it fires on the outer client regardless of whether our pty
+	// survives.
+	newSid, _ := h.DisplayMessageAt(newWid, "#{session_id}")
+	sidNum := strings.TrimPrefix(strings.TrimSpace(newSid), "$")
+	widNum := strings.TrimPrefix(newWid, "@")
+	outerClient, _ := h.ShowGlobalOption("@atelier_outer_client")
+	clientArg := ""
+	if outerClient != "" {
+		clientArg = fmt.Sprintf(" -c '%s'", outerClient)
+	}
+	// TMUX_PARENT_PANE_PWD pins the popup's cwd to the NEW worktree
+	// path. Without it, popup.ResolveParentContext falls back to
+	// reading @atelier_outer_pane's pane_current_path — and that
+	// global was stamped by M-; on the user's PREVIOUS workspace
+	// pane, so Claude would launch in the wrong cwd while still
+	// being bound to the new window's popup-session. Symptom: user
+	// selects workspace B, Claude opens in workspace A's worktree.
+	popupCmd := fmt.Sprintf(
+		`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'`,
+		clientArg, sidNum, widNum, wtPath, dispatch.ToolCmd("claude", "open"))
+	_, _ = h.Run("run-shell", "-b", popupCmd)
+
+	if err := workspace.LandOuter(h, "="+session, newWid); err != nil {
+		return err
+	}
+	// Log post-state so we can see where the client actually landed.
+	if v, err := h.DisplayMessage("#{client_name}|#{client_session}|#{window_id}|#{window_name}"); err == nil {
+		debuglog.Logf("runWorkspaceBuild: post-switch state=%q", v)
+	}
+	return nil
 }
 
 // NameCommand is the alias used from _prompt's Ctrl-A.

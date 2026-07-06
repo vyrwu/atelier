@@ -89,6 +89,7 @@ func main() {
 		root.AddCommand(workspaces.RecoverDeleteRowCommand())
 		root.AddCommand(workspaces.AutoSessionCommand())
 		root.AddCommand(workspaces.PromptCommand())
+		root.AddCommand(workspaces.BuildCommand())
 		root.AddCommand(workspaces.NameCommand())
 		root.AddCommand(workspaces.BgPullCommand())
 	})

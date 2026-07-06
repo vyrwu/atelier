@@ -197,8 +197,16 @@ func (s *Server) run(binary string, args []string) ([]byte, error) {
 	// or the test socket explicitly.
 	filtered := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "TMUX") ||
-			strings.HasPrefix(kv, "ATELIER_") {
+		if strings.HasPrefix(kv, "TMUX") {
+			continue
+		}
+		if strings.HasPrefix(kv, "ATELIER_") {
+			// Whitelist test-set gates that tests need to reach the
+			// subprocess. Everything else ATELIER_* is stripped to
+			// isolate from developer-machine state.
+			if strings.HasPrefix(kv, "ATELIER_SYNC_BUILD=") {
+				filtered = append(filtered, kv)
+			}
 			continue
 		}
 		filtered = append(filtered, kv)

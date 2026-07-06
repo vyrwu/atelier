@@ -50,6 +50,30 @@ func PopupStyleArgs(b *manifest.Binding) []string {
 	return out
 }
 
+// SpinnerStyleArgs returns display-popup args for a small centered
+// spinner popup — the "Building workspace..." transient step. Sized to
+// just fit a single spinner line (60x3: rounded border + one content
+// row) so the popup border wraps the text tightly rather than floating
+// in empty space. Colour 141 (light purple) + italic label (set by
+// spinner package) signal a transient in-flight state distinct from
+// picker green / tool-full-popup gray.
+//
+// tmux display-popup centers by default when -x/-y are omitted, so no
+// explicit position is passed.
+//
+// Callers should invoke via OpenOnOuter so the current (parent) popup
+// closes BEFORE this one opens — otherwise the parent popup rectangle
+// sits behind the spinner as a "carved shadow" on the outer terminal.
+func SpinnerStyleArgs(title string) []string {
+	return []string{
+		"-b", "rounded",
+		"-S", "fg=colour141",
+		"-T", fmt.Sprintf("#[align=centre,italics,fg=colour141] %s ", title),
+		"-w", "60",
+		"-h", "3",
+	}
+}
+
 // OpenOnOuter opens a display-popup on the user's outer (non-popup) client.
 //
 // If any inner (popup) clients exist, they're detached by name; a one-shot

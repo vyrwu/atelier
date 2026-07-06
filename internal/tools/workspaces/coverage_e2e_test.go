@@ -381,6 +381,12 @@ func TestCreator_PromptFlow_MultipleClients_OuterLandsOnNewWindow(t *testing.T) 
 	}
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
+	// _prompt production flow defers the build into a spinner popup
+	// via hostpopup.OpenOnOuter; tests need it sync so state is final
+	// when RunAtelier returns.
+	srv.SetEnv("ATELIER_SYNC_BUILD", "1")
+	t.Setenv("ATELIER_SYNC_BUILD", "1")
+
 	if _, err := srv.RunAtelier("tools", "workspaces", "_prompt",
 		"vyrwu/demo", repoDir, "main", "describe task"); err != nil {
 		t.Fatalf("_prompt: %v", err)
@@ -441,6 +447,10 @@ func TestCreator_PromptFlow_SlashName_SelectsCorrectWindow(t *testing.T) {
 	// Prepend fakeBin to PATH so atelier's claudegen invocations hit
 	// the stub before any real claude binary.
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	// See sibling test: sync-build gate keeps assertions deterministic.
+	srv.SetEnv("ATELIER_SYNC_BUILD", "1")
+	t.Setenv("ATELIER_SYNC_BUILD", "1")
 
 	if _, err := srv.RunAtelier("tools", "workspaces", "_prompt",
 		"vyrwu/demo", repoDir, "main", "describe the task"); err != nil {
