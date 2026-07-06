@@ -70,10 +70,21 @@ func SelectCommand() *cobra.Command {
 				byKind[e.Kind] = e
 			}
 
+			// alt-n / alt-s / alt-r: swap to sibling workspace pickers
+			// without leaving the popup. fzf's `become(...)` exec()s the
+			// command in place of fzf, so the popup-session pty survives
+			// and the new picker takes over. Same pattern as
+			// dispatchExecInPlace below — picker → picker is exec-in-place.
+			// Tmux's popup-table M-n binding doesn't reach inside fzf
+			// because display-popup -E hands raw stdin to fzf; fzf
+			// processes every key against its own --bind table first.
 			args := fzfstyle.Args("⌘ ", "Select Tool", "172",
 				fzfstyle.WithDelimiter("\t"),
 				fzfstyle.WithNth("1"),
 				fzfstyle.WithBind("alt-;", "abort"),
+				fzfstyle.WithBind("alt-n", "become(atelier tools workspaces pick)"),
+				fzfstyle.WithBind("alt-s", "become(atelier tools workspaces sessions)"),
+				fzfstyle.WithBind("alt-r", "become(atelier tools workspaces recover)"),
 			)
 			picked, err := fzf.Pick(lines, args...)
 			if err != nil {
