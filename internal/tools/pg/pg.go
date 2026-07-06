@@ -311,7 +311,18 @@ func pickEndpoint() (*Context, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	entry, ok := lookup[picked]
+	// fzf with --ansi strips escape codes from the returned line, so the
+	// raw `picked` no longer matches the ANSI-colored map key. Key the
+	// lookup by the trailing tab-separated <name>\t<role> fields, which
+	// flattenEndpoints emits specifically for invariant-under-ANSI
+	// matching. See toolselector.SelectCommand for the same pattern.
+	key := picked
+	if i := strings.LastIndexByte(picked, '\t'); i >= 0 {
+		if j := strings.LastIndexByte(picked[:i], '\t'); j >= 0 {
+			key = picked[j+1:]
+		}
+	}
+	entry, ok := lookup[key]
 	if !ok || entry.Ctx == nil {
 		return nil, "", fmt.Errorf("picked entry %q not resolvable", picked)
 	}
@@ -345,7 +356,11 @@ func flattenEndpoints(contexts []Context) (lines []string, lookup map[string]loo
 			}
 			line := fmt.Sprintf("%s · %s%s\033[0m\t%s\t%s", ctx.Name, color, role, ctx.Name, role)
 			lines = append(lines, line)
-			lookup[line] = lookupEntry{Ctx: &contexts[i], Role: role}
+			// Key on the trailing <name>\t<role> fields — invariant
+			// under fzf's --ansi escape-code stripping. The full-line
+			// key would silently mismatch when fzf returns the line
+			// without ANSI.
+			lookup[fmt.Sprintf("%s\t%s", ctx.Name, role)] = lookupEntry{Ctx: &contexts[i], Role: role}
 		}
 	}
 	return

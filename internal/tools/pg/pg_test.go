@@ -66,10 +66,22 @@ func TestFlattenEndpoints_OneLinePerEndpoint(t *testing.T) {
 	if len(lookup) != 3 {
 		t.Fatalf("lookup should have 3 entries, got %d", len(lookup))
 	}
+	// Lookup is keyed on the trailing <name>\t<role> fields — invariant
+	// under fzf's --ansi escape-code stripping. Derive that key from
+	// each line and assert resolvability.
 	for _, l := range lines {
-		entry, ok := lookup[l]
+		i := strings.LastIndexByte(l, '\t')
+		if i < 0 {
+			t.Fatalf("line %q has no tab", l)
+		}
+		j := strings.LastIndexByte(l[:i], '\t')
+		if j < 0 {
+			t.Fatalf("line %q has only one tab", l)
+		}
+		key := l[j+1:]
+		entry, ok := lookup[key]
 		if !ok || entry.Ctx == nil {
-			t.Fatalf("line %q not resolvable in lookup", l)
+			t.Fatalf("key %q from line %q not resolvable in lookup", key, l)
 		}
 	}
 }
