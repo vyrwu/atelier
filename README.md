@@ -4,42 +4,45 @@
 [![release](https://img.shields.io/github/v/release/vyrwu/atelier?display_name=tag&sort=semver)](https://github.com/vyrwu/atelier/releases)
 [![license](https://img.shields.io/github/license/vyrwu/atelier)](LICENSE)
 
-An open engine for **in-terminal agentic development**. Per-workspace
-tool clusters in tmux, driven by a small Go core with a true plugin
-architecture and a statusline-pluggable data API.
+**TUI-native agentic workspaces.** A tmux + git-worktree workspace
+manager for parallel Claude/Codex/Aider sessions and the terminal
+tools that go with them. Small Go core, plugin architecture, opinion-
+free statusline API.
 
-> **Status:** alpha. Single-author personal project. Stable for the author's
-> daily use; expect rough edges if you adopt early.
+> **Status:** alpha. Single-author project. Stable for the author's daily
+> use; expect rough edges if you adopt early.
 
 ---
 
 ## What is this?
 
-If you spend your day in tmux running Claude Code (or Codex, or
-Aider), juggling git worktrees, switching between k8s contexts,
-hopping between repos — you've probably ended up with a pile of bash
-scripts gluing it together.
+If you spend your day in tmux running Claude Code (or Codex, or Aider),
+juggling git worktrees, switching between k8s contexts, hopping between
+repos — you've probably ended up with a pile of bash scripts gluing it
+together.
 
-Atelier is what that pile of scripts wants to become: a small Go
-engine that exposes the primitives, and a plugin contract that lets
-you compose them into your tmux setup.
+Atelier is what that pile of scripts wants to become.
 
-- **One key per tool, per workspace.** Each workspace (a tmux window
-  backed by a git worktree) gets its own claude-code popup, lazygit,
-  persistent shell, k9s context, postgres CLI. `c` opens claude in
-  the current workspace. `g` opens lazygit. `M-s` switches workspaces.
+- **Workspace = tmux window + git worktree + tool state.** Each
+  workspace has its own Claude session, lazygit, k9s context,
+  postgres CLI. `M-;` picks any tool for the current workspace;
+  `M-s` switches workspaces; `M-n` creates a new one from a natural-
+  language task description; `M-r` recovers a soft-closed workspace.
 - **Plugin architecture.** Every tool is a separate binary on `PATH`
   named `atelier-<name>`. The engine has zero compile-time knowledge
-  of any specific tool. Replace `atelier-k8s` (which targets EKS) with
+  of any specific tool. Replace `atelier-k8s` (EKS-targeted) with
   your own `atelier-k8s-aks` — drop it on PATH, atelier picks it up.
+- **Selective install.** One Homebrew tap, one formula per tool.
+  Install only what you use.
 - **Statusline data emitters.** Atelier exposes freshness (git
-  ahead/behind/error) and attention (claude-completed-while-you-were-
+  ahead/behind/error) and attention (Claude-finished-while-you-were-
   elsewhere) as commands you embed into your tmux statusline with
-  `#(atelier status ...)`. Use them with vanilla tmux, dracula,
-  powerline — anything. The engine doesn't dictate the visuals; you do.
-- **Persistent state.** Workspaces, recap text, attention flags,
-  freshness data — written through to disk and rehydrated on tmux
-  restart.
+  `#(atelier status ...)`. Works with vanilla tmux, Dracula, Powerline —
+  anything. The engine doesn't dictate visuals; you do.
+- **Persistent state.** Workspaces, recap text, attention flags, git
+  freshness — written through to disk and rehydrated on tmux restart.
+  Detach with `M-q`; the server keeps running so background Claude
+  sessions survive.
 - **Always-on diagnostics.** Every tmux call from every atelier
   process logs to `~/.cache/atelier/debug.log`. When something
   breaks, you have the trace.
@@ -60,21 +63,32 @@ font; opt into powerline decoration via the override hook below.
 
 ```bash
 brew tap vyrwu/tap
+
+# Minimum viable install — engine + Claude + workspaces + tool selector.
 brew install \
   vyrwu/tap/atelier \
-  vyrwu/tap/atelier-claude \
   vyrwu/tap/atelier-workspaces \
+  vyrwu/tap/atelier-toolselector \
+  vyrwu/tap/atelier-claude \
+  vyrwu/tap/atelier-popupshell
+
+# Add whatever else you want, à la carte.
+brew install \
   vyrwu/tap/atelier-lazygit \
   vyrwu/tap/atelier-k8s \
   vyrwu/tap/atelier-pg \
   vyrwu/tap/atelier-aws \
-  vyrwu/tap/atelier-popupshell \
-  vyrwu/tap/atelier-toolselector
+  vyrwu/tap/atelier-ghdash \
+  vyrwu/tap/atelier-ghenhance \
+  vyrwu/tap/atelier-ccusage
 
 atelier
 ```
 
-`M-q` quits the server cleanly; workspaces persist across launches.
+`M-q` detaches your client — the tmux server keeps running so
+background Claude sessions and other agents stay alive. Reattach with
+`atelier` (or `tmux -L atelier attach`). Workspaces persist across
+detach/reattach.
 
 **Customizing the bundled mode.** Drop your tmux tweaks into
 `~/.config/atelier/tmux.conf.local`; atelier sources it after every
@@ -87,7 +101,9 @@ Font; details in the file header).
 
 ```bash
 brew tap vyrwu/tap
-brew install vyrwu/tap/atelier vyrwu/tap/atelier-claude  # etc.
+brew install vyrwu/tap/atelier vyrwu/tap/atelier-workspaces \
+             vyrwu/tap/atelier-toolselector vyrwu/tap/atelier-claude
+# ...plus any opt-in tools you want (see tap list above).
 ```
 
 In your `~/.config/tmux/tmux.conf`:
@@ -125,34 +141,28 @@ else in each `.conf` is taste — replace, remix, ignore as you like.
 atelier doctor
 # tmux:    tmux 3.6a
 # atelier: ok
-# Discovered tools (8): aws, claude, k8s, lazygit, pg, popupshell, toolselector, workspaces
+# Discovered tools (11): aws, ccusage, claude, ghdash, ghenhance, k8s, lazygit, pg, popupshell, toolselector, workspaces
 ```
 
 ---
 
 ## Quickstart (inside atelier or your embedded tmux)
 
-Four keys do most of the work:
+Six keys do most of the work:
 
 | Keys | What happens |
 |------|--------------|
-| `M-;` | **Tool selector** — fzf list of every discovered tool |
-| `M-s` | **Workspace picker** — switch between tmux windows backed by worktrees |
+| `M-;` | **Tool selector** — fzf list of every discovered tool; picks route to the current workspace |
+| `M-n` | **New workspace** — natural-language task description → Claude names the branch → worktree + Claude session spawn |
+| `M-s` | **Select workspace** — switch between existing workspaces (recap + freshness per row) |
+| `M-r` | **Recover workspace** — recently soft-closed workspaces float to top; recover or permanently delete |
 | `M-?` | **Cheatsheet** — every active binding, scoped to current context |
-| `M-q` | **Quit** — kill the tmux server (workspaces persist; restore next launch) |
+| `M-q` | **Detach** — server keeps running; reattach later with `atelier` |
 
-Single-key tool launchers (workspace-scoped):
-
-| Key | Tool | What it opens |
-|-----|------|---------------|
-| `c` | claude | Claude Code popup, scoped to this workspace |
-| `g` | lazygit | lazygit popup |
-| `p` | popupshell | persistent shell popup |
-| `9` | k9s | k9s (workspace-aware k8s context) |
-| `a` | aws | aws-vault profile picker |
-
-Every popup runs in its own backing tmux session. Opening it doesn't
-disturb your work; closing it leaves it ready to resume.
+Every popup runs in its own backing tmux session. Opening a tool
+doesn't disturb your work; closing it leaves it ready to resume.
+Inside a tool's popup, `M-;` still works — you can pivot to another
+tool without losing what's underneath.
 
 ---
 

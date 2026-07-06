@@ -5,3 +5,8 @@
 result
 result-*
 .direnv/
+
+# Private planning / scratch docs — kept local, never committed.
+FEATURE_REQUESTS.md
+PLAN.md
+REFACTOR.md
