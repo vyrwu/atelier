@@ -8,8 +8,15 @@ name: release-please
 # binaries + push formulas to the Homebrew tap.
 #
 # The author NEVER tags manually. The Release PR IS the release gesture.
+#
+# Trigger is `workflow_run: ci: completed` (not push) so the Release
+# PR is only created / updated when the tip of main has passed CI —
+# a broken main can't produce a Release PR that pretends the world
+# is fine.
 on:
-  push:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
     branches: [main]
 
 permissions:
@@ -19,6 +26,9 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Only fire on green CI. A failed / cancelled ci run leaves main
+    # in a state we don't want to advertise as releasable.
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: googleapis/release-please-action@v5
         with:

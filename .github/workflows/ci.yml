@@ -6,8 +6,25 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel any in-flight runs for the same ref when a new push/PR update
+# arrives. On main, only the tip commit is worth testing; on a PR, only
+# the latest force-push matters. Frees runner minutes and clears the
+# queue when several pushes land in quick succession.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
+    # Skip CI on release-please's auto-generated PRs. Their diff is
+    # only CHANGELOG.md + .release-please-manifest.json — no code
+    # change, no reason to spend runner minutes. The main-branch CI
+    # gate on release-please.yml already ensured main was green
+    # before the PR was created. Skipped jobs register as "skipped"
+    # checks, which required-status-check rules accept as passing.
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.head_ref, 'release-please--')
     strategy:
       fail-fast: false
       matrix:
@@ -67,6 +84,9 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.head_ref, 'release-please--')
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -86,6 +106,9 @@ jobs:
 
   goreleaser-check:
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.head_ref, 'release-please--')
     steps:
       - uses: actions/checkout@v7
         with:
