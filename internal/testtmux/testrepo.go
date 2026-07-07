@@ -50,6 +50,12 @@ func TestRepo(t *testing.T, root, owner, repo, defaultBranch string) string {
 	run("fetch", "origin", defaultBranch)
 	// Stamp the symbolic-ref so DefaultBranch() resolves correctly.
 	run("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+defaultBranch)
+	// Wire upstream tracking on the default branch so `git pull
+	// --rebase` inside runBgPull works without complaining about
+	// missing tracking info. Without this, tests that create a
+	// session whose cwd is the fixture repo hit the pull-rebase
+	// branch of runBgPull and fail.
+	run("branch", "--set-upstream-to=origin/"+defaultBranch, defaultBranch)
 	return dir
 }
 

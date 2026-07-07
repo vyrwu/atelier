@@ -12,10 +12,11 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest    # linux/amd64
-          - ubuntu-24.04-arm # linux/arm64
-          - macos-13         # darwin/amd64 (intel)
-          - macos-latest     # darwin/arm64 (apple silicon)
+          # v0.1 target platforms only. Linux/arm64 (ubuntu-24.04-arm)
+          # and darwin/amd64 (macos-13) drop until the release cadence
+          # justifies the extra runner minutes. No Windows target yet.
+          - ubuntu-latest # linux/amd64
+          - macos-latest  # darwin/arm64 (apple silicon)
     runs-on: ${{ matrix.os }}
     # Ubuntu runners have no default git identity; several tests create
     # git repos and commit. macOS runners inherit an identity from the

@@ -223,220 +223,186 @@ archives:
     files: [LICENSE]
 
 # Homebrew tap publishing. Every release tag, goreleaser regenerates
-# the formula Ruby files and pushes them to vyrwu/homebrew-tap.
-# Honors the plugin model: each tool is an independent formula that
-# depends_on "vyrwu/tap/atelier" (the core). Users compose what they
+# the cask Ruby files and pushes them to vyrwu/homebrew-tap.
+# Honors the plugin model: each tool is an independent cask that
+# depends_on cask: atelier (the core). Users compose what they
 # want; third-party plugins coexist via PATH discovery.
 #
-# `homebrew_formulas` replaces the deprecated `brews:` key in
-# goreleaser v2.13+. Field shape is identical.
-homebrew_formulas:
+# `homebrew_casks` replaces the deprecated `brews:` (formulae) key
+# in goreleaser v2.13+. Casks ship pre-built binaries directly —
+# the right model for atelier since we don't build from source in
+# the user's environment. Homebrew now supports Linux casks too, so
+# the cross-platform story stays intact.
+homebrew_casks:
   - name: atelier
     ids: [atelier]
+    binary: atelier
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
-    description: Terminal-centric agentic dev framework — engine
-    license: MIT
+    description: TUI-native agentic workspaces — engine
     dependencies:
-      - name: tmux
-      - name: fzf
-    test: |
-      system "#{bin}/atelier", "version"
-    install: |
-      bin.install "atelier"
+      - formula: tmux
+      - formula: fzf
 
   - name: atelier-popupshell
     ids: [atelier-popupshell]
+    binary: atelier-popupshell
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — popup shell
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-    install: |
-      bin.install "atelier-popupshell"
+      - cask: atelier
 
   - name: atelier-lazygit
     ids: [atelier-lazygit]
+    binary: atelier-lazygit
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — lazygit launcher
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-      - name: lazygit
-    install: |
-      bin.install "atelier-lazygit"
+      - cask: atelier
+      - formula: lazygit
 
   - name: atelier-claude
     ids: [atelier-claude]
+    binary: atelier-claude
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — Claude Code integration
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-    install: |
-      bin.install "atelier-claude"
+      - cask: atelier
 
   - name: atelier-k8s
     ids: [atelier-k8s]
+    binary: atelier-k8s
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — k9s + EKS context switcher
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-      - name: k9s
-    install: |
-      bin.install "atelier-k8s"
+      - cask: atelier
+      - formula: k9s
 
   - name: atelier-pg
     ids: [atelier-pg]
+    binary: atelier-pg
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — Postgres pgcli launcher
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-      - name: pgcli
-    install: |
-      bin.install "atelier-pg"
+      - cask: atelier
+      - formula: pgcli
 
   - name: atelier-aws
     ids: [atelier-aws]
+    binary: atelier-aws
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — AWS context switcher
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-      - name: awscli
-    install: |
-      bin.install "atelier-aws"
+      - cask: atelier
+      - formula: awscli
 
   - name: atelier-workspaces
     ids: [atelier-workspaces]
+    binary: atelier-workspaces
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — workspace + worktree manager
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-    install: |
-      bin.install "atelier-workspaces"
+      - cask: atelier
 
   - name: atelier-toolselector
     ids: [atelier-toolselector]
+    binary: atelier-toolselector
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — M-; tool picker
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-    install: |
-      bin.install "atelier-toolselector"
+      - cask: atelier
 
   # gh-dash isn't in homebrew-core (it's a gh extension). We depend on
   # `gh` and expect the user to `gh extension install dlvhdr/gh-dash`
   # separately — atelier doctor flags the missing binary.
   - name: atelier-ghdash
     ids: [atelier-ghdash]
+    binary: atelier-ghdash
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — gh-dash PR dashboard launcher
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-      - name: gh
-    install: |
-      bin.install "atelier-ghdash"
+      - cask: atelier
+      - formula: gh
 
   - name: atelier-ghenhance
     ids: [atelier-ghenhance]
+    binary: atelier-ghenhance
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — gh enhance-repo launcher
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-      - name: gh
-    install: |
-      bin.install "atelier-ghenhance"
+      - cask: atelier
+      - formula: gh
 
   # ccusage is an npm package invoked via `npx ccusage`. Depending on
   # `node` gets npx onto PATH; ccusage itself lazy-installs on first
   # run via npx's cache.
   - name: atelier-ccusage
     ids: [atelier-ccusage]
+    binary: atelier-ccusage
     repository:
       owner: vyrwu
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — Claude API usage snapshot popup
-    license: MIT
     dependencies:
-      - name: atelier
-        version: '{{ .Version }}'
-      - name: node
-    install: |
-      bin.install "atelier-ccusage"
+      - cask: atelier
+      - formula: node
 
 checksum:
   name_template: 'atelier_{{ .Version }}_checksums.txt'
