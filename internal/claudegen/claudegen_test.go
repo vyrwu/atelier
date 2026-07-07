@@ -9,13 +9,13 @@ import (
 
 func TestFirstLine(t *testing.T) {
 	cases := map[string]string{
-		"":                 "",
-		"\n":               "",
-		"feat/foo":         "feat/foo",
-		"feat/foo\n":       "feat/foo",
-		"feat/foo\nbar":    "feat/foo",
-		"  feat/foo  \n":   "feat/foo",
-		"line1\nline2\n":   "line1",
+		"":               "",
+		"\n":             "",
+		"feat/foo":       "feat/foo",
+		"feat/foo\n":     "feat/foo",
+		"feat/foo\nbar":  "feat/foo",
+		"  feat/foo  \n": "feat/foo",
+		"line1\nline2\n": "line1",
 	}
 	for in, want := range cases {
 		if got := firstLine(in); got != want {

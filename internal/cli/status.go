@@ -28,15 +28,15 @@ func StatusCommand() *cobra.Command {
 // Invoked from window-status-format with the window's pull-state options
 // (and the session's @repo_path) inlined via tmux's #{...} expansion:
 //
-//   set -ag window-status-current-format \
-//     "#(atelier status freshness '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')"
+//	set -ag window-status-current-format \
+//	  "#(atelier status freshness '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')"
 //
 // Args (positional):
-//   1. behind        — count of commits in origin/<default> not in branch
-//   2. ahead         — count of commits in branch not in origin/<default>
-//   3. pull_error    — short error message from the last failed _bg-pull
-//   4. freshness_ts  — unix epoch of last successful fetch
-//   5. repo_path     — session's @repo_path (empty for non-git sessions)
+//  1. behind        — count of commits in origin/<default> not in branch
+//  2. ahead         — count of commits in branch not in origin/<default>
+//  3. pull_error    — short error message from the last failed _bg-pull
+//  4. freshness_ts  — unix epoch of last successful fetch
+//  5. repo_path     — session's @repo_path (empty for non-git sessions)
 //
 // Outputs the icon + counts wrapped in tmux color codes, or empty
 // string when the workspace isn't a git repo or no pull has run yet.
@@ -77,15 +77,15 @@ func freshnessStatusCmd() *cobra.Command {
 // formatFreshnessIcon renders the status-line freshness segment.
 // Pure helper for unit testing.
 //
-//   Empty       — non-git session OR pull never ran (freshnessTs="")
-//   ✔           — in-sync (green, U+2714 heavy check) — uses stock tmux 'green' which
-//                  picks up whatever shade the user's theme defines
-//   ↓N          — behind by N (red) — needs `git pull`
-//   ↑N          — ahead by N (yellow) — needs `git push`
-//   ↓N↑M        — diverged (red, worst case)
-//   ⚠ <msg>     — pull error (red) with short message ("fetch failed",
-//                  "rebase failed", etc.) so the user can tell error
-//                  classes apart without opening the debug log
+//	Empty       — non-git session OR pull never ran (freshnessTs="")
+//	✔           — in-sync (green, U+2714 heavy check) — uses stock tmux 'green' which
+//	               picks up whatever shade the user's theme defines
+//	↓N          — behind by N (red) — needs `git pull`
+//	↑N          — ahead by N (yellow) — needs `git push`
+//	↓N↑M        — diverged (red, worst case)
+//	⚠ <msg>     — pull error (red) with short message ("fetch failed",
+//	               "rebase failed", etc.) so the user can tell error
+//	               classes apart without opening the debug log
 //
 // Per the user's spec — between window name and the global attention
 // rollup. Padded with a leading space so it doesn't kiss the window

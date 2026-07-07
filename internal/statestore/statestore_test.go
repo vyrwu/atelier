@@ -46,9 +46,9 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 						Recap:     "Designing persistence layer",
 						RecapTs:   1729094400,
 						Metadata: map[string]string{
-							"ai.prompt":             "build statestore",
-							"ai.workspace_kind":     "worktree",
-							"ai.active_session_id":  "abc-123",
+							"ai.prompt":            "build statestore",
+							"ai.workspace_kind":    "worktree",
+							"ai.active_session_id": "abc-123",
 						},
 					},
 				},
@@ -335,9 +335,9 @@ func TestLoad_FiltersNonAtelierWorkspaces(t *testing.T) {
 func TestSave_FiltersNonAtelierWorkspaces(t *testing.T) {
 	setupCacheDir(t)
 	in := &State{Workspaces: []Workspace{
-		{SessionName: "ghost"},                         // dropped
-		{SessionName: "real", RepoPath: "/r"},          // kept
-		{SessionName: "multi", Kind: "multi-repo"},     // kept
+		{SessionName: "ghost"},                                         // dropped
+		{SessionName: "real", RepoPath: "/r"},                          // kept
+		{SessionName: "multi", Kind: "multi-repo"},                     // kept
 		{SessionName: "another-ghost", Windows: []Window{{Name: "x"}}}, // dropped
 	}}
 	if err := Save(in); err != nil {

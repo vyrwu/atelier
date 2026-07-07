@@ -18,15 +18,15 @@ func (r *recorderClient) Run(args ...string) ([]byte, error) {
 	r.runs = append(r.runs, append([]string(nil), args...))
 	return nil, nil
 }
-func (r *recorderClient) HasSession(string) (bool, error)              { return false, nil }
-func (r *recorderClient) ShowGlobalOption(string) (string, error)      { return "", nil }
-func (r *recorderClient) DisplayMessage(string) (string, error)        { return "", nil }
+func (r *recorderClient) HasSession(string) (bool, error)         { return false, nil }
+func (r *recorderClient) ShowGlobalOption(string) (string, error) { return "", nil }
+func (r *recorderClient) DisplayMessage(string) (string, error)   { return "", nil }
 func (r *recorderClient) DisplayMessageAt(string, string) (string, error) {
 	return "", nil
 }
 func (r *recorderClient) NewSessionWithCommand(string, string) error { return nil }
-func (r *recorderClient) KillSession(string) error                    { return nil }
-func (r *recorderClient) Attach(string) error                         { return nil }
+func (r *recorderClient) KillSession(string) error                   { return nil }
+func (r *recorderClient) Attach(string) error                        { return nil }
 
 // TestApplyStyle_EmitsCanonicalOptionSequence locks in the canonical
 // popup style: five set-option calls, in this exact order, with these

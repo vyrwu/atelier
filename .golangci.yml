@@ -6,21 +6,27 @@ run:
 linters:
   default: none
   enable:
+    # gosimple is folded into staticcheck in golangci-lint v2, no
+    # longer a separate linter. gofmt lives in `formatters:` below.
     - errcheck
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gosimple
-    - gofmt
     - misspell
 
   settings:
     errcheck:
-      # Allow unchecked errors on intentional best-effort cleanups (tmux
-      # kill-server, popup cleanup hooks). The rest must be checked.
+      # Allow unchecked errors on:
+      #   - intentional best-effort cleanups (kill-server, popup GC)
+      #   - fmt.Fprint* to stdout/stderr/tmux stdout — write failures
+      #     to user-visible sinks aren't recoverable, and wrapping
+      #     every print in `_, _ =` adds noise without upside.
       exclude-functions:
         - (*github.com/vyrwu/atelier/internal/tmuxhost.Client).KillServer
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
 
   exclusions:
     rules:

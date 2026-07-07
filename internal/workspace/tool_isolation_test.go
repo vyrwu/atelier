@@ -43,17 +43,17 @@ func TestTools_DoNotReimplementWindowManagement(t *testing.T) {
 		// dance — these are tool-INTERNAL session management, not
 		// workspace-lifecycle. Borderline; could lift into popup.SessionGlobal
 		// methods (Respawn already exists; ensure-with-env doesn't).
-		"internal/tools/k8s/k8s.go:respawn-pane":  "TODO: lift into popup.SessionGlobal (Respawn-style with env)",
-		"internal/tools/k8s/k8s.go:new-session":   "TODO: same — k8s creates its own popup session with env vars",
-		"internal/tools/pg/pg.go:respawn-pane":    "TODO: same as k8s",
-		"internal/tools/pg/pg.go:new-session":     "TODO: same as k8s",
-		"internal/tools/aws/aws.go:respawn-pane":  "TODO: aws respawns the CALLER pane under aws-vault; tool-specific, candidate for popup.RespawnCallerPane(target, cmd)",
+		"internal/tools/k8s/k8s.go:respawn-pane": "TODO: lift into popup.SessionGlobal (Respawn-style with env)",
+		"internal/tools/k8s/k8s.go:new-session":  "TODO: same — k8s creates its own popup session with env vars",
+		"internal/tools/pg/pg.go:respawn-pane":   "TODO: same as k8s",
+		"internal/tools/pg/pg.go:new-session":    "TODO: same as k8s",
+		"internal/tools/aws/aws.go:respawn-pane": "TODO: aws respawns the CALLER pane under aws-vault; tool-specific, candidate for popup.RespawnCallerPane(target, cmd)",
 
 		// Workspaces-tool remaining sites — Layer B partial migration.
-		"internal/tools/workspaces/workspaces.go:new-session":   "TODO: CloneCommand + runAutoSession should use workspace.EnsureSession / workspace.NewMultiRepoSession",
-		"internal/tools/workspaces/workspaces.go:new-window":    "TODO: ensureDefaultBranchWindow should call workspace.NewDefaultBranchWindow (extracts the remaining new-window site)",
-		"internal/tools/workspaces/workspaces.go:kill-window":   "TODO: DeleteRowCommand should call workspace.DeleteWindow(h, session, window)",
-		"internal/tools/workspaces/workspaces.go:kill-session":  "TODO: DeleteRowCommand should call workspace.DeleteSession(h, session)",
+		"internal/tools/workspaces/workspaces.go:new-session":  "TODO: CloneCommand + runAutoSession should use workspace.EnsureSession / workspace.NewMultiRepoSession",
+		"internal/tools/workspaces/workspaces.go:new-window":   "TODO: ensureDefaultBranchWindow should call workspace.NewDefaultBranchWindow (extracts the remaining new-window site)",
+		"internal/tools/workspaces/workspaces.go:kill-window":  "TODO: DeleteRowCommand should call workspace.DeleteWindow(h, session, window)",
+		"internal/tools/workspaces/workspaces.go:kill-session": "TODO: DeleteRowCommand should call workspace.DeleteSession(h, session)",
 
 		// toolselector's "Shell" dispatch navigates to window :1.
 		"internal/tools/toolselector/selector.go:select-window": "TODO: lift to workspace.LandOnWindow(\":1\") or similar; the special case is invocable as navigation",

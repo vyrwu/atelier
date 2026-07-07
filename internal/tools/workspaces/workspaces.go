@@ -670,6 +670,7 @@ func CreateCommand() *cobra.Command {
 // with Enter to open and M-x to delete. Sibling to:
 //   - M-n (creator) — make a NEW worktree
 //   - M-s (sessions) — pick among LIVE tmux sessions
+//
 // The three pickers cross-jump via M-n/M-s/M-r/M-u footer keys.
 func RecoverCommand() *cobra.Command {
 	var socket string
@@ -1952,14 +1953,6 @@ func removeWorktree(repoPath, wtPath string) error {
 		return fmt.Errorf("worktree remove (fallback rm -rf): %w", err)
 	}
 	return nil
-}
-
-func pullDefault(repoPath, defaultBranch string) error {
-	current := runGitQuiet(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	if current == defaultBranch {
-		return runGit(repoPath, "pull", "--rebase")
-	}
-	return runGit(repoPath, "fetch", "origin", defaultBranch)
 }
 
 // ensureDefaultBranchWindow makes sure the given session has a window

@@ -50,10 +50,10 @@ import (
 //
 // Persistence flow:
 //
-//   1. The tool stamps the option on a window via `tmux set-option @ai_*`.
-//   2. The tool mirrors it into statestore via PersistWindowMetadata
-//      with the same key — survives tmux server restarts.
-//   3. Restore re-stamps the option from Metadata on rehydrate.
+//  1. The tool stamps the option on a window via `tmux set-option @ai_*`.
+//  2. The tool mirrors it into statestore via PersistWindowMetadata
+//     with the same key — survives tmux server restarts.
+//  3. Restore re-stamps the option from Metadata on rehydrate.
 const (
 	MetaPrompt          = "ai.prompt"
 	MetaWorkspaceKind   = "ai.workspace_kind"

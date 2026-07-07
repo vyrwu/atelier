@@ -40,8 +40,8 @@ const schemaVersion = 2
 // Marker field `__atelier_version` is read on Ensure() to decide
 // whether to overwrite stale content.
 type canonicalSettings struct {
-	AtelierVersion int                       `json:"__atelier_version"`
-	Hooks          map[string][]hookGroup    `json:"hooks"`
+	AtelierVersion int                    `json:"__atelier_version"`
+	Hooks          map[string][]hookGroup `json:"hooks"`
 }
 
 type hookGroup struct {

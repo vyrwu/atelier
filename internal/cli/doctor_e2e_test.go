@@ -100,4 +100,3 @@ func TestCheckStatuslineFormat_PartialInjection(t *testing.T) {
 		t.Errorf("WARN must name the missing segment; got %q", r.Detail)
 	}
 }
-

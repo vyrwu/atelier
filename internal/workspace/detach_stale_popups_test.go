@@ -10,10 +10,10 @@ import "testing"
 // scoped to the SAME workspace are kept.
 func TestShouldDetachPopupClient(t *testing.T) {
 	cases := []struct {
-		name           string
-		clientSession  string
-		keepSidWid     string
-		wantDetach     bool
+		name          string
+		clientSession string
+		keepSidWid    string
+		wantDetach    bool
 	}{
 		// Same-workspace popup → KEEP.
 		{
@@ -95,11 +95,11 @@ func TestShouldDetachPopupClient(t *testing.T) {
 // work.
 func TestStripEqualsPrefix(t *testing.T) {
 	cases := map[string]string{
-		"=ws-a":   "ws-a",
-		"=ws:1":   "ws:1",
-		"ws-a":    "ws-a",
-		"@2":      "@2",
-		"":        "",
+		"=ws-a": "ws-a",
+		"=ws:1": "ws:1",
+		"ws-a":  "ws-a",
+		"@2":    "@2",
+		"":      "",
 	}
 	for in, want := range cases {
 		if got := stripEqualsPrefix(in); got != want {

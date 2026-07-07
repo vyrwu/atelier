@@ -13,11 +13,11 @@ import (
 type trackingClient struct {
 	*fakeClient
 	calls         []string
-	sessionExists bool                     // result for HasSession
-	createCmd     string                   // captured shellCmd from NewSessionWithCommand
-	attached      string                   // captured session from Attach
-	attachErr     error                    // simulate attach failure
-	ensureErr     error                    // simulate NewSessionWithCommand failure
+	sessionExists bool   // result for HasSession
+	createCmd     string // captured shellCmd from NewSessionWithCommand
+	attached      string // captured session from Attach
+	attachErr     error  // simulate attach failure
+	ensureErr     error  // simulate NewSessionWithCommand failure
 }
 
 func (c *trackingClient) Run(args ...string) ([]byte, error) {
@@ -75,7 +75,7 @@ func TestOpenWorkspaceScoped_HappyPath(t *testing.T) {
 	newIdx := indexOfPrefix(c.calls, "NewSessionWithCommand ")
 	styleIdx := indexOfPrefix(c.calls, "Run set-option ")
 	attachIdx := indexOfPrefix(c.calls, "Attach ")
-	if !(hasIdx < newIdx && newIdx < styleIdx && styleIdx < attachIdx) {
+	if hasIdx >= newIdx || newIdx >= styleIdx || styleIdx >= attachIdx {
 		t.Errorf("ordering violated: has=%d new=%d style=%d attach=%d\ncalls: %v",
 			hasIdx, newIdx, styleIdx, attachIdx, c.calls)
 	}

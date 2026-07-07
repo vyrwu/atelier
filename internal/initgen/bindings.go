@@ -43,10 +43,10 @@ func BindingBlock(toolName string, m *manifest.Manifest) string {
 // derived from any plugin manifest. Available everywhere (root + popup
 // tables).
 //
-//   M-?  cheatsheet popup
-//   M-q  detach the outer client (server stays alive, background
-//        agents survive). `atelier server kill` is the explicit force-
-//        quit when the user actually wants the server gone.
+//	M-?  cheatsheet popup
+//	M-q  detach the outer client (server stays alive, background
+//	     agents survive). `atelier server kill` is the explicit force-
+//	     quit when the user actually wants the server gone.
 //
 // Popup-table M-? uses inline display-popup (same nesting pattern as
 // M-; / M-n / M-s) so the cheatsheet overlays cleanly without
@@ -156,11 +156,11 @@ run-shell -b 'atelier popup cleanup --startup'
 //
 // Two per-window segments are appended to the window-status format:
 //
-//   1. Freshness icon (FR-7) — shows ✓ / ↓N / ↑N / ↓N↑M / ⚠ for git
-//      workspaces. Empty for foreign (non-git) sessions.
+//  1. Freshness icon (FR-7) — shows ✓ / ↓N / ↑N / ↓N↑M / ⚠ for git
+//     workspaces. Empty for foreign (non-git) sessions.
 //
-//   2. Attention rollup — global ⏺ count of windows flagged for
-//      attention (Claude Stop hook fires on a non-attached popup).
+//  2. Attention rollup — global ⏺ count of windows flagged for
+//     attention (Claude Stop hook fires on a non-attached popup).
 //
 // Order matters: freshness comes BEFORE attention so the layout reads
 // `<window-name> <freshness> ⏺<n>` — local sync state next to the

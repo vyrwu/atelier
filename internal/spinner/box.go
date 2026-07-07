@@ -189,10 +189,10 @@ func drawBox(w io.Writer, row, col, width, height int) {
 	const dim = "\033[38;5;240m"
 	const reset = "\033[0m"
 
-	fmt.Fprintf(w, "\033[%d;%dH%s%s%s%s",
+	_, _ = fmt.Fprintf(w, "\033[%d;%dH%s%s%s%s",
 		row, col, dim, tl, strings.Repeat(h, width-2), tr+reset)
 	for r := 1; r < height-1; r++ {
-		fmt.Fprintf(w, "\033[%d;%dH%s%s%s\033[%d;%dH%s%s%s",
+		_, _ = fmt.Fprintf(w, "\033[%d;%dH%s%s%s\033[%d;%dH%s%s%s",
 			row+r, col, dim, v, reset,
 			row+r, col+width-1, dim, v, reset)
 	}

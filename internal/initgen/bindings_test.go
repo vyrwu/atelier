@@ -161,15 +161,15 @@ func TestHooksBlock_ContainsExpectedHooks(t *testing.T) {
 func TestThemeBlock_DistroGradeDefaults(t *testing.T) {
 	b := ThemeBlock()
 	required := map[string]string{
-		"set-clipboard on":                              "OSC 52 clipboard passthrough — `set -g set-clipboard on`",
-		"history-limit 50000":                           "scrollback bumped from tmux's 2000-line default",
-		"focus-events on":                               "needed for vim/nvim FocusGained/FocusLost inside tmux",
-		"repeat-time 0":                                 "kill chord-swallowing repeat window",
-		"atelier internal clipboard-copy":               "copy-mode yank pipes to system clipboard",
-		"copy-mode-vi y send -X copy-pipe-and-cancel":   "y binding wired to clipboard pipe",
-		"bind -T popup C-] copy-mode":                   "popup key-table needs an explicit copy-mode entry (prefix is unset there)",
-		"automatic-rename off":                          "window names persist across shell process changes",
-		"allow-rename off":                              "same",
+		"set-clipboard on":                            "OSC 52 clipboard passthrough — `set -g set-clipboard on`",
+		"history-limit 50000":                         "scrollback bumped from tmux's 2000-line default",
+		"focus-events on":                             "needed for vim/nvim FocusGained/FocusLost inside tmux",
+		"repeat-time 0":                               "kill chord-swallowing repeat window",
+		"atelier internal clipboard-copy":             "copy-mode yank pipes to system clipboard",
+		"copy-mode-vi y send -X copy-pipe-and-cancel": "y binding wired to clipboard pipe",
+		"bind -T popup C-] copy-mode":                 "popup key-table needs an explicit copy-mode entry (prefix is unset there)",
+		"automatic-rename off":                        "window names persist across shell process changes",
+		"allow-rename off":                            "same",
 	}
 	for opt, why := range required {
 		if !strings.Contains(b, opt) {

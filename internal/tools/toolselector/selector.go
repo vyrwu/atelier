@@ -144,7 +144,7 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 		"claude",
 		"ghdash",
 		"ghenhance",
-		"pgcli",   // pg subcommands surfaced separately
+		"pgcli", // pg subcommands surfaced separately
 		"pgcenter",
 		"ccusage",
 		"workspaces-selector", // virtual: "Select Workspace" from workspaces tool

@@ -62,8 +62,8 @@ type RenderOptions struct {
 // bundled launcher and plugin mode pick them up automatically.
 func Render(w io.Writer, opts RenderOptions) (*plugin.DiscoveryResult, error) {
 	if opts.Header != "" {
-		fmt.Fprintln(w, opts.Header)
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, opts.Header)
+		_, _ = fmt.Fprintln(w)
 	}
 
 	// Socket-routing env line. Must come BEFORE any run-shell call
@@ -71,15 +71,15 @@ func Render(w io.Writer, opts RenderOptions) (*plugin.DiscoveryResult, error) {
 	// rest of the blocks all use run-shell, so this is the FIRST
 	// substantive line of the config.
 	if opts.Socket != "" {
-		fmt.Fprintf(w, "set-environment -g ATELIER_TMUX_SOCKET %q\n\n", opts.Socket)
+		_, _ = fmt.Fprintf(w, "set-environment -g ATELIER_TMUX_SOCKET %q\n\n", opts.Socket)
 	}
 
-	fmt.Fprint(w, PopupTableShim())
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprint(w, PopupTableShim())
+	_, _ = fmt.Fprintln(w)
 
 	if opts.IncludeTheme {
-		fmt.Fprint(w, ThemeBlock())
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprint(w, ThemeBlock())
+		_, _ = fmt.Fprintln(w)
 	}
 
 	res, err := plugin.Discover()
@@ -91,12 +91,12 @@ func Render(w io.Writer, opts RenderOptions) (*plugin.DiscoveryResult, error) {
 		if block == "" {
 			continue
 		}
-		fmt.Fprint(w, block)
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprint(w, block)
+		_, _ = fmt.Fprintln(w)
 	}
 
-	fmt.Fprint(w, CoreBindingsBlock())
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprint(w, CoreBindingsBlock())
+	_, _ = fmt.Fprintln(w)
 	fmt.Fprint(w, HooksBlock())
 	fmt.Fprintln(w)
 	fmt.Fprint(w, StatuslineBlock())

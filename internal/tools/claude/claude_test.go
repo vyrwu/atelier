@@ -111,11 +111,11 @@ func TestClaudeSessionIDFromPath(t *testing.T) {
 		want string
 	}{
 		{"/Users/u/.claude/projects/-cwd/abc-123-def-456.jsonl", "abc-123-def-456"},
-		{"abc-123.jsonl", "abc-123"},                                  // bare filename
+		{"abc-123.jsonl", "abc-123"}, // bare filename
 		{"/abs/path/foo-bar.jsonl", "foo-bar"},
-		{"", ""},                                                      // empty input → empty id
-		{"/no/extension/file", ""},                                    // wrong extension → empty
-		{"/wrong.txt", ""},                                            // wrong extension → empty
+		{"", ""},                   // empty input → empty id
+		{"/no/extension/file", ""}, // wrong extension → empty
+		{"/wrong.txt", ""},         // wrong extension → empty
 		{"/Users/u/.claude/projects/-cwd-with-dashes/uuid.jsonl", "uuid"},
 	}
 	for _, tc := range cases {
@@ -206,9 +206,9 @@ func TestTruncateLine_NoEllipsisWhenWithinLimit(t *testing.T) {
 // it. We strip both straight and curly variants.
 func TestTruncateLine_StripsQuotes(t *testing.T) {
 	cases := map[string]string{
-		`"quoted"`:   "quoted",
-		`'apostrophe'`: "apostrophe",
-		`“curly”`:    "curly",
+		`"quoted"`:       "quoted",
+		`'apostrophe'`:   "apostrophe",
+		`“curly”`:        "curly",
 		`‘single curly’`: "single curly",
 	}
 	for in, want := range cases {

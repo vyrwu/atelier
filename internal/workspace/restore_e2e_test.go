@@ -103,12 +103,12 @@ func TestRestore_RecreatesSessionsWindowsAndOptions(t *testing.T) {
 	// key `<plugin>.<field>` to its tmux option `@<plugin>_<field>`
 	// (statestore.MetadataKeyToOptionName).
 	checks := map[string]string{
-		"@needs_attention":       "1",
-		"@attention_recap":       "Wrote persistence layer",
-		"@attention_recap_ts":    "1729094400",
-		"@ai_prompt":             "build the cache",
-		"@ai_workspace_kind":     "worktree",
-		"@ai_active_session_id":  "abc-123-def-456",
+		"@needs_attention":      "1",
+		"@attention_recap":      "Wrote persistence layer",
+		"@attention_recap_ts":   "1729094400",
+		"@ai_prompt":            "build the cache",
+		"@ai_workspace_kind":    "worktree",
+		"@ai_active_session_id": "abc-123-def-456",
 	}
 	for opt, want := range checks {
 		got, _ := srv.Client.GetWindowOption(wid, opt)

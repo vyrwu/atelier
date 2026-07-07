@@ -9,10 +9,10 @@ import "testing"
 // phantom empty repo that needed an explicit M-n to dismiss.
 func TestInterpretPickedRepo(t *testing.T) {
 	cases := []struct {
-		name        string
-		picked      string
-		wantRepo    string
-		wantCancel  bool
+		name       string
+		picked     string
+		wantRepo   string
+		wantCancel bool
 	}{
 		{"empty string", "", "", true},
 		{"whitespace only", "   \t  ", "", true},

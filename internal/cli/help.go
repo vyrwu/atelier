@@ -170,7 +170,7 @@ func readAnyKey() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer term.Restore(fd, state)
+	defer func() { _ = term.Restore(fd, state) }()
 	buf := make([]byte, 8)
 	n, _ := os.Stdin.Read(buf)
 	return n, nil

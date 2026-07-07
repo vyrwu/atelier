@@ -15,14 +15,14 @@ import (
 //
 // Two flag-controlled modes:
 //
-//   atelier init           - engine + theme (default).
-//                            For users who want the curated visual
-//                            identity layered into their existing tmux.
+//	atelier init           - engine + theme (default).
+//	                         For users who want the curated visual
+//	                         identity layered into their existing tmux.
 //
-//   atelier init --bare    - engine only. No theme.
-//                            For users who own the visual layer
-//                            themselves and just want atelier's
-//                            behavioral primitives.
+//	atelier init --bare    - engine only. No theme.
+//	                         For users who own the visual layer
+//	                         themselves and just want atelier's
+//	                         behavioral primitives.
 //
 // Both modes emit the engine wiring identically: popup-shim, tool
 // bindings, core bindings, hooks, statusline-injection, restore.

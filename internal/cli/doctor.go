@@ -331,4 +331,3 @@ func checkWorktreeDirsExist() CheckResult {
 		Detail:      fmt.Sprintf("%d orphaned: %s", len(ghosts), strings.Join(ghosts, "; ")),
 		Remediation: "run `atelier state sync` to drop entries for vanished worktrees"}
 }
-

@@ -336,28 +336,6 @@ func listClients(h *tmuxhost.Client) (outer string, inner []string, err error) {
 	return outer, inner, nil
 }
 
-// tmuxJoin joins args into a single tmux command string with proper quoting
-// for use inside set-hook actions.
-func tmuxJoin(args []string) string {
-	parts := make([]string, len(args))
-	for i, a := range args {
-		parts[i] = tmuxQuote(a)
-	}
-	return strings.Join(parts, " ")
-}
-
-func tmuxQuote(s string) string {
-	if s == "" {
-		return `""`
-	}
-	if !strings.ContainsAny(s, " \t\n\"\\;") {
-		return s
-	}
-	escaped := strings.ReplaceAll(s, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	return `"` + escaped + `"`
-}
-
 func isAtelierPopup(name string) bool {
 	return len(name) > len(state.SessionNamePrefix) &&
 		name[:len(state.SessionNamePrefix)] == state.SessionNamePrefix

@@ -66,7 +66,8 @@ jobs:
         with:
           # Pin to a specific release so a future golangci-lint change
           # can't silently break CI. Bump deliberately when needed.
-          version: v1.62.2
+          # .golangci.yml uses schema v2 → linter must be v2.x.
+          version: v2.1.6
           args: --timeout=5m
 
   goreleaser-check:

@@ -16,14 +16,14 @@ import (
 // Spec backs the popup as a SessionGlobal. The launch command stacks
 // three ccusage views from "now" to "career", refreshed every 60s:
 //
-//   1. `blocks --since <1d>` — last 24h of 5h session blocks. Top row
-//      is the ACTIVE block with `% of quota / projected burn`; the
-//      previous block(s) sit underneath for "where did the last few
-//      hours go" context. 24h cap keeps the section to ~5 rows.
-//   2. `weekly --since <3w>` — last 3 weeks of aggregated cost.
-//      Answers "am I trending up or down this week."
-//   3. `monthly --since <3m>` — last 3 months of aggregated cost.
-//      Answers "career spend over time."
+//  1. `blocks --since <1d>` — last 24h of 5h session blocks. Top row
+//     is the ACTIVE block with `% of quota / projected burn`; the
+//     previous block(s) sit underneath for "where did the last few
+//     hours go" context. 24h cap keeps the section to ~5 rows.
+//  2. `weekly --since <3w>` — last 3 weeks of aggregated cost.
+//     Answers "am I trending up or down this week."
+//  3. `monthly --since <3m>` — last 3 months of aggregated cost.
+//     Answers "career spend over time."
 //
 // Why three reports instead of one daily list: daily was 30 rows of
 // undifferentiated noise. The active → weekly → monthly stack answers

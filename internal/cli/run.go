@@ -94,7 +94,7 @@ func runBundled(cmd *cobra.Command, socket, session string) error {
 	// for the duration of the tmux session — tmux's source-file
 	// processes the file at startup, but we keep it around in case
 	// of later resource lookups.
-	defer os.Remove(confPath)
+	defer func() { _ = os.Remove(confPath) }()
 
 	// Liveness probe + auto-recovery for a wedged prior server.
 	//

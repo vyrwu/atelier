@@ -18,9 +18,9 @@ func (c *capturingReporter) SetStatus(label string) {
 
 // TestBuildClaudeNamedWorkspace_StageOrder locks in FR-2.1: the
 // auto-named build flow must emit, in order:
-//   1. Inferring branch name...
-//   2. Fetching origin/<branch>...   (after Claude returns a valid name)
-//   3. Building worktree...           (after fetch succeeds)
+//  1. Inferring branch name...
+//  2. Fetching origin/<branch>...   (after Claude returns a valid name)
+//  3. Building worktree...           (after fetch succeeds)
 //
 // We don't run the real Claude / git calls here — we test the stages
 // emitted BEFORE the first failure. With prompt="" and no git repo,

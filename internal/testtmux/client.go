@@ -197,21 +197,21 @@ func isPopupSession(name string) bool {
 
 // Common key escape sequences for convenience.
 const (
-	KeyEnter  = "\r"
-	KeyEsc    = "\x1b"
-	KeyAltSC  = "\x1b;" // Alt-;
-	KeyAltN   = "\x1bn" // Alt-n
-	KeyAltS   = "\x1bs" // Alt-s
-	KeyCtrlC  = "\x03"
-	KeyCtrlN  = "\x0e"
-	KeyCtrlS  = "\x13"
-	KeyCtrlU  = "\x15"
-	KeyCtrlA  = "\x01"
-	KeyCtrlX  = "\x18"
-	KeyUp     = "\x1b[A"
-	KeyDown   = "\x1b[B"
-	KeyRight  = "\x1b[C"
-	KeyLeft   = "\x1b[D"
+	KeyEnter = "\r"
+	KeyEsc   = "\x1b"
+	KeyAltSC = "\x1b;" // Alt-;
+	KeyAltN  = "\x1bn" // Alt-n
+	KeyAltS  = "\x1bs" // Alt-s
+	KeyCtrlC = "\x03"
+	KeyCtrlN = "\x0e"
+	KeyCtrlS = "\x13"
+	KeyCtrlU = "\x15"
+	KeyCtrlA = "\x01"
+	KeyCtrlX = "\x18"
+	KeyUp    = "\x1b[A"
+	KeyDown  = "\x1b[B"
+	KeyRight = "\x1b[C"
+	KeyLeft  = "\x1b[D"
 )
 
 // Eventually retries fn until it returns nil or timeout. Used in tests

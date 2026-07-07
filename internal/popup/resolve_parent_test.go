@@ -38,8 +38,8 @@ func (f *fakeClient) DisplayMessageAt(target, format string) (string, error) {
 	return "", nil
 }
 func (f *fakeClient) NewSessionWithCommand(string, string) error { return nil }
-func (f *fakeClient) KillSession(string) error                    { return nil }
-func (f *fakeClient) Attach(string) error                         { return nil }
+func (f *fakeClient) KillSession(string) error                   { return nil }
+func (f *fakeClient) Attach(string) error                        { return nil }
 
 // envFn returns a getenv-shaped closure backed by a map.
 func envFn(m map[string]string) func(string) string {

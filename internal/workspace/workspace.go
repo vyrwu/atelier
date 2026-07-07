@@ -59,8 +59,8 @@ type Workspace struct {
 	PaneID    string `json:"pane_id"`
 	SessionID string `json:"session_id"`
 	WindowID  string `json:"window_id"`
-	Session   string `json:"session"`   // session name
-	Name      string `json:"name"`      // window name
+	Session   string `json:"session"` // session name
+	Name      string `json:"name"`    // window name
 	Cwd       string `json:"cwd"`
 	Repo      string `json:"repo,omitempty"`
 	Branch    string `json:"branch,omitempty"`

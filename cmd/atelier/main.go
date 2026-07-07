@@ -23,8 +23,8 @@ func main() {
 	// and tooling integrations.
 	runCmd := cli.RunCommand()
 	root := &cobra.Command{
-		Use:           "atelier",
-		Short:         "Terminal-native agentic development runtime",
+		Use:   "atelier",
+		Short: "Terminal-native agentic development runtime",
 		Long: `atelier is a runtime for agentic development that uses tmux as
 its display server. Running ` + "`atelier`" + ` with no subcommand boots the
 bundled experience on a dedicated tmux socket — themed, wired, and
@@ -69,7 +69,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print build version",
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Fprintln(cmd.OutOrStdout(), version)
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), version)
 		},
 	}
 }
