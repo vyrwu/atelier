@@ -32,9 +32,22 @@ import (
 const DefaultTimeout = 5 * time.Second
 
 type Client struct {
-	socket  string
-	timeout time.Duration
+	socket     string
+	timeout    time.Duration
+	configFile string // when set, prepends `-f <file>` to every tmux call
 }
+
+// SetConfigFile makes every subsequent tmux invocation include
+// `-f <path>` (before the -L flag). Intended for tests: passing
+// `-f /dev/null` prevents tmux from sourcing the developer's real
+// ~/.config/tmux/tmux.conf, which — via atelier's own init emitted
+// there — would trigger `atelier state restore` on the fresh test
+// socket and populate it with production workspaces from
+// ~/.cache/atelier/state-<host>.json.
+//
+// Production code never needs this; a stray `-f /dev/null` in a
+// production tmux invocation would drop the user's own tmux config.
+func (c *Client) SetConfigFile(path string) { c.configFile = path }
 
 // New returns a Client that targets the named tmux socket (-L).
 // Pass an empty string to target the user's default tmux server — or,
@@ -58,13 +71,26 @@ func NewWithTimeout(socket string, timeout time.Duration) *Client {
 	if socket == "" {
 		socket = os.Getenv("ATELIER_TMUX_SOCKET")
 	}
-	return &Client{socket: socket, timeout: timeout}
+	c := &Client{socket: socket, timeout: timeout}
+	// ATELIER_TMUX_CONFIG lets test harnesses (or advanced users)
+	// override the tmux config file for every tmux call made through
+	// this client — e2e tests set it to /dev/null so tmux doesn't
+	// source the developer's ~/.config/tmux/tmux.conf into the
+	// isolated test server.
+	if v := os.Getenv("ATELIER_TMUX_CONFIG"); v != "" {
+		c.configFile = v
+	}
+	return c
 }
 
-func (c *Client) Socket() string { return c.socket }
+func (c *Client) Socket() string     { return c.socket }
+func (c *Client) ConfigFile() string { return c.configFile }
 
 func (c *Client) args(args []string) []string {
-	out := make([]string, 0, len(args)+2)
+	out := make([]string, 0, len(args)+4)
+	if c.configFile != "" {
+		out = append(out, "-f", c.configFile)
+	}
 	if c.socket != "" {
 		out = append(out, "-L", c.socket)
 	}

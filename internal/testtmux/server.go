@@ -38,10 +38,40 @@ func New(t *testing.T) *Server {
 		t.Skipf("tmux not on PATH: %v", err)
 	}
 	socket := fmt.Sprintf("atelier-test-%s", randHex(8))
+
+	// Point tmux at a minimal test config file that both:
+	//   1. Prevents tmux from sourcing the developer's real
+	//      ~/.config/tmux/tmux.conf — which invokes `atelier state
+	//      restore` on server start and leaks production workspaces
+	//      into the test socket. `-f <file>` overrides tmux's default
+	//      config-file search.
+	//   2. Sets base-index=1 / pane-base-index=1. Atelier's own target
+	//      format assumes 1-indexed windows (e.g. `select-window -t
+	//      =session:1` for the default workspace window). Without
+	//      this, tests targeting `:1` fail on tmux's stock 0-indexed
+	//      defaults. Previously "worked" only because the user config
+	//      leak also carried these settings in.
+	cfgFile, err := os.CreateTemp("", "atelier-test-tmux-*.conf")
+	if err != nil {
+		t.Fatalf("create test tmux config: %v", err)
+	}
+	if _, err := cfgFile.WriteString(
+		"set-option -g base-index 1\n" +
+			"set-window-option -g pane-base-index 1\n",
+	); err != nil {
+		_ = cfgFile.Close()
+		t.Fatalf("write test tmux config: %v", err)
+	}
+	_ = cfgFile.Close()
+	t.Cleanup(func() { _ = os.Remove(cfgFile.Name()) })
+
+	client := tmuxhost.New(socket)
+	client.SetConfigFile(cfgFile.Name())
+
 	srv := &Server{
 		Socket: socket,
 		T:      t,
-		Client: tmuxhost.New(socket),
+		Client: client,
 	}
 	t.Cleanup(srv.Kill)
 	return srv
@@ -204,7 +234,18 @@ func (s *Server) run(binary string, args []string) ([]byte, error) {
 			// Whitelist test-set gates that tests need to reach the
 			// subprocess. Everything else ATELIER_* is stripped to
 			// isolate from developer-machine state.
-			if strings.HasPrefix(kv, "ATELIER_SYNC_BUILD=") {
+			//
+			// Kept whitelist entries:
+			//   ATELIER_SYNC_BUILD — makes runWorkspacePrompt run its
+			//     build inline instead of deferring via display-popup,
+			//     so RunAtelier can assert state deterministically.
+			//   ATELIER_TMUX_CONFIG — pins `-f /dev/null` on every
+			//     tmux invocation so tmux doesn't source the
+			//     developer's ~/.config/tmux/tmux.conf into the
+			//     isolated test server (which would restore prod
+			//     workspaces onto it via atelier init).
+			if strings.HasPrefix(kv, "ATELIER_SYNC_BUILD=") ||
+				strings.HasPrefix(kv, "ATELIER_TMUX_CONFIG=") {
 				filtered = append(filtered, kv)
 			}
 			continue
@@ -214,6 +255,11 @@ func (s *Server) run(binary string, args []string) ([]byte, error) {
 	cmd.Env = append(filtered,
 		"PATH="+s.BinDir()+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"ATELIER_TMUX_SOCKET="+s.Socket,
+		// Match the parent test's tmux-isolation: every tmux call the
+		// subprocess makes gets `-f <test-config>` so the developer's
+		// real tmux.conf can't restore production state into the test
+		// socket, AND base-index=1 stays consistent with the parent.
+		"ATELIER_TMUX_CONFIG="+s.Client.ConfigFile(),
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
@@ -224,9 +270,9 @@ func (s *Server) run(binary string, args []string) ([]byte, error) {
 }
 
 var (
-	buildOnce sync.Once
+	buildOnce   sync.Once
 	builtBinDir string
-	buildErr   error
+	buildErr    error
 )
 
 // atelierBinDir builds every cmd/atelier* binary into a shared temp dir

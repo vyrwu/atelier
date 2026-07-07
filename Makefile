@@ -1,4 +1,4 @@
-.PHONY: build test test-e2e fmt lint clean help tidy install uninstall init-snapshot list-binaries release-check release-snapshot test-tmux test-tmux-clean test-plugin test-plugin-config
+.PHONY: build test test-e2e fmt lint clean help tidy install uninstall init-snapshot list-binaries release-check release-snapshot test-tmux test-tmux-clean test-plugin test-plugin-config ci
 
 BIN_DIR    := bin
 PREFIX     ?= $(HOME)/.local
@@ -23,6 +23,7 @@ help:
 	@echo "  list-binaries   print the names of binaries that would be built"
 	@echo "  test            run unit tests (no tmux required)"
 	@echo "  test-e2e        run e2e tests (spins up isolated tmux servers)"
+	@echo "  ci              run every CI step locally (gate before push)"
 	@echo "  install         copy every binary to $(INSTALL_DIR)"
 	@echo "  uninstall       remove installed binaries"
 	@echo "  init-snapshot   write 'atelier init' output to ./atelier.tmux"
@@ -62,6 +63,35 @@ test:
 test-e2e: build
 	@# Put $(BIN_DIR) on PATH so plugin discovery finds the freshly-built tools.
 	PATH="$(PWD)/$(BIN_DIR):$$PATH" go test -tags=e2e ./...
+
+# ci runs every step CI runs, in the same order, against the local
+# working tree. Use this before every push — an entire matrix of CI
+# jobs (build+test on 4 OSes, lint, goreleaser check) reduces to one
+# local dry-run. Fast-fails on the first broken step, so a single red
+# line points at the CI job that will fail if you push.
+#
+# Skips the multi-OS matrix — CI still exercises linux/darwin ×
+# amd64/arm64. This target proves the local host is compliant; the
+# matrix catches OS-specific regressions after push.
+ci:
+	@echo "→ go mod verify"
+	@go mod verify
+	@echo "→ make build"
+	@$(MAKE) --no-print-directory build
+	@echo "→ make test (unit)"
+	@$(MAKE) --no-print-directory test
+	@echo "→ make test-e2e"
+	@$(MAKE) --no-print-directory test-e2e
+	@echo "→ golangci-lint run"
+	@golangci-lint run --timeout=5m
+	@echo "→ goreleaser check"
+	@if command -v goreleaser >/dev/null 2>&1; then \
+		goreleaser check; \
+	else \
+		echo "  (goreleaser not on PATH — skipped; CI validates)"; \
+	fi
+	@echo ""
+	@echo "✔ CI-equivalent checks passed locally. Safe to push."
 
 fmt:
 	go fmt ./...

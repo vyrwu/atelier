@@ -94,7 +94,8 @@ func TestInitAggregator_EmitsAllToolBlocks(t *testing.T) {
 		"bind -T root a ",
 		"bind -T root C-s ",
 		"bind -T popup \"C-s\"",
-		"# --- k8s ---",
+		// k8s now emits a binding block (M-c → switch context), so
+		// it's no longer in the "no bindings" set.
 		"# --- popupshell ---",
 		"# --- lazygit ---",
 		"# --- claude ---",

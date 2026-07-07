@@ -19,7 +19,16 @@ func TestBgPull_StampsFreshnessOnSuccess(t *testing.T) {
 	tmp := t.TempDir()
 	repo := testtmux.TestRepo(t, tmp, "vyrwu", "demo", "main")
 
-	srv.NewSession("vyrwu/demo")
+	// Session cwd must point at the test repo — runBgPull's ahead/behind
+	// measurement reads #{pane_current_path} of the target window and
+	// runs `git rev-list` in that dir. If the pane inherits the test
+	// binary's cwd (the atelier repo), the count reflects atelier's
+	// local vs. origin state, not the test's isolated fixture repo,
+	// making the assertion depend on the developer's unpushed commits.
+	if _, err := srv.Client.Run("new-session", "-d", "-s", "vyrwu/demo",
+		"-c", repo); err != nil {
+		t.Fatalf("new-session -c %s: %v", repo, err)
+	}
 	time.Sleep(150 * time.Millisecond)
 	out, _ := srv.Client.Run("list-windows", "-t", "=vyrwu/demo", "-F", "#{window_id}")
 	wid := string(out)
