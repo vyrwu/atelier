@@ -227,7 +227,10 @@ archives:
 # Honors the plugin model: each tool is an independent formula that
 # depends_on "vyrwu/tap/atelier" (the core). Users compose what they
 # want; third-party plugins coexist via PATH discovery.
-brews:
+#
+# `homebrew_formulas` replaces the deprecated `brews:` key in
+# goreleaser v2.13+. Field shape is identical.
+homebrew_formulas:
   - name: atelier
     ids: [atelier]
     repository:

@@ -11,6 +11,13 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Ubuntu has no default git identity; test hook creates git repos
+    # and commits. See ci.yml for the same env block.
+    env:
+      GIT_AUTHOR_NAME: atelier-ci
+      GIT_AUTHOR_EMAIL: ci@atelier.local
+      GIT_COMMITTER_NAME: atelier-ci
+      GIT_COMMITTER_EMAIL: ci@atelier.local
     steps:
       - uses: actions/checkout@v7
         with:
