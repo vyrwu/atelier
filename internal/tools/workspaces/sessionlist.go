@@ -86,6 +86,22 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		}
 	}
 
+	// Memoize DefaultBranch per repo path. Every window of a repo
+	// session shares one @repo_path and one default branch, but the
+	// picker has one row per window — without the cache this shells out
+	// `git symbolic-ref` once per row (dozens of sequential git spawns
+	// in a busy sandbox) on the critical path before the picker opens.
+	// Cache collapses that to one git call per distinct repo.
+	defaultBranchCache := make(map[string]string)
+	defaultBranchFor := func(repoPath string) string {
+		if b, ok := defaultBranchCache[repoPath]; ok {
+			return b
+		}
+		b := DefaultBranch(repoPath)
+		defaultBranchCache[repoPath] = b
+		return b
+	}
+
 	type entry struct {
 		priority int
 		row      SessionRow
@@ -185,7 +201,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		var display string
 		var priority int
 		if repoPath != "" {
-			defaultBranch := DefaultBranch(repoPath)
+			defaultBranch := defaultBranchFor(repoPath)
 			isDefault := window == defaultBranch
 			// Priority layers (bash):
 			//   0/1 claude+attention (default last)

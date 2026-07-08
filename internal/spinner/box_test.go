@@ -35,6 +35,56 @@ func TestBoxSpinner_PropagatesError(t *testing.T) {
 	}
 }
 
+// TestBoxSpinner_DelayGate_SkipsRenderWhenFast locks in the delay gate:
+// a task that finishes before Delay renders nothing at all (no spinner
+// frames, no clear), so fast operations don't flash the box.
+func TestBoxSpinner_DelayGate_SkipsRenderWhenFast(t *testing.T) {
+	buf := &bytes.Buffer{}
+	s := &BoxSpinner{
+		Message:  "loading",
+		Writer:   buf,
+		Frames:   DefaultFrames,
+		Interval: time.Millisecond,
+		Delay:    100 * time.Millisecond,
+	}
+	if err := s.Run(func() error { return nil }); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("fast task under Delay should render nothing, got %q", buf.String())
+	}
+}
+
+// TestBoxSpinner_DelayGate_RendersWhenSlow verifies the gate still shows
+// the spinner once the task outlives Delay.
+func TestBoxSpinner_DelayGate_RendersWhenSlow(t *testing.T) {
+	buf := &bytes.Buffer{}
+	s := &BoxSpinner{
+		Message:  "loading",
+		Writer:   buf,
+		Frames:   DefaultFrames,
+		Interval: time.Millisecond,
+		Delay:    10 * time.Millisecond,
+	}
+	if err := s.Run(func() error { time.Sleep(60 * time.Millisecond); return nil }); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(buf.String(), "loading") {
+		t.Fatalf("slow task past Delay should render the message, got %q", buf.String())
+	}
+}
+
+// TestBoxSpinner_DelayGate_PropagatesErrorOnFastPath ensures the early
+// return from the delay gate still surfaces the task's error.
+func TestBoxSpinner_DelayGate_PropagatesErrorOnFastPath(t *testing.T) {
+	buf := &bytes.Buffer{}
+	want := errors.New("boom")
+	s := &BoxSpinner{Writer: buf, Frames: DefaultFrames, Interval: time.Millisecond, Message: "x", Delay: 100 * time.Millisecond}
+	if got := s.Run(func() error { return want }); got != want {
+		t.Fatalf("Run: got %v want %v", got, want)
+	}
+}
+
 func TestNewBox_Defaults(t *testing.T) {
 	s := NewBox("test")
 	if s.Writer == nil {

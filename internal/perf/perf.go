@@ -45,6 +45,16 @@ func Add(category string, d time.Duration) {
 	mu.Unlock()
 }
 
+// Calls returns the total number of external calls recorded for a
+// category since process start. Exposed for tests that assert a hot
+// path fans out the expected number of subprocess spawns (e.g. that
+// the session-list picker calls git once per repo, not once per row).
+func Calls(category string) int {
+	mu.Lock()
+	defer mu.Unlock()
+	return calls[category]
+}
+
 func snapshot() (map[string]int, map[string]time.Duration) {
 	mu.Lock()
 	defer mu.Unlock()
