@@ -1,9 +1,23 @@
 name: release
 
+# Trigger paths:
+#   1. `release: published` — release-please creates the GitHub Release
+#      directly via API; the release-published event fires downstream
+#      workflows even when release-please uses GITHUB_TOKEN. (Tag-push
+#      events from GITHUB_TOKEN do NOT trigger workflows — GitHub's
+#      loop-prevention.)
+#   2. `workflow_dispatch` — manual override, e.g. to re-run against
+#      an existing tag if the automated run failed. Provide the tag
+#      as input.
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0). Defaults to latest."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -22,6 +36,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # On workflow_dispatch, honor the `tag` input if given so a
+          # re-run targets a specific historical tag (e.g. v0.1.0)
+          # rather than the branch tip. On release-published, ref is
+          # already the tag, so the default is correct.
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
