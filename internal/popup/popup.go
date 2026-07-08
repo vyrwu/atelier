@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/vyrwu/atelier/internal/debuglog"
 )
 
 // SessionPrefix is the common prefix for every atelier-managed popup
@@ -191,6 +193,7 @@ func (w *WorkspaceScoped) EnsureWithCmd(h Client, parentSessionID, parentWindowI
 		return err
 	}
 	if has {
+		debuglog.Logf("popup.EnsureWithCmd: %s already exists — reattaching (launch cmd %q ignored)", name, cmd)
 		return nil
 	}
 	actualCmd := cmd
@@ -203,6 +206,7 @@ func (w *WorkspaceScoped) EnsureWithCmd(h Client, parentSessionID, parentWindowI
 	if startDir != "" {
 		actualCmd = fmt.Sprintf("cd %q && %s", startDir, actualCmd)
 	}
+	debuglog.Logf("popup.EnsureWithCmd: creating %s with cmd=%q", name, actualCmd)
 	return h.NewSessionWithCommand(name, actualCmd)
 }
 

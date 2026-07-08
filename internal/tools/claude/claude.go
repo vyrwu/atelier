@@ -22,17 +22,16 @@ package claude
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/claudegen"
+	"github.com/vyrwu/atelier/internal/claudeproj"
 	"github.com/vyrwu/atelier/internal/claudesettings"
 	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/popup"
@@ -103,17 +102,27 @@ func OpenCommand() *cobra.Command {
 				// Claude task completes. Durable (NOT one-shot like
 				// @claude_prompt) so it survives close+reopen and tmux
 				// restart.
-				resumeID, _ := h.GetWindowOption(ctx.WindowID, OptActiveSessionID)
-				// Validate: if the transcript file was deleted (user
-				// nuked ~/.claude/projects/, Claude reinstall, etc.),
-				// drop the stale id so we start fresh instead of
-				// asking Claude to --resume a missing session (which
-				// would error out and leave the popup in a bad state).
-				if resumeID != "" && !transcriptExists(resumeID) {
-					debuglog.Logf("claude.Open: stale @claude_active_session_id=%q (transcript missing) — clearing", resumeID)
-					_ = h.UnsetWindowOption(ctx.WindowID, OptActiveSessionID)
-					_ = workspace.PersistWindowMetadata(h, ctx.WindowID, MetaActiveSessionID, "")
-					resumeID = ""
+				storedID, _ := h.GetWindowOption(ctx.WindowID, OptActiveSessionID)
+				resumeID := resumeIDForLaunch(storedID)
+				if storedID != "" && resumeID == "" {
+					debuglog.Logf("claude.Open: transcript for @ai_active_session_id=%q not found — starting fresh this launch, id preserved", storedID)
+				}
+				// Fallback: no tracked id but this directory has a Claude
+				// transcript on disk → resume the most recent conversation
+				// for it. Covers the id being lost upstream — notably a
+				// soft-close (M-s M-x) prunes the window from the
+				// statestore, so recover has nothing to re-stamp — and any
+				// workspace Claude ran in before atelier tracked it. Skipped
+				// when a fresh @ai_prompt is queued (a new conversation is
+				// intended). Re-stamp so later opens and notify-attention
+				// stay consistent.
+				if resumeID == "" && prompt == "" && ctx.Cwd != "" {
+					if id := latestSessionIDForCwd(ctx.Cwd); id != "" {
+						debuglog.Logf("claude.Open: no tracked id; resuming latest transcript for cwd=%q id=%q", ctx.Cwd, id)
+						resumeID = id
+						_ = h.SetWindowOption(ctx.WindowID, OptActiveSessionID, id)
+						_ = workspace.PersistWindowMetadata(h, ctx.WindowID, MetaActiveSessionID, id)
+					}
 				}
 
 				// One-shot: clear the prompt + kind options so they
@@ -418,41 +427,30 @@ func buildClaudeStartCmd(prompt, kind, multiRepoSys, settingsPath, resumeSession
 	return fmt.Sprintf("claude %s%s", settings, shellQuote(prompt))
 }
 
-// claudeSessionIDFromPath extracts the Claude session UUID from a
-// transcript path like ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl.
-// Returns "" if the filename doesn't look like a session transcript.
-func claudeSessionIDFromPath(transcriptPath string) string {
-	base := filepath.Base(transcriptPath)
-	const suffix = ".jsonl"
-	if !strings.HasSuffix(base, suffix) {
+// Thin delegators to the shared claudeproj package (which also serves the
+// workspaces tool). Kept as unexported names so call sites + tests read
+// naturally.
+func claudeSessionIDFromPath(p string) string { return claudeproj.SessionIDFromPath(p) }
+func claudeProjectSlug(cwd string) string     { return claudeproj.ProjectSlug(cwd) }
+func claudeProjectsDir() string               { return claudeproj.ProjectsDir() }
+func transcriptExists(id string) bool         { return claudeproj.TranscriptExists(id) }
+func latestSessionIDForCwd(cwd string) string { return claudeproj.LatestSessionID(cwd) }
+
+// resumeIDForLaunch decides the id to pass to `claude --resume` given the
+// id stored on the window. Returns "" (start fresh) when there's no stored
+// id or no transcript is found for it.
+//
+// Deliberately PURE and non-mutating: it never clears the stored id. A
+// missing transcript is frequently a false negative (config dir resolved
+// wrong, env not propagated to this process, glob race), and clearing is
+// permanent + mirrored to the statestore — one false negative used to
+// erase the only pointer to a real conversation. Skipping --resume for a
+// single launch is recoverable; destroying the id is not.
+func resumeIDForLaunch(storedID string) string {
+	if storedID == "" || !transcriptExists(storedID) {
 		return ""
 	}
-	return strings.TrimSuffix(base, suffix)
-}
-
-// transcriptExists returns true if Claude has a saved transcript file
-// for the given session id. Claude stores transcripts at
-// ~/.claude/projects/<encoded-cwd>/<sessionID>.jsonl — we don't know
-// the encoded cwd at this point, so we glob over all projects.
-//
-// Used by OpenCommand to detect a STALE @claude_active_session_id
-// (transcript file deleted by the user — `rm -rf ~/.claude/projects/X`,
-// `claude` reinstall, etc.). Without this check, --resume on a missing
-// id makes Claude CLI error out and the popup shows a failure instead
-// of falling back to a fresh start.
-func transcriptExists(sessionID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	matches, err := filepath.Glob(filepath.Join(home, ".claude/projects/*", sessionID+".jsonl"))
-	if err != nil {
-		return false
-	}
-	return len(matches) > 0
+	return storedID
 }
 
 func shellQuote(s string) string {
@@ -537,39 +535,5 @@ func LatestRecap(projectDir string) (string, error) {
 }
 
 func findLatestTranscript(projectDir string) (string, error) {
-	if projectDir == "" {
-		return "", nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	slug := strings.ReplaceAll(strings.TrimPrefix(projectDir, "/"), "/", "-")
-	dir := filepath.Join(home, ".claude", "projects", slug)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
-		return "", err
-	}
-	var latest os.DirEntry
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
-		}
-		if latest == nil {
-			latest = e
-			continue
-		}
-		li, _ := latest.Info()
-		ei, _ := e.Info()
-		if ei.ModTime().After(li.ModTime()) {
-			latest = e
-		}
-	}
-	if latest == nil {
-		return "", nil
-	}
-	return filepath.Join(dir, latest.Name()), nil
+	return claudeproj.LatestTranscriptPath(projectDir)
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/vyrwu/atelier/internal/debuglog"
 
 	"github.com/vyrwu/atelier/internal/claudegen"
+	"github.com/vyrwu/atelier/internal/claudeproj"
 	"github.com/vyrwu/atelier/internal/dispatch"
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
@@ -514,6 +515,18 @@ func DeleteRowCommand() *cobra.Command {
 			// reserved for the M-r picker's own M-x — that flow is
 			// explicit about "I really mean it".
 			if repoPath != "" && window != defaultBranch {
+				// Stamp the soft-close marker FIRST, before any tmux
+				// mutation. When the victim is the sole window in its
+				// session AND the outer client is parked on it, the
+				// kill-window below destroys the session and tears down
+				// the pane/client hosting THIS very process — so anything
+				// after the kill (RemoveWindow, the marker, cleanup) may
+				// never run. The marker only needs the (stable) worktree
+				// path, so writing it up front makes M-r's "closed X ago"
+				// badge survive a self-delete. (Bug: the badge silently
+				// vanished exactly when you deleted the workspace you were
+				// sitting on.)
+				touchSoftClosedMarker(filepath.Join(workspaceWorktreeRoot(), session, window))
 				// If the target window is the outer client's CURRENT
 				// window, killing it forces tmux to auto-switch which
 				// tears down the popup-client holding the sessions
@@ -528,13 +541,8 @@ func DeleteRowCommand() *cobra.Command {
 				} else {
 					moveOuterAway(h, session, window, defaultBranch)
 				}
-				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
 				_ = statestore.RemoveWindow(session, window)
-				// Stamp a soft-close marker so M-r ranks this
-				// workspace at the top of the recover list — the
-				// "I just M-x'd by accident, give it back" path
-				// shouldn't require alphabetical scanning.
-				touchSoftClosedMarker(filepath.Join(workspaceWorktreeRoot(), session, window))
+				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
 				return hostpopup.CleanupOrphanedPopups(h)
 			}
 			// Default branch (or non-git row): kill whole session. If the
@@ -679,6 +687,7 @@ func touchSoftClosedMarker(wtPath string) {
 		return
 	}
 	if _, err := os.Stat(wtPath); err != nil {
+		debuglog.Logf("touchSoftClosedMarker: skip — wtPath %q not on disk (%v)", wtPath, err)
 		return // worktree no longer on disk (e.g. the rare case it was already wiped externally)
 	}
 	path := filepath.Join(wtPath, softClosedMarker)
@@ -690,6 +699,7 @@ func touchSoftClosedMarker(wtPath string) {
 	// Explicit Chtimes covers the case where the file already existed
 	// (re-soft-close) and write didn't bump mtime to "now" cleanly.
 	_ = os.Chtimes(path, now, now)
+	debuglog.Logf("touchSoftClosedMarker: wrote %s", path)
 }
 
 // readSoftClosedMarker returns the marker file's mtime when present,
@@ -1033,6 +1043,7 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 		WtPath:     wtPath,
 		WindowName: branch,
 		Kind:       "worktree",
+		Metadata:   recoverWindowMetadata(repo, branch),
 	}
 	if created {
 		spec.KillDefaultBranch = defaultBranch
@@ -1043,6 +1054,27 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 	}
 	spawnClaudeResume(h, repo, newWid)
 	return workspace.LandOuter(h, "="+repo, newWid)
+}
+
+// recoverWindowMetadata loads the persisted plugin metadata for a
+// soft-closed worktree window from the statestore cache, so the freshly
+// re-created window is re-stamped with (notably) `ai.active_session_id`.
+// Without this the M-r recover path creates a bare window and
+// spawnClaudeResume finds no session id to `--resume` — the Claude
+// session silently starts fresh instead of continuing where it left off.
+//
+// Mirrors what workspace.Restore does on server startup, which reads the
+// same cache. Returns nil when nothing is cached (brand-new window).
+func recoverWindowMetadata(repo, branch string) map[string]string {
+	st, err := statestore.Load()
+	if err != nil || st == nil {
+		return nil
+	}
+	w := st.FindWindow(repo, branch)
+	if w == nil || len(w.Metadata) == 0 {
+		return nil
+	}
+	return w.Metadata
 }
 
 // spawnClaudeResume queues a Claude popup for `repo:windowID` when the
@@ -1069,8 +1101,17 @@ func spawnClaudeResume(h *tmuxhost.Client, repo, windowID string) {
 	hasPopup, _ := h.HasSession(claudeSession)
 	resumeID, _ := h.GetWindowOption(wid,
 		statestore.MetadataKeyToOptionName("ai.active_session_id"))
+	// No live popup and no tracked id — but a prior conversation for this
+	// worktree may still be on disk (soft-close prunes the tracked id from
+	// the statestore, so recover has nothing to re-stamp). Consult the
+	// transcript; if one exists, still open — claude.Open resolves the
+	// latest transcript for the cwd and --resumes it. Without this, the
+	// FIRST recover after a delete lands on a bare shell with no Claude.
 	if !hasPopup && resumeID == "" {
-		return
+		cwd, _ := h.DisplayMessageAt(wid, "#{pane_current_path}")
+		if claudeproj.LatestSessionID(strings.TrimSpace(cwd)) == "" {
+			return
+		}
 	}
 	sidNum := strings.TrimPrefix(sid, "$")
 	widNum := strings.TrimPrefix(wid, "@")
