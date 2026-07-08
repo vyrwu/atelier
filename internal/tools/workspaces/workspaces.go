@@ -494,10 +494,17 @@ func DeleteRowCommand() *cobra.Command {
 				// If the target window is the outer client's CURRENT
 				// window, killing it forces tmux to auto-switch which
 				// tears down the popup-client holding the sessions
-				// picker. Hop the outer to a safe sibling window
-				// (default-branch if present, else any other window)
-				// before the kill so the picker survives.
-				moveOuterAway(h, session, window, defaultBranch)
+				// picker. Hop the outer to a safe spot before the kill
+				// so the picker survives. When a sibling window exists it
+				// absorbs the hop (default-branch preferred). When this is
+				// the SOLE window, kill-window empties — and destroys —
+				// the session, so the hop must go to another workspace
+				// entirely or tmux detaches the outer.
+				if soleWindowInSession(h, session, window) {
+					moveOuterToSiblingSession(h, session)
+				} else {
+					moveOuterAway(h, session, window, defaultBranch)
+				}
 				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
 				_ = statestore.RemoveWindow(session, window)
 				// Stamp a soft-close marker so M-r ranks this
@@ -507,7 +514,11 @@ func DeleteRowCommand() *cobra.Command {
 				touchSoftClosedMarker(filepath.Join(workspaceWorktreeRoot(), session, window))
 				return hostpopup.CleanupOrphanedPopups(h)
 			}
-			// Default branch with no other windows: kill whole session.
+			// Default branch (or non-git row): kill whole session. If the
+			// outer client is parked on this session, land it on another
+			// workspace first — otherwise kill-session detaches the outer
+			// (and tears down the M-s popup) instead of switching.
+			moveOuterToSiblingSession(h, session)
 			_, _ = h.Run("kill-session", "-t", "="+session)
 			_ = statestore.RemoveSession(session)
 			return hostpopup.CleanupOrphanedPopups(h)
@@ -562,6 +573,71 @@ func moveOuterAway(h *tmuxhost.Client, session, victimWindow, defaultBranch stri
 		return
 	}
 	debuglog.Logf("_delete-row: hopped outer=%q off victim=%s/%s to sibling=%s", outer, session, victimWindow, target)
+}
+
+// soleWindowInSession reports whether `window` is the only window in
+// `session` — i.e. killing it would empty and destroy the session.
+func soleWindowInSession(h *tmuxhost.Client, session, window string) bool {
+	out, err := h.Run("list-windows", "-t", "="+session, "-F", "#W")
+	if err != nil {
+		return false
+	}
+	n := 0
+	for _, w := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(w) != "" {
+			n++
+		}
+	}
+	return n <= 1
+}
+
+// moveOuterToSiblingSession lands the outer client on another live
+// workspace before `victimSession` gets killed, so the M-s popup
+// survives (another workspace simply becomes active) instead of tmux
+// detaching the client. No-op when the outer isn't parked on
+// `victimSession` — deleting some OTHER workspace from the picker must
+// not yank the user off the one they're viewing — or when there's no
+// other workspace to hop to (sole-workspace server: detach is then
+// unavoidable). Sibling to moveOuterAway, at session granularity.
+func moveOuterToSiblingSession(h *tmuxhost.Client, victimSession string) {
+	outer, _ := h.ShowGlobalOption("@atelier_outer_client")
+	outer = strings.TrimSpace(outer)
+	if outer == "" {
+		return
+	}
+	// Is the outer actually on the session we're about to kill? Compare
+	// by session_id (outerCurrent reads the live outer client) so a name
+	// collision can't misfire.
+	curSid, _, err := outerCurrent(h)
+	if err != nil {
+		return
+	}
+	victimSid, err := h.DisplayMessageAt(victimSession, "#{session_id}")
+	if err != nil {
+		return
+	}
+	if strings.TrimSpace(curSid) == "" || strings.TrimSpace(curSid) != strings.TrimSpace(victimSid) {
+		return
+	}
+	// Land on the highest-priority OTHER workspace. BuildSessionList
+	// already filters internal `_` sessions and sorts attention/claude
+	// first, so the first non-victim row is the natural next workspace.
+	rows, err := BuildSessionList(h)
+	if err != nil {
+		return
+	}
+	for _, r := range rows {
+		if r.Session == victimSession {
+			continue
+		}
+		if err := workspace.LandOuter(h, "="+r.Session, "="+r.Session+":"+r.Window); err != nil {
+			debuglog.LogErr("_delete-row: LandOuter to sibling session", err)
+			return
+		}
+		debuglog.Logf("_delete-row: hopped outer=%q off victim session=%s to %s/%s",
+			outer, victimSession, r.Session, r.Window)
+		return
+	}
 }
 
 // softClosedMarker is the basename of the per-worktree file that
