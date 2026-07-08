@@ -45,13 +45,33 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		return nil, err
 	}
 
+	// Badge providers (e.g. ghpr's PR-status symbol) declare a window
+	// option the picker splices between the workspace name and the recap.
+	// The picker stays agnostic to what each badge means — it just reads
+	// the declared option and renders its (pre-colored) value. This is the
+	// generic mechanism task #75 will fold @ai_workspace_kind into.
+	badgeSpecs := discoverBadges()
+	badgeKeys := badgeOptionKeys(badgeSpecs)
+	// Providers may also declare a row-sort signal (e.g. ghpr: open →
+	// draft → merged → closed). Read those options too; they're appended
+	// to the format AFTER the badge columns.
+	sorts := badgeSorts(badgeSpecs)
+	sortKeys := sortOptionKeys(sorts)
+
 	// TODO(plugins-refactor): the `@ai_workspace_kind` field is the AI
 	// plugin's namespace leaking into the foundational picker. When
 	// task #75 lands, the picker should source workspace-kind from
 	// statestore.Workspace.Kind directly (it's already mirrored there)
 	// instead of reading an AI plugin option.
-	out, err := h.Run("list-windows", "-a",
-		"-F", "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{session_last_attached}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{@last_seen}")
+	const baseFields = 10
+	format := "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{session_last_attached}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{@last_seen}"
+	for _, k := range badgeKeys {
+		format += "|#{" + k + "}"
+	}
+	for _, k := range sortKeys {
+		format += "|#{" + k + "}"
+	}
+	out, err := h.Run("list-windows", "-a", "-F", format)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +90,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		priority int
 		row      SessionRow
 		lastAtt  string
+		sortRank []int // provider-declared row-sort ranks, in provider order
 	}
 	var entries []entry
 
@@ -77,12 +98,25 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		if line == "" {
 			continue
 		}
-		fields := strings.SplitN(line, "|", 10)
-		if len(fields) < 10 {
+		fields := strings.SplitN(line, "|", baseFields+len(badgeKeys)+len(sortKeys))
+		if len(fields) < baseFields {
 			continue
 		}
 		sid, wid, session, window, lastAtt := fields[0], fields[1], fields[2], fields[3], fields[4]
 		repoPath, attention, kind, recap, lastSeen := fields[5], fields[6], fields[7], fields[8], fields[9]
+		// Badge values (each already carries its own leading space +
+		// ANSI color) follow the fixed fields, in provider order; the
+		// sort-signal columns follow the badge columns.
+		badgeStr := strings.Join(fields[baseFields:baseFields+len(badgeKeys)], "")
+		sortRank := make([]int, len(sorts))
+		for si, bs := range sorts {
+			fi := baseFields + len(badgeKeys) + si
+			v := ""
+			if fi < len(fields) {
+				v = fields[fi]
+			}
+			sortRank[si] = bs.rankOf(v)
+		}
 		// Prefer @last_seen (stamped by client-session-changed hook on
 		// switch-away) over session_last_attached (frozen at initial
 		// attach). last_seen is missing for sessions that haven't
@@ -184,31 +218,41 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 					priority = 6
 				}
 			}
-			// session=cyan(36), window=green(32)
-			display = fmt.Sprintf("%s%s\033[%s36m%s\033[0m/\033[%s32m%s\033[0m%s",
-				timeCol, icon, weight, session, weight, window, recapStr)
+			// session=cyan(36), window=green(32). Badge (if any) sits
+			// between the window name and the recap suffix.
+			display = fmt.Sprintf("%s%s\033[%s36m%s\033[0m/\033[%s32m%s\033[0m%s%s",
+				timeCol, icon, weight, session, weight, window, badgeStr, recapStr)
 		} else {
 			// Non-git (auto) session.
 			priority = 8
 			if isAttn {
 				priority = 0
 			}
-			// session=orange(256:166), window=green(32)
-			display = fmt.Sprintf("%s%s\033[%s38;5;166m%s\033[0m/\033[%s32m%s\033[0m%s",
-				timeCol, icon, weight, session, weight, window, recapStr)
+			// session=orange(256:166), window=green(32). Badge (if any)
+			// sits between the window name and the recap suffix.
+			display = fmt.Sprintf("%s%s\033[%s38;5;166m%s\033[0m/\033[%s32m%s\033[0m%s%s",
+				timeCol, icon, weight, session, weight, window, badgeStr, recapStr)
 		}
 
 		entries = append(entries, entry{
 			priority: priority,
 			row:      SessionRow{Session: session, Window: window, Display: display},
 			lastAtt:  lastAtt,
+			sortRank: sortRank,
 		})
 	}
 
-	// Stable sort by priority, ties broken by reverse last_attached (newest first).
+	// Stable sort by priority, then by any provider-declared row-sort
+	// signal (e.g. ghpr: open → draft → merged → closed), ties finally
+	// broken by reverse last_attached (newest first).
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].priority != entries[j].priority {
 			return entries[i].priority < entries[j].priority
+		}
+		for k := range entries[i].sortRank {
+			if entries[i].sortRank[k] != entries[j].sortRank[k] {
+				return entries[i].sortRank[k] < entries[j].sortRank[k]
+			}
 		}
 		return entries[i].lastAtt > entries[j].lastAtt
 	})

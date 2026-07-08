@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "k8s",
 	Description:   "Singleton k9s popup (picker on every open; respawns on context change)",
 	PrimaryInvoke: "open",

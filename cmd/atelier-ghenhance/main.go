@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "ghenhance",
 	Description:   "Per-workspace gh-enhance popup (GitHub Actions)",
 	Popup:         manifest.KindWorkspace,

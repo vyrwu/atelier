@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "ccusage",
 	Description:   "Claude API token usage snapshot (singleton, fresh on each open)",
 	Popup:         manifest.KindGlobal,

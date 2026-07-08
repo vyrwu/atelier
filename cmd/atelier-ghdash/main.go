@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "ghdash",
 	Description:   "Per-workspace gh-dash popup (GitHub PRs/issues)",
 	Popup:         manifest.KindWorkspace,

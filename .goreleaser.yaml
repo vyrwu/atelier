@@ -98,6 +98,14 @@ builds:
     goarch: [amd64, arm64]
     ldflags: [-s, -w]
 
+  - id: atelier-ghpr
+    main: ./cmd/atelier-ghpr
+    binary: atelier-ghpr
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
   - id: atelier-ccusage
     main: ./cmd/atelier-ccusage
     binary: atelier-ccusage
@@ -208,6 +216,15 @@ archives:
     ids: [atelier-ghenhance]
     name_template: >-
       atelier-ghenhance_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files: [LICENSE]
+
+  - id: atelier-ghpr
+    ids: [atelier-ghpr]
+    name_template: >-
+      atelier-ghpr_{{ .Version }}_
       {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
       {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
     formats: [tar.gz]
@@ -394,6 +411,23 @@ homebrew_casks:
     directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: Atelier tool — gh enhance-repo launcher
+    dependencies:
+      - cask: atelier
+      - formula: gh
+
+  # gh-pr reads PR state via `gh pr view --json` and opens PRs with
+  # `gh pr view --web`; depends on `gh` (same as ghdash/ghenhance).
+  - name: atelier-ghpr
+    ids: [atelier-ghpr]
+    binaries:
+      - atelier-ghpr
+    repository:
+      owner: vyrwu
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    directory: Casks
+    homepage: https://github.com/vyrwu/atelier
+    description: Atelier tool — per-workspace GitHub PR status badge
     dependencies:
       - cask: atelier
       - formula: gh

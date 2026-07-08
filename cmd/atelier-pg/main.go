@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "pg",
 	Description:   "Postgres tools (pgcli + pgcenter, singleton popups)",
 	Popup:         manifest.KindGlobal,

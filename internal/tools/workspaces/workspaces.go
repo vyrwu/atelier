@@ -78,7 +78,22 @@ func SessionsCommand() *cobra.Command {
 			// popup chrome. `#44475a` is dracula's "current line"
 			// selection grey — dimmer than the purple it replaced, so
 			// `#f8f8f2:bold` text reads with more contrast on it.
-			args := fzfstyle.Args("栽 ", "Select Workspace", "red",
+			// Badge providers (e.g. ghpr) contribute a per-row symbol and
+			// an optional keybinding. Poke each provider's refresh once now
+			// so the badges are current on the NEXT open (fire-and-forget;
+			// each tool throttles its own fetches). Then wire their declared
+			// action keys + footer hints generically — the picker never
+			// hard-codes a provider.
+			badgeSpecs := discoverBadges()
+			spawnBadgeRefreshes(badgeSpecs)
+			footer := "M-x · delete  |  M-n · creator  |  M-r · history  |  M-u · clone url"
+			for _, s := range badgeSpecs {
+				if s.Action != nil && s.Action.Label != "" {
+					footer += "  |  " + s.Action.Key + " · " + s.Action.Label
+				}
+			}
+
+			opts := []fzfstyle.Opt{
 				fzfstyle.WithCustomColor("prompt:red:bold,pointer:red,query:red,hl:red,hl+:red:bold,bg+:#44475a,fg+:#f8f8f2:bold,label:103,border:103,footer:103"),
 				fzfstyle.WithDelimiter("\t"),
 				fzfstyle.WithNth("3"),
@@ -91,8 +106,16 @@ func SessionsCommand() *cobra.Command {
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithFooter("M-x · delete  |  M-n · creator  |  M-r · history  |  M-u · clone url"),
-			)
+			}
+			for _, s := range badgeSpecs {
+				if s.Action == nil || s.Action.Invoke == "" || s.Action.Key == "" {
+					continue
+				}
+				opts = append(opts, fzfstyle.WithBind(keyToFzf(s.Action.Key),
+					"execute-silent("+dispatch.ToolCmd(s.tool, s.Action.Invoke, "{}")+")"))
+			}
+			opts = append(opts, fzfstyle.WithFooter(footer))
+			args := fzfstyle.Args("栽 ", "Select Workspace", "red", opts...)
 			if emptyHeader != "" {
 				args = append(args, "--header="+emptyHeader)
 			}

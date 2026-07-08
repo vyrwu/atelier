@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "lazygit",
 	Description:   "Per-window lazygit popup",
 	Popup:         manifest.KindWorkspace,

@@ -57,6 +57,14 @@ type Manifest struct {
 	Requires    []string `json:"requires,omitempty"`
 	Subcommands []string `json:"subcommands,omitempty"`
 
+	// Tool declares that this plugin registers a launchable entry in the
+	// M-; tool selector. Being a discovered plugin is NOT enough — a
+	// plugin may exist purely to contribute background capabilities
+	// (badges, sort signals, hooks) without being a menu tool. Only
+	// plugins with Tool=true appear in the selector; providers like ghpr
+	// omit it. Discovery, dispatch, and `atelier doctor` are unaffected.
+	Tool bool `json:"tool,omitempty"`
+
 	// PickerBindings declares the keys this tool binds INSIDE its own
 	// popup (whatever rendering technology the popup uses — fzf, bubbletea,
 	// raw curses, doesn't matter to atelier). atelier core uses this only
@@ -67,6 +75,61 @@ type Manifest struct {
 	// one consistent modifier across the whole UI, but tools can deviate
 	// if they have a stronger UX reason.
 	PickerBindings []PickerBinding `json:"picker_bindings,omitempty"`
+
+	// Badge, if set, declares that this tool contributes a per-workspace
+	// status badge to the M-s workspace picker. The picker stays agnostic
+	// to what the badge means: it reads the declared window option, splices
+	// its (already-rendered) value between the workspace name and the AI
+	// summary, and — if Action is set — wires the declared key to invoke a
+	// subcommand on the selected row. See internal/tools/workspaces badge
+	// wiring. The gh-pr tool is the first provider.
+	Badge *Badge `json:"badge,omitempty"`
+}
+
+// Badge is a tool's contribution to the workspace picker: a per-window
+// status symbol plus an optional keybinding that acts on the selected row.
+// The core never interprets the badge's meaning — the tool writes a
+// pre-rendered (ANSI-colored) glyph into the Option window-option and the
+// picker splices it verbatim.
+type Badge struct {
+	// Option is the tmux window-option the picker reads for the badge
+	// value, e.g. "@ghpr_badge". Follows the @<plugin>_<field> convention.
+	Option string `json:"option"`
+
+	// Refresh, if set, is a subcommand the picker spawns (detached, once
+	// per open) so the tool can update its badges. The tool owns its own
+	// staleness throttling — the picker just pokes it. e.g. "_refresh".
+	Refresh string `json:"refresh,omitempty"`
+
+	// Order sorts this badge among multiple providers (ascending). Ties
+	// break on tool name.
+	Order int `json:"order,omitempty"`
+
+	// SortOption + SortOrder let a provider influence the picker's row
+	// order. When set, the picker reads SortOption (a tmux window option
+	// holding a semantic value) and sorts rows by the value's index in
+	// SortOrder (earlier = higher). Values absent from SortOrder (and
+	// windows without the option) sort last. Applied WITHIN the picker's
+	// existing grouping, as a tiebreak before recency. ghpr uses this to
+	// order open → draft → merged → closed.
+	SortOption string   `json:"sort_option,omitempty"`
+	SortOrder  []string `json:"sort_order,omitempty"`
+
+	// Action, if set, binds a key in the picker that runs Invoke on the
+	// selected row.
+	Action *BadgeAction `json:"action,omitempty"`
+}
+
+// BadgeAction binds a picker key to a tool subcommand invoked with the
+// selected row (the full tab-delimited picker line) as its argument.
+type BadgeAction struct {
+	// Key is atelier canonical form ("M-o", "C-o"); the picker translates
+	// it to its rendering library's syntax and shows it in the footer.
+	Key string `json:"key"`
+	// Invoke is the tool subcommand to run, e.g. "open".
+	Invoke string `json:"invoke"`
+	// Label is the short footer text, e.g. "open PR".
+	Label string `json:"label,omitempty"`
 }
 
 // PickerBinding describes one keybinding inside a tool's popup. It is

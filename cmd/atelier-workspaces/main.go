@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "workspaces",
 	Description:   "Workspace picker, session switcher, clone-from-URL (fzf-driven, bash-exact)",
 	PrimaryInvoke: "sessions",
