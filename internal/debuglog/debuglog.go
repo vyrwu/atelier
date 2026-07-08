@@ -7,13 +7,16 @@
 //
 //	2026-06-10T19:45:23.123 [atelier-workspaces:12345] <event> <fields...>
 //
-// Three categories of records:
+// Four categories of records:
 //
-//   - cmd: every `tmux <args>` invocation issued via tmuxhost.Client.Run.
-//     Records args, exit code, stdout/stderr (truncated to 1KB).
+//   - cmd: every `tmux <args>` (via tmuxhost.Client.Run) and instrumented
+//     `git <args>` invocation. Records args, exit code, stdout/stderr
+//     (truncated to 1KB), and wall-clock duration (`dur=Nms`).
 //   - log: ad-hoc `Logf` calls from any package — decision points,
 //     resolved state, branch markers.
 //   - err: errors that propagate up but are otherwise discarded.
+//   - perf: operation-level timing rollups from package perf — total
+//     wall-clock plus a tmux/git/self breakdown for one logical op.
 //
 // Always-on, no env-var gate. Rotation: file is renamed to `.1` (and
 // `.1` → `.2`) when it exceeds maxBytes. The rotated history is enough
@@ -142,8 +145,26 @@ func isHotPathBinary() bool {
 }
 
 // LogCmd records a tmux invocation: args (joined with single spaces), the
-// combined output (truncated to 1KB), and the exit code derived from err.
-func LogCmd(args []string, output []byte, err error) {
+// combined output (truncated to 1KB), the exit code derived from err, and
+// how long the call took (for perf diagnosis of slow operations).
+func LogCmd(args []string, output []byte, err error, dur time.Duration) {
+	logExec("tmux", strings.Join(args, " "), output, err, dur)
+}
+
+// LogGitCmd records a git invocation the same way as LogCmd. dir (when
+// non-empty) is shown as a leading `-C <dir>` so the log reflects which
+// repo the call hit — the session-list picker fans out one-to-many git
+// calls across repos and that context is what makes a slow build legible.
+func LogGitCmd(dir string, args []string, output []byte, err error, dur time.Duration) {
+	argStr := strings.Join(args, " ")
+	if dir != "" {
+		argStr = "-C " + dir + " " + argStr
+	}
+	logExec("git", argStr, output, err, dur)
+}
+
+// logExec is the shared formatter behind LogCmd/LogGitCmd.
+func logExec(tool, argStr string, output []byte, err error, dur time.Duration) {
 	if isHotPathBinary() {
 		return
 	}
@@ -152,7 +173,6 @@ func LogCmd(args []string, output []byte, err error) {
 		return
 	}
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000")
-	argStr := strings.Join(args, " ")
 	outStr := string(output)
 	if len(outStr) > 1024 {
 		outStr = outStr[:1024] + "…(truncated)"
@@ -167,8 +187,25 @@ func LogCmd(args []string, output []byte, err error) {
 			status = status[:200] + "…"
 		}
 	}
-	fmt.Fprintf(f, "%s [%s:%d] cmd tmux %s → %s | %s\n",
-		now, binary, pid, argStr, status, outStr)
+	fmt.Fprintf(f, "%s [%s:%d] cmd %s %s → %s dur=%dms | %s\n",
+		now, binary, pid, tool, argStr, status, dur.Milliseconds(), outStr)
+}
+
+// LogPerf records a perf-span rollup (formatted by package perf). The
+// message already carries the operation name and its timing breakdown;
+// this just stamps the shared prefix and `perf` category.
+func LogPerf(msg string) {
+	if isHotPathBinary() {
+		return
+	}
+	f := ensureOpen()
+	if f == nil {
+		return
+	}
+	now := time.Now().UTC().Format("2006-01-02T15:04:05.000")
+	mu.Lock()
+	defer mu.Unlock()
+	fmt.Fprintf(f, "%s [%s:%d] perf %s\n", now, binary, pid, msg)
 }
 
 // LogErr records an error with a context label. Use at error-discard

@@ -23,7 +23,7 @@ func TestHotPathBinary_SuppressesStatusEmitters(t *testing.T) {
 	os.Args = []string{"atelier", "status", "freshness"}
 
 	Logf("should not appear")
-	LogCmd([]string{"list-windows"}, []byte("zsh"), nil)
+	LogCmd([]string{"list-windows"}, []byte("zsh"), nil, 0)
 	LogErr("ctx", os.ErrNotExist)
 
 	logPath := filepath.Join(tmp, "atelier", "debug.log")

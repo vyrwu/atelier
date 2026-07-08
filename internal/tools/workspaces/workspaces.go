@@ -33,6 +33,7 @@ import (
 	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
 	"github.com/vyrwu/atelier/internal/initgen"
 	"github.com/vyrwu/atelier/internal/manifest"
+	"github.com/vyrwu/atelier/internal/perf"
 	"github.com/vyrwu/atelier/internal/spinner"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
@@ -1876,7 +1877,12 @@ func runGit(dir string, args ...string) error {
 	}
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
+	start := time.Now()
+	err := cmd.Run()
+	dur := time.Since(start)
+	debuglog.LogGitCmd(dir, args, errBuf.Bytes(), err, dur)
+	perf.Add("git", dur)
+	if err != nil {
 		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
 	}
 	return nil
@@ -1887,7 +1893,11 @@ func runGitQuiet(dir string, args ...string) string {
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	start := time.Now()
 	out, err := cmd.Output()
+	dur := time.Since(start)
+	debuglog.LogGitCmd(dir, args, out, err, dur)
+	perf.Add("git", dur)
 	if err != nil {
 		return ""
 	}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
+	"github.com/vyrwu/atelier/internal/perf"
 )
 
 // DefaultTimeout caps how long any single tmux command may take. A
@@ -109,8 +110,11 @@ func (c *Client) exec(fullArgs []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "tmux", fullArgs...)
+	start := time.Now()
 	out, err := cmd.CombinedOutput()
-	debuglog.LogCmd(fullArgs, out, err)
+	dur := time.Since(start)
+	debuglog.LogCmd(fullArgs, out, err, dur)
+	perf.Add("tmux", dur)
 	if ctx.Err() == context.DeadlineExceeded {
 		return out, fmt.Errorf("tmux %s: timed out after %s (server wedged?)",
 			strings.Join(fullArgs, " "), c.timeout)

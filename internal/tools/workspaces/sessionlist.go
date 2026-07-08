@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/perf"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
 
@@ -36,6 +37,8 @@ type SessionRow struct {
 //   - Priority sort: claude+attention < claude < attention < regular
 //     (default-branch row of a repo sorts after non-default within each layer)
 func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
+	defer perf.Start("session-list").End()
+
 	// Find outer (workspace) client's current sid+wid for "you are here".
 	currentSid, currentWid, err := outerCurrent(h)
 	if err != nil {
