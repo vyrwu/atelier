@@ -1247,13 +1247,20 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 		return runWorkspaceBuild(prompt, repo, repoPath, defaultBranch)
 	}
 
-	// Defer the build into a spinner-sized popup so the M-n picker
-	// popup fully closes first — otherwise the picker's rectangle sits
-	// behind the spinner as an empty "carved shadow" on the outer
-	// terminal (the popup pty stays open until this process exits, and
-	// the spinner draws inside that oversized picker geometry). Writing
-	// the prompt to a tmp file avoids shell-escaping any special chars
-	// the user typed; other args are shell-safe repo/path/branch names.
+	// Defer the build into a spinner-sized popup that renders ON TOP of
+	// the Claude popup the creator was launched from — the user keeps
+	// seeing their Claude session while the build runs, then _build's
+	// LandOuter swaps to the new workspace and reopens Claude there.
+	//
+	// This must nest on the tool popup's INNER client, not the outer
+	// client: tmux allows only one popup per client, so a second
+	// display-popup on the outer client (which the Claude popup occupies)
+	// is silently dropped and never launches _build. OpenOverInnerPopup
+	// targets the inner client and defers past this process's exit so the
+	// creator popup closes first and frees that client to stack the
+	// spinner. Writing the prompt to a tmp file avoids shell-escaping any
+	// special chars the user typed; other args are shell-safe
+	// repo/path/branch names.
 	specPath, err := writeBuildSpec(prompt)
 	if err != nil {
 		return err
@@ -1261,7 +1268,7 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 	invoke := fmt.Sprintf("%s --spec-file=%s --repo=%s --repo-path=%s --default-branch=%s",
 		dispatch.ToolCmd("workspaces", "_build"),
 		specPath, repo, repoPath, defaultBranch)
-	return hostpopup.OpenOnOuter(
+	return hostpopup.OpenOverInnerPopup(
 		tmuxhost.New(""),
 		hostpopup.SpinnerStyleArgs("Building workspace"),
 		invoke,
