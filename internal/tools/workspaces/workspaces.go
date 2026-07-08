@@ -1230,47 +1230,17 @@ func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
 			}
 		}
 
-		// If a window with this name already exists in the session, jump to it.
+		// If the name maps to an existing window or worktree, reuse it
+		// (jump / attach) instead of rebuilding.
 		h := tmuxhost.New("")
-		if has, _ := h.HasSession(session); has {
-			// list-windows with #{window_id}\t#W so we can target the
-			// existing window by its @ID instead of by name (which
-			// silently fails when name contains `/`).
-			out, _ := h.Run("list-windows", "-t", "="+session, "-F", "#{window_id}\t#W")
-			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-				parts := strings.SplitN(line, "\t", 2)
-				if len(parts) != 2 {
-					continue
-				}
-				if parts[1] == name {
-					return workspace.LandOuter(h, "="+session, parts[0])
-				}
-			}
+		if _, newWid, handled, err := reuseExistingWorkspace(h, session, repoPath, name, defaultBranch); err != nil {
+			return err
+		} else if handled {
+			return workspace.LandOuter(h, "="+session, newWid)
 		}
 
-		// If a branch with this name exists but isn't a worktree, error.
+		// A branch with this name exists but isn't a worktree — re-prompt.
 		if branchExists(repoPath, name) {
-			wtPath := worktreePathForBranch(repoPath, name)
-			if wtPath != "" {
-				created, err := ensureSession()
-				if err != nil {
-					return err
-				}
-				h := tmuxhost.New("")
-				spec := workspace.WorktreeWindowSpec{
-					Session:    session,
-					WtPath:     wtPath,
-					WindowName: name,
-				}
-				if created {
-					spec.KillDefaultBranch = defaultBranch
-				}
-				newWid, err := workspace.CreateWorktreeWindow(h, spec)
-				if err != nil {
-					return err
-				}
-				return workspace.LandOuter(h, "="+session, newWid)
-			}
 			errMsg = fmt.Sprintf("✗ branch '%s' exists but isn't a worktree — pick another name", name)
 			query = name
 			name = ""
@@ -1514,12 +1484,23 @@ func runWorkspaceBuild(prompt, repo, repoPath, defaultBranch string) error {
 		return err
 	})
 	if err != nil {
-		// The picker popup is already gone by the time _build runs,
-		// so no re-prompt loop is possible from here. Surface the
-		// failure via display-message (visible on the outer client's
-		// statusline) and exit; user re-invokes M-n to retry.
-		_, _ = h.Run("display-message", fmt.Sprintf("✗ workspace build failed: %v", err))
-		return err
+		// The picker popup is already gone by the time _build runs, so no
+		// re-prompt loop is possible from here. When Claude's generated
+		// name collides with an existing workspace (common: vague prompts
+		// all name to `chore/wip`), reuse it and land there instead of
+		// dumping the user out of the creator.
+		if errors.Is(err, errBranchAlreadyExists) {
+			if wt, wid, handled, rerr := reuseExistingWorkspace(h, session, repoPath, name, defaultBranch); rerr == nil && handled {
+				wtPath, newWid = wt, wid
+				err = nil
+			}
+		}
+		if err != nil {
+			// Surface the failure via display-message (visible on the outer
+			// client's statusline) and exit; user re-invokes M-n to retry.
+			_, _ = h.Run("display-message", fmt.Sprintf("✗ workspace build failed: %v", err))
+			return err
+		}
 	}
 
 	// Queue the Claude popup BEFORE LandOuter. LandOuter's
@@ -1689,7 +1670,17 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 		return name, "", fmt.Errorf("invalid name: %q", name)
 	}
 	if branchExists(repoPath, name) {
-		return name, "", fmt.Errorf("branch %q already exists", name)
+		// `chore/wip` names every vague/unparseable prompt, so distinct
+		// tasks all collide on it — give each its own worktree
+		// (chore/wip-2, -3, …) instead of reusing an unrelated wip
+		// branch. A *specific* name colliding means "resume that task":
+		// surface errBranchAlreadyExists so _build reuses the existing
+		// workspace.
+		if name == wipFallbackBranch {
+			name = nextFreeBranch(repoPath, name)
+		} else {
+			return name, "", fmt.Errorf("branch %q %w", name, errBranchAlreadyExists)
+		}
 	}
 	wtPath = filepath.Join(workspaceWorktreeRoot(), repo, name)
 	_ = os.MkdirAll(filepath.Dir(wtPath), 0o755)
@@ -2057,6 +2048,83 @@ func runGitQuiet(dir string, args ...string) string {
 
 func branchExists(repoPath, branch string) bool {
 	return runGitQuiet(repoPath, "show-ref", "--verify", "refs/heads/"+branch) != ""
+}
+
+// wipFallbackBranch is the deterministic name the branch-naming prompt
+// emits for vague/unparseable prompts. It's the one name that legitimately
+// collides across unrelated tasks, so it gets numeric disambiguation
+// rather than reuse — see buildClaudeNamedWorkspace.
+const wipFallbackBranch = "chore/wip"
+
+// nextFreeBranch returns the first name of the form base, base-2, base-3,
+// … that has no existing branch in the repo.
+func nextFreeBranch(repoPath, base string) string {
+	if !branchExists(repoPath, base) {
+		return base
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if !branchExists(repoPath, candidate) {
+			return candidate
+		}
+	}
+}
+
+// errBranchAlreadyExists is returned by buildClaudeNamedWorkspace when the
+// Claude-generated branch name collides with an existing branch. The
+// _build flow catches it (errors.Is) to reuse the existing workspace
+// instead of dumping the user out of the creator.
+var errBranchAlreadyExists = errors.New("already exists")
+
+// reuseExistingWorkspace handles the "requested branch/window already
+// exists" case shared by the manual-name and Claude-named build flows.
+// It never re-runs `git worktree add`. Returns handled=true with the
+// target window (and its worktree path) when the name maps to an existing
+// atelier window or an existing git worktree — the caller should land on
+// newWid rather than error out. Returns handled=false when the branch
+// exists but isn't a worktree (not reusable) or doesn't exist at all.
+func reuseExistingWorkspace(h *tmuxhost.Client, session, repoPath, name, defaultBranch string) (wtPath, newWid string, handled bool, err error) {
+	// An atelier window with this name already exists → reuse it directly.
+	if has, _ := h.HasSession(session); has {
+		// list-windows with #{window_id}\t#W so we target the existing
+		// window by @ID instead of by name (which silently fails when the
+		// name contains `/`).
+		out, _ := h.Run("list-windows", "-t", "="+session, "-F", "#{window_id}\t#W")
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			parts := strings.SplitN(line, "\t", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			if parts[1] == name {
+				return worktreePathForBranch(repoPath, name), parts[0], true, nil
+			}
+		}
+	}
+	// The branch exists as a worktree but has no window yet → stamp one.
+	if branchExists(repoPath, name) {
+		wt := worktreePathForBranch(repoPath, name)
+		if wt == "" {
+			return "", "", false, nil // branch exists but isn't a worktree
+		}
+		created, cerr := workspace.EnsureSession(h, session, repoPath, defaultBranch)
+		if cerr != nil {
+			return "", "", false, cerr
+		}
+		spec := workspace.WorktreeWindowSpec{
+			Session:    session,
+			WtPath:     wt,
+			WindowName: name,
+		}
+		if created {
+			spec.KillDefaultBranch = defaultBranch
+		}
+		wid, cerr := workspace.CreateWorktreeWindow(h, spec)
+		if cerr != nil {
+			return "", "", false, cerr
+		}
+		return wt, wid, true, nil
+	}
+	return "", "", false, nil
 }
 
 // remoteBranchExists checks whether origin has a branch with this name.
