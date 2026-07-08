@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "claude",
 	Description:   "Per-window Claude Code popup",
 	Popup:         manifest.KindWorkspace,

@@ -115,12 +115,26 @@ func SelectCommand() *cobra.Command {
 // Selector, Workspace Creator. Falls back to plugin order for any
 // non-canonical tools.
 func buildEntries(plugins []plugin.Plugin) []entry {
-	// Index plugins by name for quick lookup.
-	byName := make(map[string]*plugin.Plugin, len(plugins))
+	// Only plugins that explicitly register a tool (Manifest.Tool) appear
+	// in the selector. Discovered-but-not-a-tool plugins (providers like
+	// ghpr that only contribute a workspace badge) are filtered out here,
+	// so neither the canonical ordering below nor the community loop can
+	// surface them.
+	tools := make([]plugin.Plugin, 0, len(plugins))
 	for i := range plugins {
 		if plugins[i].Name == "toolselector" {
 			continue
 		}
+		if plugins[i].Manifest == nil || !plugins[i].Manifest.Tool {
+			continue
+		}
+		tools = append(tools, plugins[i])
+	}
+	plugins = tools
+
+	// Index plugins by name for quick lookup.
+	byName := make(map[string]*plugin.Plugin, len(plugins))
+	for i := range plugins {
 		byName[plugins[i].Name] = &plugins[i]
 	}
 

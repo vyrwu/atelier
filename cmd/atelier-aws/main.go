@@ -11,6 +11,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "aws",
 	Description:   "aws-vault profile picker (respawns outer pane under aws-vault exec)",
 	Popup:         manifest.KindNone,

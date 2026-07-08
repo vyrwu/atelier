@@ -53,8 +53,8 @@ func TestCheckEscapeTime_Low(t *testing.T) {
 func TestCheckStatuslineFormat_NoAtelier(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("seed")
-	// Default tmux window-status-current-format has neither freshness
-	// nor attention segments.
+	// Default tmux window-status-format has neither freshness nor
+	// attention segments.
 
 	r := checkStatuslineFormat(srv.Client)
 	if r.Status != StatusFail {
@@ -70,8 +70,8 @@ func TestCheckStatuslineFormat_BothPresent(t *testing.T) {
 	fmt := "#W " +
 		"#(atelier status freshness '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')" +
 		"#(atelier status attention count)"
-	if _, err := srv.Client.Run("set-option", "-g", "window-status-current-format", fmt); err != nil {
-		t.Fatalf("set window-status-current-format: %v", err)
+	if _, err := srv.Client.Run("set-option", "-g", "window-status-format", fmt); err != nil {
+		t.Fatalf("set window-status-format: %v", err)
 	}
 
 	r := checkStatuslineFormat(srv.Client)
@@ -87,9 +87,9 @@ func TestCheckStatuslineFormat_PartialInjection(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("seed")
 	// Only freshness, no attention.
-	if _, err := srv.Client.Run("set-option", "-g", "window-status-current-format",
+	if _, err := srv.Client.Run("set-option", "-g", "window-status-format",
 		"#W #(atelier status freshness 'a' 'b' 'c' 'd' 'e')"); err != nil {
-		t.Fatalf("set window-status-current-format: %v", err)
+		t.Fatalf("set window-status-format: %v", err)
 	}
 
 	r := checkStatuslineFormat(srv.Client)

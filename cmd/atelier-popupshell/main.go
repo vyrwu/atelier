@@ -12,6 +12,7 @@ import (
 
 var Manifest = &manifest.Manifest{
 	APIVersion:    manifest.APIVersion,
+	Tool:          true,
 	Name:          "popupshell",
 	Description:   "Persistent shell popup per parent window",
 	Popup:         manifest.KindWorkspace,
