@@ -209,6 +209,23 @@ func TestThemeBlock_UserOverrideHookIsLast(t *testing.T) {
 	}
 }
 
+// TestThemeBlock_HidesInactiveWorkspaces locks the "only the current
+// workspace renders" contract: a repo session can hold many worktree
+// windows and listing every branch in the status bar is redundant
+// clutter next to the M-; picker. window-status-format is empty (hidden
+// inactive windows) while window-status-current-format keeps the #W
+// anchor so stamp-statusline can inject freshness + attention for the
+// active workspace.
+func TestThemeBlock_HidesInactiveWorkspaces(t *testing.T) {
+	b := ThemeBlock()
+	if !strings.Contains(b, `set -g window-status-format ""`) {
+		t.Errorf("ThemeBlock must set an EMPTY window-status-format to hide inactive workspaces.\nfull block:\n%s", b)
+	}
+	if !strings.Contains(b, `set -g window-status-current-format "#[bold] #W #[nobold]"`) {
+		t.Errorf("ThemeBlock window-status-current-format must keep the #W anchor for the active workspace.\nfull block:\n%s", b)
+	}
+}
+
 // TestRestoreBlock_RunsPopupCleanupAtStartup locks the auto-GC
 // contract: every fresh atelier tmux server kicks off a popup
 // orphan sweep on startup. Without this, hook failures (cleanup

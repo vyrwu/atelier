@@ -164,10 +164,12 @@ run-shell -b 'atelier popup cleanup --startup'
 //
 // Order matters: freshness comes BEFORE attention so the layout reads
 // `<window-name> <freshness> ⏺<n>` — local sync state next to the
-// window, global attention to the right. Both segments are appended
-// to BOTH window-status-format and window-status-current-format so the
-// freshness icon shows on every window in the bar, not only the active
-// one.
+// window, global attention to the right. In bundled mode only the
+// current workspace renders (window-status-format is empty), so the
+// segments effectively show for the active workspace. Plugin-mode
+// users who keep a #W-bearing window-status-format still get freshness
+// injected on every window — stamp-statusline stamps both formats; the
+// bundled theme simply opts the inactive windows out.
 func StatuslineBlock() string {
 	return `# --- statusline ---
 set -g status-interval 3
@@ -317,12 +319,15 @@ set -g status-left-length 100
 set -g status-right-length 50
 set -g status-left " #S "
 set -g status-right " %H:%M "
-# window-status-format MUST contain #W. stamp-statusline injects the
-# atelier freshness segment AFTER the #W anchor; with an empty / #W-less
-# format the injection falls through to append, producing a bare
-# floating icon for every inactive window in the bar (the "phantom
-# second checkmark" bug).
-set -g window-status-format " #W "
+# Only the CURRENT workspace renders in the status line. Inactive
+# windows are intentionally hidden (empty window-status-format) — a
+# repo session can hold many worktree windows and listing every branch
+# in the bar is redundant clutter next to the workspace picker (M-;).
+# The empty format has no #W anchor, so stamp-statusline injects
+# nothing there (no phantom floating freshness icon on hidden windows);
+# the freshness + attention segments land in window-status-current-format
+# below and show for the active workspace only.
+set -g window-status-format ""
 set -g window-status-separator ""
 set -g window-status-current-format "#[bold] #W #[nobold]"
 
