@@ -1,7 +1,8 @@
 // Package ghpr is atelier's GitHub-PR-status badge provider. It enriches
 // the M-s workspace picker with a per-workspace PR-state symbol (open /
-// draft / merged / closed) rendered right after the workspace name, and
-// binds M-o to open the workspace's PR in the browser.
+// draft / merged / closed) rendered between the attention icon and the
+// workspace name, and binds M-o to open the workspace's PR in the
+// browser.
 //
 // It plugs in via the generic manifest Badge capability: the picker reads
 // the @ghpr_badge window option and splices it verbatim, and spawns
