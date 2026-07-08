@@ -16,15 +16,6 @@ concurrency:
 
 jobs:
   build-and-test:
-    # Skip CI on release-please's auto-generated PRs. Their diff is
-    # only CHANGELOG.md + .release-please-manifest.json — no code
-    # change, no reason to spend runner minutes. The main-branch CI
-    # gate on release-please.yml already ensured main was green
-    # before the PR was created. Skipped jobs register as "skipped"
-    # checks, which required-status-check rules accept as passing.
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.head_ref, 'release-please--')
     strategy:
       fail-fast: false
       matrix:
@@ -35,25 +26,36 @@ jobs:
           - ubuntu-latest # linux/amd64
           - macos-latest  # darwin/arm64 (apple silicon)
     runs-on: ${{ matrix.os }}
+    # RELEASE_PR flags release-please's auto-generated PRs. Each
+    # expensive step below is `if: !RELEASE_PR`. Skipping steps (not
+    # jobs) keeps the check reporting "success" instead of "skipped",
+    # which required-status-check rules accept for merge — a
+    # job-level `if:` would have marked the whole check "skipped" and
+    # left branch protection BLOCKED.
+    #
     # Ubuntu runners have no default git identity; several tests create
     # git repos and commit. macOS runners inherit an identity from the
     # image. Set the identity at job level so both paths behave the
     # same (git honors GIT_AUTHOR_*/GIT_COMMITTER_* env for every
     # commit without needing `git config`).
     env:
+      RELEASE_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') }}
       GIT_AUTHOR_NAME: atelier-ci
       GIT_AUTHOR_EMAIL: ci@atelier.local
       GIT_COMMITTER_NAME: atelier-ci
       GIT_COMMITTER_EMAIL: ci@atelier.local
     steps:
       - uses: actions/checkout@v7
+        if: env.RELEASE_PR != 'true'
 
       - uses: actions/setup-go@v6
+        if: env.RELEASE_PR != 'true'
         with:
           go-version: '1.25'
           cache: true
 
       - name: Install tmux + fzf
+        if: env.RELEASE_PR != 'true'
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
@@ -63,37 +65,48 @@ jobs:
           fi
 
       - name: Verify versions
+        if: env.RELEASE_PR != 'true'
         run: |
           go version
           tmux -V
           fzf --version
 
       - name: go mod verify
+        if: env.RELEASE_PR != 'true'
         run: go mod verify
 
       - name: Build all binaries
+        if: env.RELEASE_PR != 'true'
         run: make build
 
       - name: Unit tests
+        if: env.RELEASE_PR != 'true'
         run: make test
 
       - name: E2E tests
+        if: env.RELEASE_PR != 'true'
         run: |
           export PATH="$PWD/bin:$PATH"
           go test -tags=e2e ./...
 
+      - name: Release-PR skip marker
+        if: env.RELEASE_PR == 'true'
+        run: echo "release-please PR — CI intentionally skipped (see workflow comment)."
+
   lint:
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.head_ref, 'release-please--')
+    env:
+      RELEASE_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') }}
     steps:
       - uses: actions/checkout@v7
+        if: env.RELEASE_PR != 'true'
       - uses: actions/setup-go@v6
+        if: env.RELEASE_PR != 'true'
         with:
           go-version: '1.25'
           cache: true
       - uses: golangci/golangci-lint-action@v9
+        if: env.RELEASE_PR != 'true'
         with:
           # Pin to a specific release so a future golangci-lint change
           # can't silently break CI. Bump deliberately when needed.
@@ -103,21 +116,26 @@ jobs:
           # v2.12.2 (built with go1.25) matches our go.mod.
           version: v2.12.2
           args: --timeout=5m
+      - name: Release-PR skip marker
+        if: env.RELEASE_PR == 'true'
+        run: echo "release-please PR — lint intentionally skipped."
 
   goreleaser-check:
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.head_ref, 'release-please--')
+    env:
+      RELEASE_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') }}
     steps:
       - uses: actions/checkout@v7
+        if: env.RELEASE_PR != 'true'
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6
+        if: env.RELEASE_PR != 'true'
         with:
           go-version: '1.25'
           cache: true
       - uses: goreleaser/goreleaser-action@v7
+        if: env.RELEASE_PR != 'true'
         with:
           distribution: goreleaser
           # Pin so a future goreleaser release can't break this job.
@@ -127,3 +145,6 @@ jobs:
           # release.yml.
           version: v2.17.0
           args: check
+      - name: Release-PR skip marker
+        if: env.RELEASE_PR == 'true'
+        run: echo "release-please PR — goreleaser check intentionally skipped."
