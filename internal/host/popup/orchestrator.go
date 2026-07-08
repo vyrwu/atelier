@@ -61,9 +61,11 @@ func PopupStyleArgs(b *manifest.Binding) []string {
 // tmux display-popup centers by default when -x/-y are omitted, so no
 // explicit position is passed.
 //
-// Callers should invoke via OpenOnOuter so the current (parent) popup
-// closes BEFORE this one opens — otherwise the parent popup rectangle
-// sits behind the spinner as a "carved shadow" on the outer terminal.
+// Callers open this via OpenOverInnerPopup so it nests ON TOP of the
+// underlying tool popup (e.g. the Claude popup the user launched the
+// creator from) rather than detaching it. The parent picker popup still
+// closes on its own — the process that queued the spinner exits — so no
+// "carved shadow" of the picker geometry is left behind.
 func SpinnerStyleArgs(title string) []string {
 	return []string{
 		"-b", "rounded",
@@ -154,6 +156,50 @@ func OverlayOnOuter(h *tmuxhost.Client, styleArgs []string, invoke string) error
 	args = append(args, styleArgs...)
 	args = append(args, "-E", invoke)
 	shellCmd := "tmux display-popup " + tmuxShellQuoteArgs(args)
+	_, err = h.Run("run-shell", "-b", shellCmd)
+	return err
+}
+
+// OpenOverInnerPopup opens a display-popup so it renders ON TOP of the
+// currently-open tool popup (e.g. the Claude popup the workspace creator
+// was launched from) rather than replacing it.
+//
+// tmux allows only ONE popup per client, so a second display-popup can
+// never stack on the OUTER client while a tool popup occupies it — that's
+// why targeting the outer client (OpenOnOuter / OverlayOnOuter) silently
+// drops the popup here. Instead we nest the new popup on the tool popup's
+// own INNER client, which tmux permits (popup-in-popup) and which renders
+// visually over the tool's content.
+//
+// Contract: the CALLER is itself a nested popup (the creator) running on
+// that same inner client, so it must return-and-exit right after this
+// call — its popup then closes, freeing the inner client for the deferred
+// popup to stack. The `sleep` covers that teardown before display-popup;
+// without it the inner client still has the creator popup open and the
+// stack silently fails.
+//
+// Falls back to the outer client when there is no inner popup (creator
+// launched from the root key-table, not from inside a tool popup).
+func OpenOverInnerPopup(h *tmuxhost.Client, styleArgs []string, invoke string) error {
+	outer, inner, err := listClients(h)
+	if err != nil {
+		return err
+	}
+	target := outer
+	if len(inner) > 0 {
+		// Innermost tool popup — the one the creator is nested on.
+		target = inner[len(inner)-1]
+	}
+	if target == "" {
+		// No client at all (shouldn't happen from a live popup); best
+		// effort without an explicit -c.
+		shellCmd := "sleep 0.2 ; tmux display-popup " + tmuxShellQuoteArgs(append(append([]string{}, styleArgs...), "-E", invoke))
+		_, err := h.Run("run-shell", "-b", shellCmd)
+		return err
+	}
+	args := append([]string{"-c", target}, styleArgs...)
+	args = append(args, "-E", invoke)
+	shellCmd := "sleep 0.2 ; tmux display-popup " + tmuxShellQuoteArgs(args)
 	_, err = h.Run("run-shell", "-b", shellCmd)
 	return err
 }
