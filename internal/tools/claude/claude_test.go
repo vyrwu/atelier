@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildClaudeStartCmd_NoPrompt(t *testing.T) {
@@ -127,13 +128,14 @@ func TestClaudeSessionIDFromPath(t *testing.T) {
 	}
 }
 
-// TestTranscriptExists locks in the stale-session-id detection. The
-// glob spans `~/.claude/projects/*/<id>.jsonl` — when present, the
-// resume signal is honored; when absent, OpenCommand clears the stale
-// id and starts fresh.
+// TestTranscriptExists locks in the transcript detection. The glob spans
+// `<config>/projects/*/<id>.jsonl` — when present, the resume signal is
+// honored; when absent, OpenCommand starts fresh (without clearing the
+// stored id — see TestResumeIDForLaunch).
 func TestTranscriptExists(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // exercise the ~/.claude fallback
 	proj := filepath.Join(home, ".claude", "projects", "-some-encoded-cwd")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
@@ -295,5 +297,137 @@ func TestFindLatestTranscript_MissingDirReturnsEmpty(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("expected empty, got %q", got)
+	}
+}
+
+func TestClaudeProjectsDir_HonorsConfigDir(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/claude")
+	if got, want := claudeProjectsDir(), "/custom/claude/projects"; got != want {
+		t.Fatalf("claudeProjectsDir with CLAUDE_CONFIG_DIR: got %q want %q", got, want)
+	}
+}
+
+// TestTranscriptExists_FindsUnderConfigDir locks in the resume fix: when
+// CLAUDE_CONFIG_DIR relocates the transcript tree (e.g. ~/.config/claude),
+// transcriptExists must still find the session file. Before the fix it
+// globbed a hardcoded ~/.claude/projects and returned false for everyone
+// with CLAUDE_CONFIG_DIR set, so claude.Open cleared the id and never
+// --resume'd.
+func TestTranscriptExists_FindsUnderConfigDir(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	const id = "abc-123-session"
+	projDir := filepath.Join(cfg, "projects", "-some-encoded-cwd")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, id+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !transcriptExists(id) {
+		t.Errorf("transcriptExists(%q) = false, want true (should look under CLAUDE_CONFIG_DIR)", id)
+	}
+	if transcriptExists("no-such-id") {
+		t.Errorf("transcriptExists(unknown id) = true, want false")
+	}
+}
+
+// TestResumeIDForLaunch covers the non-destructive resume decision: a
+// present transcript yields the id (--resume), an absent one yields ""
+// (fresh start) WITHOUT the helper having any way to clear the stored id.
+// Guards the fix for false-negative transcript checks permanently wiping
+// real session ids.
+func TestResumeIDForLaunch(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	const id = "sess-abc-123"
+	projDir := filepath.Join(cfg, "projects", "-enc-cwd")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, id+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := resumeIDForLaunch(id); got != id {
+		t.Errorf("resumeIDForLaunch(present) = %q, want %q", got, id)
+	}
+	if got := resumeIDForLaunch("missing-id"); got != "" {
+		t.Errorf("resumeIDForLaunch(absent transcript) = %q, want \"\"", got)
+	}
+	if got := resumeIDForLaunch(""); got != "" {
+		t.Errorf("resumeIDForLaunch(empty) = %q, want \"\"", got)
+	}
+}
+
+// TestOpenCommand_NeverClearsStoredSessionID is a source guard: the
+// transcript-missing path in claude.Open must NOT unset / persist-empty
+// the active-session id. Clearing is permanent and cost real ids in the
+// field. If a refactor reintroduces it, this fails.
+func TestOpenCommand_NeverClearsStoredSessionID(t *testing.T) {
+	src, err := os.ReadFile("claude.go")
+	if err != nil {
+		t.Fatalf("read source: %v", err)
+	}
+	s := string(src)
+	openBody := s[strings.Index(s, "func OpenCommand"):]
+	openBody = openBody[:strings.Index(openBody, "\nfunc ")]
+	for _, forbidden := range []string{
+		"UnsetWindowOption(ctx.WindowID, OptActiveSessionID)",
+		"PersistWindowMetadata(h, ctx.WindowID, MetaActiveSessionID, \"\")",
+	} {
+		if strings.Contains(openBody, forbidden) {
+			t.Errorf("OpenCommand must not clear the stored session id, found: %s", forbidden)
+		}
+	}
+}
+
+// TestClaudeProjectSlug covers the cwd → transcript-dir encoding. Both
+// "/" and "." collapse to "-", leading separator kept. Regression guard:
+// the old encoder dropped the leading dash and ignored ".", so every
+// worktree path under ".worktrees" (where atelier workspaces live)
+// resolved to the wrong dir and never found a transcript.
+func TestClaudeProjectSlug(t *testing.T) {
+	cases := map[string]string{
+		"/Users/a/code/github/vyrwu/atelier":      "-Users-a-code-github-vyrwu-atelier",
+		"/Users/a/code/.worktrees/github/x/fix/y": "-Users-a-code--worktrees-github-x-fix-y",
+	}
+	for in, want := range cases {
+		if got := claudeProjectSlug(in); got != want {
+			t.Errorf("claudeProjectSlug(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestLatestSessionIDForCwd verifies the on-disk fallback: given a cwd
+// with transcripts, it returns the id of the newest one. This is what
+// resumes a conversation after a soft-close pruned the tracked id.
+func TestLatestSessionIDForCwd(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	cwd := "/Users/a/code/.worktrees/github/x/fix/y"
+	dir := filepath.Join(cfg, "projects", claudeProjectSlug(cwd))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	older := filepath.Join(dir, "older-sess.jsonl")
+	newer := filepath.Join(dir, "newer-sess.jsonl")
+	if err := os.WriteFile(older, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Make `newer` distinctly newer.
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(older, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := latestSessionIDForCwd(cwd); got != "newer-sess" {
+		t.Errorf("latestSessionIDForCwd = %q, want newer-sess", got)
+	}
+	if got := latestSessionIDForCwd("/no/transcripts/here"); got != "" {
+		t.Errorf("latestSessionIDForCwd(empty dir) = %q, want \"\"", got)
 	}
 }
