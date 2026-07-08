@@ -30,10 +30,11 @@ import (
 //	client.WaitFor(t, "Select Tool", 2*time.Second)
 //	client.Send("\n")              // accept first entry
 type AttachedClient struct {
-	pty io.ReadWriteCloser
-	cmd *exec.Cmd
-	srv *Server
-	t   *testing.T
+	pty     io.ReadWriteCloser
+	cmd     *exec.Cmd
+	srv     *Server
+	t       *testing.T
+	session string
 }
 
 // Attach starts `tmux -L <socket> attach-session -t <session>` in a PTY,
@@ -54,7 +55,7 @@ func (s *Server) Attach(t *testing.T, session string) *AttachedClient {
 	// (capture-pane), which is more reliable than parsing terminal escapes.
 	go func() { _, _ = io.Copy(io.Discard, ptmx) }()
 
-	c := &AttachedClient{pty: ptmx, cmd: cmd, srv: s, t: t}
+	c := &AttachedClient{pty: ptmx, cmd: cmd, srv: s, t: t, session: session}
 	t.Cleanup(c.Close)
 	// Give tmux a moment to actually attach before the test sends keys.
 	c.waitForClientAttached(2 * time.Second)
@@ -174,13 +175,21 @@ func (c *AttachedClient) WaitForNoPopup(timeout time.Duration) {
 func (c *AttachedClient) waitForClientAttached(timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		out, err := c.srv.Client.Run("list-clients", "-F", "#{client_name}")
-		if err == nil && strings.TrimSpace(string(out)) != "" {
-			return
+		// Wait for THIS client's session to appear — not just any client.
+		// A prior Attach on a different session already satisfies "≥1
+		// client attached", so matching by session is what makes
+		// multi-client setups (outer + popup) deterministic.
+		out, err := c.srv.Client.Run("list-clients", "-F", "#{client_session}")
+		if err == nil {
+			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				if strings.TrimSpace(line) == c.session {
+					return
+				}
+			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	c.t.Fatalf("tmux client did not attach within %s", timeout)
+	c.t.Fatalf("tmux client for session %q did not attach within %s", c.session, timeout)
 }
 
 func isPopupSession(name string) bool {

@@ -365,6 +365,13 @@ func TestCreator_PromptFlow_MultipleClients_OuterLandsOnNewWindow(t *testing.T) 
 	})
 
 	tmp := t.TempDir()
+	// t.TempDir's RemoveAll cleanup would otherwise run BEFORE
+	// testtmux.New's srv.Kill (cleanups are LIFO; New registered Kill
+	// first, so it runs last). The still-live tmux server's deferred
+	// Claude popup (run-shell -b … display-popup, cwd inside the
+	// worktree) then races RemoveAll → "directory not empty" on Linux.
+	// Registering Kill here — after t.TempDir — makes it run first.
+	t.Cleanup(srv.Kill)
 	repoDir := testtmux.TestRepo(t, tmp, "vyrwu", "demo", "main")
 	srv.SetEnv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
 	srv.SetEnv("HOME", tmp)
@@ -425,6 +432,10 @@ func TestCreator_PromptFlow_SlashName_SelectsCorrectWindow(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	tmp := t.TempDir()
+	// Kill the tmux server before t.TempDir's RemoveAll (see the
+	// TestCreator_PromptFlow_MultipleClients_OuterLandsOnNewWindow note):
+	// the deferred Claude popup otherwise races cleanup on Linux.
+	t.Cleanup(srv.Kill)
 	repoDir := testtmux.TestRepo(t, tmp, "vyrwu", "demo", "main")
 	srv.SetEnv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
 	srv.SetEnv("HOME", tmp)

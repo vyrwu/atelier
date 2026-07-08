@@ -46,7 +46,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	}
 
 	// Badge providers (e.g. ghpr's PR-status symbol) declare a window
-	// option the picker splices between the icon and the workspace name.
+	// option the picker splices between the workspace name and the recap.
 	// The picker stays agnostic to what each badge means — it just reads
 	// the declared option and renders its (pre-colored) value. This is the
 	// generic mechanism task #75 will fold @ai_workspace_kind into.
@@ -120,15 +120,10 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		}
 		sid, wid, session, window, lastAtt := fields[0], fields[1], fields[2], fields[3], fields[4]
 		repoPath, attention, kind, recap, lastSeen := fields[5], fields[6], fields[7], fields[8], fields[9]
-		// Badge values (each stored as " <ansi>glyph<reset>", i.e. a
-		// leading space + a single-cell glyph) follow the fixed fields,
-		// in provider order; the sort-signal columns follow the badge
-		// columns. The badge sits between the time column and the
-		// attention icon, so formatBadgeColumn normalizes every
-		// provider's cell to a fixed 2-cell slot — that keeps the icon
-		// and name columns aligned across every row whether or not a
-		// workspace has a badge.
-		badgeStr := formatBadgeColumn(fields[baseFields : baseFields+len(badgeKeys)])
+		// Badge values (each already carries its own leading space +
+		// ANSI color) follow the fixed fields, in provider order; the
+		// sort-signal columns follow the badge columns.
+		badgeStr := strings.Join(fields[baseFields:baseFields+len(badgeKeys)], "")
 		sortRank := make([]int, len(sorts))
 		for si, bs := range sorts {
 			fi := baseFields + len(badgeKeys) + si
@@ -164,14 +159,12 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		isAttn := attention == "1"
 		isCurrent := currentSid != "" && sid == currentSid && wid == currentWid
 
-		// Layout: "<time> <icon><badge><session>/<window>  · <recap>"
+		// Layout: "<time> <icon><session>/<window>  · <recap>"
 		//
 		// Time is a 3-char right-aligned dim-grey column on the left.
-		// Icon (❯ ⏺ ○) follows the time column — the icon column is 2
-		// cells wide (glyph + trailing space). The PR badge follows the
-		// icon and precedes the name; its slot is a fixed 2 cells (see
-		// badgeStr above) so name text stays vertically aligned across
-		// rows.
+		// Icon (❯ ⏺ ○) follows after a single space — the icon column
+		// is 2 cells wide (glyph + trailing space) so name text stays
+		// vertically aligned across rows.
 		//
 		// Recap stays at the END (variable; allowed to push right).
 		var ageText string
@@ -242,9 +235,9 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 				}
 			}
 			// session=cyan(36), window=green(32). Badge (if any) sits
-			// between the attention icon and the workspace name.
-			display = fmt.Sprintf("%s%s%s\033[%s36m%s\033[0m/\033[%s32m%s\033[0m%s",
-				timeCol, icon, badgeStr, weight, session, weight, window, recapStr)
+			// between the window name and the recap suffix.
+			display = fmt.Sprintf("%s%s\033[%s36m%s\033[0m/\033[%s32m%s\033[0m%s%s",
+				timeCol, icon, weight, session, weight, window, badgeStr, recapStr)
 		} else {
 			// Non-git (auto) session.
 			priority = 8
@@ -252,9 +245,9 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 				priority = 0
 			}
 			// session=orange(256:166), window=green(32). Badge (if any)
-			// sits between the attention icon and the workspace name.
-			display = fmt.Sprintf("%s%s%s\033[%s38;5;166m%s\033[0m/\033[%s32m%s\033[0m%s",
-				timeCol, icon, badgeStr, weight, session, weight, window, recapStr)
+			// sits between the window name and the recap suffix.
+			display = fmt.Sprintf("%s%s\033[%s38;5;166m%s\033[0m/\033[%s32m%s\033[0m%s%s",
+				timeCol, icon, weight, session, weight, window, badgeStr, recapStr)
 		}
 
 		entries = append(entries, entry{
@@ -285,26 +278,6 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		out2 = append(out2, e.row)
 	}
 	return out2, nil
-}
-
-// formatBadgeColumn renders the fixed-width badge column that sits
-// between the attention icon and the workspace name. Each value is a
-// provider's stored badge (" <ansi>glyph<reset>", i.e. a leading space
-// + a single display cell) or empty when the provider has no badge for
-// the row. Every cell is normalized to exactly 2 display cells — glyph
-// + a trailing space, or two spaces when unset — so the icon and name
-// columns stay vertically aligned across every row. Pure helper.
-func formatBadgeColumn(values []string) string {
-	var b strings.Builder
-	for _, v := range values {
-		if strings.TrimSpace(v) == "" {
-			b.WriteString("  ")
-			continue
-		}
-		b.WriteString(strings.TrimPrefix(v, " "))
-		b.WriteString(" ")
-	}
-	return b.String()
 }
 
 // formatAge renders a short relative-time suffix for a unix epoch.
