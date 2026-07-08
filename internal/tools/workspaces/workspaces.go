@@ -52,7 +52,18 @@ func SessionsCommand() *cobra.Command {
 		Short: "Pick an existing workspace session (bash-exact tmux_session_picker)",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			h := tmuxhost.New(socket)
-			rows, err := BuildSessionList(h)
+			// Show a centered loading box while the list is assembled
+			// (tmux list-windows + one git default-branch resolve per
+			// repo). Delay-gated so a fast build doesn't flash the box
+			// before fzf takes over the popup.
+			var rows []SessionRow
+			sp := spinner.NewBox("Loading workspaces...")
+			sp.Delay = 120 * time.Millisecond
+			err := sp.Run(func() error {
+				var e error
+				rows, e = BuildSessionList(h)
+				return e
+			})
 			if err != nil {
 				return err
 			}

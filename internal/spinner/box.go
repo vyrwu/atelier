@@ -29,6 +29,13 @@ type BoxSpinner struct {
 	Interval time.Duration
 	Writer   io.Writer
 
+	// Delay, when > 0, suppresses ALL rendering until the task has been
+	// running for at least this long. If the task finishes first, nothing
+	// is drawn — this avoids flashing a full-screen clear + box for an
+	// operation that turns out to be fast. Zero (default) renders
+	// immediately, so existing callers are unaffected.
+	Delay time.Duration
+
 	mu         sync.Mutex
 	status     string    // current stage label; empty → use Message
 	stageStart time.Time // start of current stage; reset by SetStatus
@@ -92,18 +99,10 @@ func (s *BoxSpinner) Run(fn func() error) error {
 		s.Interval = DefaultInterval
 	}
 
-	cols, rows, termOK := terminalSize(s.Writer)
-	msgLen := utf8.RuneCountInString(s.Message)
-	// Bash: box_w = msg_len + 6, min 32, max cols-2.
-	boxWidth := msgLen + 6
-	if boxWidth < 32 {
-		boxWidth = 32
-	}
-	// Initialise stage tracking BEFORE the fallback branch — both the
-	// box path and the inline fallback read s.status / s.stageStart
-	// via currentLabel(), so an uninitialised stageStart (zero-time)
-	// would surface as a nonsense elapsed suffix on the very first
-	// tick of the fallback path.
+	// Initialise stage tracking BEFORE any render path — both the box
+	// path and the inline fallback read s.status / s.stageStart via
+	// currentLabel(), so an uninitialised stageStart (zero-time) would
+	// surface as a nonsense elapsed suffix on the very first tick.
 	s.mu.Lock()
 	if s.status == "" {
 		s.status = s.Message
@@ -111,19 +110,49 @@ func (s *BoxSpinner) Run(fn func() error) error {
 	s.stageStart = time.Now()
 	s.mu.Unlock()
 
+	// Run the task in the background; done closes when it returns. A
+	// single goroutine drives the delay gate AND both render loops, so
+	// the task is never started twice.
+	done := make(chan struct{})
+	var (
+		fnErr error
+		once  sync.Once
+	)
+	go func() {
+		fnErr = fn()
+		once.Do(func() { close(done) })
+	}()
+
+	// Delay gate: render nothing when the task finishes quickly, so a
+	// fast operation doesn't flash a full-screen clear + box.
+	if s.Delay > 0 {
+		select {
+		case <-done:
+			return fnErr
+		case <-time.After(s.Delay):
+		}
+	}
+
+	cols, rows, termOK := terminalSize(s.Writer)
+	msgLen := utf8.RuneCountInString(s.Message)
+	// Bash: box_w = msg_len + 6, min 32, max cols-2.
+	boxWidth := msgLen + 6
+	if boxWidth < 32 {
+		boxWidth = 32
+	}
+
 	if !termOK || cols < boxWidth+4 || rows < 5 {
-		// Fallback: inline carriage-return spinner. Passes currentLabel
-		// as the live status source so stage updates via SetStatus stay
-		// visible; italic-purple LabelStyle marks this as a transient
-		// step (matches the tight spinner popup's border color 141).
-		return (&Spinner{
-			Message:    s.Message,
-			Writer:     s.Writer,
-			Frames:     s.Frames,
-			Interval:   s.Interval,
-			Status:     s.currentLabel,
-			LabelStyle: "3;38;5;141",
-		}).Run(fn)
+		// Fallback: inline carriage-return spinner. currentLabel keeps
+		// stage updates via SetStatus visible; italic-purple marks this
+		// as a transient step (matches the tight spinner popup's border
+		// color 141).
+		s.spin(done, func(frame string) {
+			fmt.Fprintf(s.Writer, "\r\033[K%s \033[3;38;5;141m%s\033[0m",
+				frame, s.currentLabel())
+		}, func() {
+			fmt.Fprint(s.Writer, "\r\033[K")
+		})
+		return fnErr
 	}
 	if boxWidth > cols-4 {
 		boxWidth = cols - 4
@@ -140,28 +169,31 @@ func (s *BoxSpinner) Run(fn func() error) error {
 	}()
 
 	drawBox(s.Writer, startRow, startCol, boxWidth, boxHeight)
+	s.spin(done, func(frame string) {
+		renderBoxFrame(s.Writer, startRow+1, startCol+1, boxWidth-2, frame, s.currentLabel())
+	}, nil)
+	return fnErr
+}
 
-	done := make(chan struct{})
-	var (
-		fnErr error
-		once  sync.Once
-	)
-	go func() {
-		fnErr = fn()
-		once.Do(func() { close(done) })
-	}()
-
+// spin renders the first frame immediately, then a new frame on every
+// interval tick until done closes, at which point cleanup (if non-nil)
+// runs. Shared by the box and inline-fallback paths so both consume the
+// single task goroutine started in Run.
+func (s *BoxSpinner) spin(done <-chan struct{}, render func(frame string), cleanup func()) {
 	ticker := time.NewTicker(s.Interval)
 	defer ticker.Stop()
+	render(s.Frames[0])
 	i := 0
-	renderBoxFrame(s.Writer, startRow+1, startCol+1, boxWidth-2, s.Frames[0], s.currentLabel())
 	for {
 		select {
 		case <-done:
-			return fnErr
+			if cleanup != nil {
+				cleanup()
+			}
+			return
 		case <-ticker.C:
 			i++
-			renderBoxFrame(s.Writer, startRow+1, startCol+1, boxWidth-2, s.Frames[i%len(s.Frames)], s.currentLabel())
+			render(s.Frames[i%len(s.Frames)])
 		}
 	}
 }
