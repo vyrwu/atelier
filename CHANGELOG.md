@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/vyrwu/atelier/compare/v0.2.0...v0.2.1) (2026-07-08)
+
+
+### Bug fixes
+
+* **workspaces:** handle branch-exists gracefully in creator ([#11](https://github.com/vyrwu/atelier/issues/11)) ([00b50a7](https://github.com/vyrwu/atelier/commit/00b50a7455358b6cff4564b54b40a44a0e92576b))
+* **workspaces:** make Claude session restore survive delete + recover ([#9](https://github.com/vyrwu/atelier/issues/9)) ([1fd2ffb](https://github.com/vyrwu/atelier/commit/1fd2ffb87968b2ead6b1fc803a80b69bc2ffda65))
+
+
+### Performance
+
+* **workspaces:** speed up M-s picker + add loading box ([#10](https://github.com/vyrwu/atelier/issues/10)) ([024cc19](https://github.com/vyrwu/atelier/commit/024cc199dfadb7e782cc4bcb5580f6424d67df12))
+
+
+### Refactors
+
+* **workspaces:** move PR badge after attention icon ([#15](https://github.com/vyrwu/atelier/issues/15)) ([1ea47bf](https://github.com/vyrwu/atelier/commit/1ea47bf797d8ef6dc8d475a7537219a4a508eb40))
+
 ## [0.2.0](https://github.com/vyrwu/atelier/compare/v0.1.0...v0.2.0) (2026-07-08)
 
 
