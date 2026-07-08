@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/vyrwu/atelier/compare/v0.1.0...v0.2.0) (2026-07-08)
+
+
+### Features
+
+* **ghpr:** per-workspace GitHub PR status badge + open ([#13](https://github.com/vyrwu/atelier/issues/13)) ([9acbde9](https://github.com/vyrwu/atelier/commit/9acbde9319beb414dee99f26cd1bbbbb72dd2387))
+
+
+### Bug fixes
+
+* **release:** remove release-as pin so version bumps ([#6](https://github.com/vyrwu/atelier/issues/6)) ([71b0ef3](https://github.com/vyrwu/atelier/commit/71b0ef3bd4b662a380c89753a2404c7a4775c9db))
+* **statusline:** show only the current workspace in the bar ([#12](https://github.com/vyrwu/atelier/issues/12)) ([e15c2ef](https://github.com/vyrwu/atelier/commit/e15c2efc81eee3a7ba15f02ce629af4a091661eb))
+* **workspaces:** dim workspace selector highlight ([#2](https://github.com/vyrwu/atelier/issues/2)) ([7f98214](https://github.com/vyrwu/atelier/commit/7f982148e1692022b0a551011e807058d256b97f))
+* **workspaces:** render build spinner over Claude popup ([#5](https://github.com/vyrwu/atelier/issues/5)) ([4c00214](https://github.com/vyrwu/atelier/commit/4c00214a237fe3b6da2e428b28ce4e3e00d487f7))
+* **workspaces:** switch instead of detach on active delete ([#8](https://github.com/vyrwu/atelier/issues/8)) ([596d3ff](https://github.com/vyrwu/atelier/commit/596d3ff3ebdb7dc3eb050fb2bf0d59b2c2ee559a))
+
+
+### Performance
+
+* **logging:** add always-on operation timing to debug log ([#4](https://github.com/vyrwu/atelier/issues/4)) ([dc7877b](https://github.com/vyrwu/atelier/commit/dc7877ba0f016bf8eef6605f773c991970907a70))
+
 ## 0.1.0 (2026-07-07)
 
 
