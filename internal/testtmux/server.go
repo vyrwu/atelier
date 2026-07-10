@@ -189,9 +189,9 @@ func splitLines(s string) []string {
 	return out
 }
 
-// BinDir returns the test binary directory. All atelier-* binaries are
-// built into it once per `go test` invocation and added to PATH for
-// child processes via RunAtelier.
+// BinDir returns the test binary directory. The single `atelier` binary is
+// built into it once per `go test` invocation and added to PATH for child
+// processes via RunAtelier.
 func (s *Server) BinDir() string {
 	return atelierBinDir(s.T)
 }
@@ -201,21 +201,16 @@ func (s *Server) Binary() string {
 	return filepath.Join(s.BinDir(), "atelier")
 }
 
-// BinaryFor returns the path to the named tool's binary (e.g., "popupshell"
-// → BinDir/atelier-popupshell).
-func (s *Server) BinaryFor(tool string) string {
-	return filepath.Join(s.BinDir(), "atelier-"+tool)
-}
-
-// RunAtelier invokes the core atelier binary with PATH=BinDir so plugin
-// discovery finds the test-built tool binaries.
+// RunAtelier invokes the single atelier binary with PATH=BinDir.
 func (s *Server) RunAtelier(args ...string) ([]byte, error) {
 	return s.run(s.Binary(), args)
 }
 
-// RunTool invokes a specific atelier-<tool> binary directly.
+// RunTool dispatches to a tool through the single binary:
+// `atelier tools <tool> <args...>`. There are no per-tool binaries — the
+// core resolves the tool from its in-process registry.
 func (s *Server) RunTool(tool string, args ...string) ([]byte, error) {
-	return s.run(s.BinaryFor(tool), args)
+	return s.run(s.Binary(), append([]string{"tools", tool}, args...))
 }
 
 func (s *Server) run(binary string, args []string) ([]byte, error) {
@@ -275,8 +270,9 @@ var (
 	buildErr    error
 )
 
-// atelierBinDir builds every cmd/atelier* binary into a shared temp dir
-// once per `go test` invocation and returns its path.
+// atelierBinDir builds the cmd/atelier binary into a shared temp dir
+// once per `go test` invocation and returns its path. (The loop over
+// cmd/* now matches exactly one directory — the single binary.)
 func atelierBinDir(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {

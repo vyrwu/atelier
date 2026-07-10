@@ -11,9 +11,9 @@ import (
 	"testing"
 )
 
-// TestDispatcher_ListsDiscoveredTools runs the freshly-built `atelier` core
-// binary with $PATH pointing at this repo's bin/, and verifies that
-// `atelier tools list` discovers every cmd/atelier-* binary we built.
+// TestDispatcher_ListsDiscoveredTools runs the freshly-built `atelier`
+// binary and verifies that `atelier tools list` reports the built-in tools
+// registered in the in-process registry (internal/tools/all).
 func TestDispatcher_ListsDiscoveredTools(t *testing.T) {
 	binDir := filepath.Join(repoRoot(), "bin")
 	core := filepath.Join(binDir, "atelier")
@@ -29,7 +29,7 @@ func TestDispatcher_ListsDiscoveredTools(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("atelier tools list: %v\nstderr: %s", err, errBuf.String())
 	}
-	for _, want := range []string{"popupshell", "lazygit", "claude", "k8s", "pg", "aws", "workspaces", "toolselector"} {
+	for _, want := range []string{"k8s", "pg", "aws", "workspaces", "toolselector"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing tool %q in output:\n%s", want, out.String())
 		}
@@ -113,9 +113,9 @@ func TestDispatcher_RoutesToCorrectBinary(t *testing.T) {
 	if _, err := exec.Command(core, "version").Output(); err != nil {
 		t.Skipf("core not built (run `make build` first): %v", err)
 	}
-	// `atelier tools popupshell --help` should exec into atelier-popupshell
-	// and show its subcommands (open, create).
-	cmd := exec.Command(core, "tools", "popupshell", "--help")
+	// `atelier tools pg --help` dispatches in-process to the pg tool's
+	// command tree and surfaces its subcommands.
+	cmd := exec.Command(core, "tools", "pg", "--help")
 	cmd.Env = append(cmd.Env, "PATH="+binDir, "HOME="+t.TempDir())
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
@@ -124,8 +124,8 @@ func TestDispatcher_RoutesToCorrectBinary(t *testing.T) {
 		t.Fatalf("dispatcher: %v\nstderr: %s", err, errBuf.String())
 	}
 	combined := out.String() + errBuf.String()
-	if !strings.Contains(combined, "open") || !strings.Contains(combined, "create") {
-		t.Fatalf("expected dispatcher to surface popupshell subcommands, got:\n%s", combined)
+	if !strings.Contains(combined, "switch") || !strings.Contains(combined, "contexts") {
+		t.Fatalf("expected dispatcher to surface pg subcommands, got:\n%s", combined)
 	}
 }
 

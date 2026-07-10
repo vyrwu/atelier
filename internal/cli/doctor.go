@@ -6,13 +6,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
+	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/plugin"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
@@ -70,7 +70,7 @@ func DoctorCommand() *cobra.Command {
 			// Group 1: tmux + atelier-self core checks.
 			results := []CheckResult{
 				checkTmuxVersion(h),
-				checkAtelierBinaries(),
+				checkToolsRegistered(),
 				checkEscapeTime(h),
 				checkStatuslineFormat(h),
 			}
@@ -78,7 +78,7 @@ func DoctorCommand() *cobra.Command {
 			// Group 2: persistence-layer + cache state.
 			results = append(results,
 				checkStatestoreParseable(),
-				checkClaudeSettings(),
+				checkAgentHooks(),
 				checkWorktreeDirsExist(),
 			)
 
@@ -155,34 +155,41 @@ func checkTmuxVersion(h *tmuxhost.Client) CheckResult {
 		Detail: v}
 }
 
-// checkAtelierBinaries verifies the atelier-* tool binaries are on
-// PATH. Missing tool binaries silently strip features from the M-;
-// picker — better to surface the gap at doctor-time than to leave
-// the user puzzled why their tool isn't listed.
-func checkAtelierBinaries() CheckResult {
-	required := []string{
-		"atelier-workspaces",
-		"atelier-toolselector",
-		"atelier-popupshell",
-		"atelier-claude",
-		"atelier-k8s",
-		"atelier-aws",
-		"atelier-pg",
-		"atelier-lazygit",
+// checkToolsRegistered verifies the built-in tool registry populated and
+// that any config launchers parsed. In the single-binary model there are
+// no atelier-* binaries to find on PATH — built-in tools are compiled in
+// (via internal/tools/all) and launchers come from config.toml. A zero
+// built-in count means the binary was built without the registry wired,
+// which would silently empty the M-; picker.
+func checkToolsRegistered() CheckResult {
+	res, err := plugin.Discover()
+	if err != nil {
+		return CheckResult{Name: "tools registered", Status: StatusFail,
+			Detail: fmt.Sprintf("tool discovery failed: %v", err)}
 	}
-	var missing []string
-	for _, name := range required {
-		if _, err := exec.LookPath(name); err != nil {
-			missing = append(missing, name)
+	builtins, launchers := 0, 0
+	for i := range res.Plugins {
+		if res.Plugins[i].IsBuiltin() {
+			builtins++
+		} else {
+			launchers++
 		}
 	}
-	if len(missing) == 0 {
-		return CheckResult{Name: "atelier-* on PATH", Status: StatusPass,
-			Detail: fmt.Sprintf("all %d tool binaries reachable", len(required))}
+	if builtins == 0 {
+		return CheckResult{Name: "tools registered", Status: StatusFail,
+			Detail:      "no built-in tools registered",
+			Remediation: "rebuild atelier — the binary must import internal/tools/all"}
 	}
-	return CheckResult{Name: "atelier-* on PATH", Status: StatusWarn,
-		Detail:      fmt.Sprintf("missing: %s", strings.Join(missing, ", ")),
-		Remediation: "run `make install` or ensure ~/.local/bin (or your install prefix) is on PATH"}
+	detail := fmt.Sprintf("%d built-in", builtins)
+	if launchers > 0 {
+		detail += fmt.Sprintf(" + %d launcher(s)", launchers)
+	}
+	if len(res.Skipped) > 0 {
+		return CheckResult{Name: "tools registered", Status: StatusWarn,
+			Detail:      detail + fmt.Sprintf("; %d config launcher(s) skipped (see below)", len(res.Skipped)),
+			Remediation: "fix the [tools.*] blocks flagged under \"Skipped tools\""}
+	}
+	return CheckResult{Name: "tools registered", Status: StatusPass, Detail: detail}
 }
 
 // checkEscapeTime catches the "Esc has a noticeable delay" trap. tmux
@@ -261,7 +268,7 @@ func checkStatestoreParseable() CheckResult {
 	if err != nil {
 		return CheckResult{Name: "statestore cache", Status: StatusFail,
 			Detail:      fmt.Sprintf("unparseable: %v", err),
-			Remediation: "back up the file, then `atelier state reset` (or delete $XDG_CACHE_HOME/atelier/state-*.json)"}
+			Remediation: "back up, then delete $XDG_CACHE_HOME/atelier/state.json (rebuilt on next launch)"}
 	}
 	if state == nil {
 		return CheckResult{Name: "statestore cache", Status: StatusPass,
@@ -272,34 +279,23 @@ func checkStatestoreParseable() CheckResult {
 			len(state.Workspaces), state.LastActiveSession)}
 }
 
-// checkClaudeSettings ensures ~/.cache/atelier/claude/settings.json
-// exists. The Claude tool reads it at startup; absence breaks the
-// flow with a cryptic error. Auto-create on absence per FR-1.2.
-func checkClaudeSettings() CheckResult {
-	cacheDir := os.Getenv("XDG_CACHE_HOME")
-	if cacheDir == "" {
-		home, _ := os.UserHomeDir()
-		cacheDir = filepath.Join(home, ".cache")
+// checkAgentHooks installs the active AI integration's stop-hook wiring
+// (idempotent, via the AIIntegration.EnsureHooks port) so the agent can
+// call back into the kernel on stop. Skipped when no AI is configured —
+// no hardcoded knowledge of any specific agent.
+func checkAgentHooks() CheckResult {
+	ai := integration.Active().AI
+	if ai == nil {
+		return CheckResult{Name: "agent hooks", Status: StatusSkip,
+			Detail: "no AI integration configured ([integrations] ai)"}
 	}
-	path := filepath.Join(cacheDir, "atelier", "claude", "settings.json")
-	if _, err := os.Stat(path); err == nil {
-		return CheckResult{Name: "claude settings", Status: StatusPass,
-			Detail: path}
-	}
-	// Auto-create with an empty JSON object — Claude tool tolerates
-	// missing keys but errors on truly invalid JSON.
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return CheckResult{Name: "claude settings", Status: StatusWarn,
-			Detail:      fmt.Sprintf("cannot create dir: %v", err),
+	if err := ai.EnsureHooks(); err != nil {
+		return CheckResult{Name: "agent hooks", Status: StatusWarn,
+			Detail:      fmt.Sprintf("%s: %v", ai.Name(), err),
 			Remediation: "ensure $XDG_CACHE_HOME (or ~/.cache) is writable"}
 	}
-	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
-		return CheckResult{Name: "claude settings", Status: StatusWarn,
-			Detail:      fmt.Sprintf("cannot write: %v", err),
-			Remediation: "ensure $XDG_CACHE_HOME (or ~/.cache) is writable"}
-	}
-	return CheckResult{Name: "claude settings", Status: StatusWarn,
-		Detail: fmt.Sprintf("created empty stub at %s", path)}
+	return CheckResult{Name: "agent hooks", Status: StatusPass,
+		Detail: fmt.Sprintf("%s stop-hook wiring installed", ai.Name())}
 }
 
 // checkWorktreeDirsExist scans the statestore cache for workspaces

@@ -1,103 +1,147 @@
 # Contributing to atelier
 
-Thanks for your interest. Atelier's plugin architecture is designed for community contributions — you can ship a tool without forking the core.
+Thanks for your interest. atelier is **one binary**. There are two ways
+to add a tool — pick by how much behavior you need. Neither involves a
+subprocess manifest protocol or an `atelier-<name>` binary on PATH; that
+model was removed (see [DESIGN.md](DESIGN.md) → "Non-goals").
 
-## Writing a new tool
+## Option 1 — a launcher (no code, no recompile)
 
-A tool is any executable named `atelier-<name>` on `PATH` that responds to the manifest contract.
+Register *any* command as a tool with a `[tools.<name>]` block in
+`$XDG_CONFIG_HOME/atelier/config.toml`. atelier binds a key, opens the
+command in a popup, and owns the window state. The command can be
+anything on PATH — a script you wrote, another TUI, a wrapper.
 
-### Minimum viable tool (in any language)
+```toml
+[tools.hello]
+launch      = "sh -c 'echo hello, atelier!; read -n1 -s'"
+popup       = "none"     # workspace | global | none
+key         = "h"        # optional tmux binding
+title       = "Hello"
+description = "Print hello to the popup"
+requires    = []         # external commands doctor should verify
+```
 
 ```bash
-#!/usr/bin/env bash
-# atelier-hello — a minimal demo tool.
+atelier doctor            # lists it under "Discovered tools", checks `requires`
+atelier tools hello       # runs the launch command in a popup
+atelier init              # includes hello's binding block
+```
 
-if [ "$1" = "--atelier-manifest" ]; then
-  cat <<'EOF'
-{
-  "api_version": 1,
-  "name": "hello",
-  "description": "Print hello to the popup",
-  "binding": {
-    "key": "h",
-    "title": "Hello",
-    "style": "full",
-    "invoke": "open"
-  },
-  "popup": "none",
-  "requires": [],
-  "subcommands": ["open"]
+Popup shapes:
+
+- `workspace` — a per-parent-window backing session (survives while the
+  window lives). Set `start_cwd = true` to open at the pane's cwd.
+- `global` — one singleton backing session shared server-wide (k9s /
+  pgcli style). Your `aws-vault-k9s` wrapper goes here.
+- `none` — exec the command directly in the popup pty; no backing
+  session.
+
+Launcher fields: `launch` (required), `popup`, `key`, `key_table`,
+`requires`, `icon`, `accent_color`, `title`, `description`, `invoke`,
+`start_cwd`.
+
+That's it. No source changes, no recompile.
+
+## Option 2 — a built-in (a PR)
+
+Richer tools — those that provide a capability slot (attention, a picker
+badge, a summary) or need deep integration with the workspace primitive
+— live in-tree and compile into the one binary. A built-in is a package
+under `internal/tools/<name>/` exposing two symbols, plus one
+registration line.
+
+```go
+// internal/tools/yourtool/register.go
+package yourtool
+
+import (
+    "github.com/spf13/cobra"
+
+    "github.com/vyrwu/atelier/internal/manifest"
+)
+
+var Manifest = &manifest.Manifest{
+    Tool:          true,                 // appears in the M-; selector
+    Name:          "yourtool",
+    Description:   "short human description",
+    Popup:         manifest.KindWorkspace,
+    PrimaryInvoke: "open",
+    Binding:       &manifest.Binding{Key: "x", Style: manifest.StyleFull, StartCwd: true, Invoke: "open"},
+    Requires:      []string{"fzf"},
 }
-EOF
-  exit 0
-fi
+// (To fill a kernel capability slot — AI summary/attention, forge badge —
+//  write an integration adapter instead; see Option 3.)
 
-case "$1" in
-  open)
-    echo "hello, atelier!"
-    read -n1 -s
-    ;;
-  *)
-    echo "usage: atelier-hello open" >&2
-    exit 1
-    ;;
-esac
-```
-
-Install it:
-
-```bash
-chmod +x atelier-hello
-cp atelier-hello ~/.local/bin/
-
-atelier doctor                  # should now list it
-atelier tools hello open        # dispatches to atelier-hello open
-atelier init                    # includes hello's binding block
-```
-
-Reload tmux and `prefix+h` (or whatever your prefix is, then `h`) opens the popup.
-
-That's it. No atelier source modifications. No recompile. No registration.
-
-## Manifest contract
-
-Every tool must respond to `--atelier-manifest` with JSON matching this schema:
-
-```json
-{
-  "api_version": 1,
-  "name": "your-tool-name",
-  "description": "short human description",
-  "version": "0.1.0",
-  "binding": {
-    "key": "x",
-    "key_table": "root",
-    "title": "Your Tool",
-    "style": "full",
-    "start_cwd": true,
-    "invoke": "open"
-  },
-  "popup": "workspace",
-  "requires": ["fzf", "git"],
-  "subcommands": ["open", "switch"]
+func AddCommands(root *cobra.Command) {
+    root.AddCommand(OpenCommand())
 }
 ```
 
-| Field | Required | Description |
-|---|---|---|
-| `api_version` | yes | Must be `1` for current core |
-| `name` | yes | Tool name (no `atelier-` prefix) |
-| `description` | recommended | Shown in `atelier tools list` and the tool selector |
-| `binding` | optional | Tmux key binding details |
-| `binding.key` | if binding set | Tmux key (e.g. `"p"`, `"M-n"`) |
-| `binding.key_table` | optional | Default `"root"` |
-| `binding.title` | optional | Popup title bar text |
-| `binding.style` | optional | `"full"` (rounded, bottom-anchored) or `"picker"` (-B compact) |
-| `binding.start_cwd` | optional | If true, popup starts at `#{pane_current_path}` |
-| `binding.invoke` | optional | Subcommand to call (default `"open"`) |
-| `popup` | optional | `"workspace"` (per-window) / `"global"` (singleton) / `"none"` |
-| `requires` | optional | External commands that must be on PATH |
-| `subcommands` | optional | Documentation hint for help output |
+```go
+// internal/tools/all/all.go — one line
+plugin.RegisterBuiltin(yourtool.Manifest, yourtool.AddCommands)
+```
+
+`atelier tools yourtool open` now dispatches to your `OpenCommand` in
+the same process; `atelier init` emits its binding; the selector lists
+it (when `Tool: true`); `atelier doctor` checks `Requires`.
+
+### Manifest fields
+
+| Field | Description |
+|---|---|
+| `Name` | tool name (no `atelier-` prefix) |
+| `Description` | shown in `atelier tools list` + selector |
+| `Tool` | `true` to appear in the M-; selector; omit for pure providers |
+| `Popup` | `KindWorkspace` / `KindGlobal` / `KindNone` — launch shape |
+| `Binding` / `Bindings` | tmux key bindings emitted by `atelier init` |
+| `Requires` | external commands `atelier doctor` verifies on PATH |
+| `UI` | icon / accent color / popup title for the selector |
+| `PickerBindings` | in-popup key hints for the cheatsheet |
+
+(Presentation CAPABILITIES — AI summary/attention/naming, forge badge —
+are NOT declared on a tool manifest. They are kernel ports filled by
+swappable integration adapters. See Option 3.)
+
+## Option 3 — an integration adapter (swap a capability)
+
+To change *who fills a kernel capability* — the AI agent (branch naming,
+summary, attention, the popup agent) or the code forge (PR badge) — write
+an adapter that satisfies the kernel port in `internal/integration` and
+wire it at the composition root. The kernel does not change.
+
+```go
+// internal/adapters/codex/codex.go
+package codex
+
+import "github.com/vyrwu/atelier/internal/integration"
+
+type Adapter struct{}
+func New() *Adapter { return &Adapter{} }
+var _ integration.AIIntegration = (*Adapter)(nil) // implement the port's methods
+```
+
+```go
+// cmd/atelier/integrations.go — one line in composeIntegrations()
+case "codex":
+    set.AI = codex.New()
+```
+
+Then `[integrations] ai = "codex"` selects it. Ports:
+
+- `AIIntegration` — `OpenAgent`, `SetPrompt`, `GenerateName`, `OnStop`,
+  `Summarize`, `EnsureHooks`, `AgentPopupSession`, `HasResumableState`.
+  The KERNEL owns the naming instruction + conventional-commit validation;
+  the adapter runs its model and manages its own resume/session semantics.
+- `ForgeIntegration` — `Status` (classify into the kernel's `ForgeState`),
+  `Open`. The KERNEL renders the glyph + sort order.
+
+**Dependency rule:** an adapter imports `internal/integration` (the port)
++ kernel primitives; it must NEVER be imported by the kernel. Only
+`cmd/atelier` maps config → adapter. Test your adapter against the port
+(`var _ integration.AIIntegration = ...`) and add a unit test; the `mock`
+adapter shows the minimum.
 
 ## Host services
 
@@ -140,11 +184,11 @@ Go-written tools can import `github.com/vyrwu/atelier/internal/popup`,
 
 ## Distribution
 
-- **Standalone binary on PATH**: drop `atelier-yourtool` anywhere on `PATH`.
-- **Homebrew tap**: `brew install yourname/tap/atelier-yourtool`.
-- **Nix package**: `nix run github:you/atelier-yourtool`.
-
-The core only needs the binary on PATH. How it got there is your choice.
+- **Launcher**: nothing to distribute — it's a `[tools.*]` block in the
+  user's `config.toml` pointing at a command they already have on PATH.
+- **Built-in**: ships inside the single `atelier` binary once your PR
+  merges. `brew install vyrwu/tap/atelier` gets it. There are no
+  per-tool packages.
 
 ## Style + behavior expectations
 
@@ -153,63 +197,46 @@ The core only needs the binary on PATH. How it got there is your choice.
 - **Tools must be idempotent.** Calling `open` twice should not create duplicate backing sessions.
 - **Tools must not panic on missing dependencies.** Declare them in `requires` so `atelier doctor` can warn.
 
-## Building tools in Go
+## Adding a built-in to atelier's official set
 
-Use the shared `toolmain` helper for boilerplate:
+Open a PR that:
 
-```go
-package main
+1. Adds `internal/tools/yourtool/` with your command constructors and a
+   `register.go` exposing `Manifest` + `AddCommands` (see Option 2 above).
+2. Adds one `plugin.RegisterBuiltin(yourtool.Manifest, yourtool.AddCommands)`
+   line to `internal/tools/all/all.go`.
 
-import (
-    "github.com/spf13/cobra"
-    "github.com/vyrwu/atelier/internal/manifest"
-    "github.com/vyrwu/atelier/internal/toolmain"
-)
+It builds via `make build` and installs via `make install`. `cmd/atelier`
+never changes — the registry is the single wiring point. In-process
+dispatch (cancel → exit 130, error → pause-and-exit) is handled for you by
+`toolmain.Dispatch`; you don't call it directly.
 
-var Manifest = &manifest.Manifest{
-    APIVersion: manifest.APIVersion,
-    Name:       "yourtool",
-    // ...
-}
+## Agent stop-hook integration
 
-func main() {
-    toolmain.Run(Manifest, func(root *cobra.Command) {
-        root.AddCommand(myOpenCommand())
-    })
-}
-```
+The kernel exposes `atelier ai on-stop` as the agent stop-hook entry
+point. The active AI adapter's `OnStop` raises `@needs_attention` on the
+workspace's parent window (unless the popup is attached) and refreshes the
+summary (`@attention_recap`) from the agent's latest transcript — both via
+the kernel verbs `workspace.SetAttention` / `SetRecap`.
 
-The helper handles `--atelier-manifest` dispatch and cobra root setup for you.
-
-## Adding a tool to atelier's official set
-
-If you want your tool shipped as a default-with-atelier extension, open a PR adding `cmd/atelier-yourtool/main.go`. It builds via `make build` and installs via `make install`. The core never changes.
-
-## Claude Code hook integration
-
-Atelier exposes `atelier tools claude notify-attention` as the hook entry
-point — it raises `@needs_attention` on the workspace's parent window and
-refreshes `@recap` from the latest Claude transcript.
-
-Add to `~/.config/claude/settings.json`:
+The Claude adapter installs this automatically (via `EnsureHooks` →
+atelier's `--settings` file), so you don't hand-edit
+`~/.config/claude/settings.json`. The canonical hook it writes is:
 
 ```json
 {
   "hooks": {
     "Stop": [
-      {
-        "type": "command",
-        "command": "atelier tools claude notify-attention"
-      }
+      { "type": "command", "command": "atelier ai on-stop" }
     ]
   }
 }
 ```
 
-The hook runs inside the Claude popup, which is an atelier-managed tmux
-session. `atelier state` resolves the outer (workspace) window from the
-chain, and `notify-attention` sets the option on that window. Your tmux
-status line then shows " ● <N>" via `atelier status attention --count`.
+The hook runs inside the agent popup, which is an atelier-managed tmux
+session. `OnStop` resolves the outer (workspace) window from the chain and
+sets the options on it. Your tmux status line then shows the attention
+rollup via `atelier status attention count`.
 
 Atelier also reads two window options that you can set per-workspace from
 the workspaces tool or by hand:

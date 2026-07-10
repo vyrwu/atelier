@@ -12,8 +12,8 @@ import (
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
 
-// SpawnBgPull fires `atelier-workspaces _bg-pull <repoPath> <defaultBranch>
-// <windowID>` detached. Returns immediately; the pull + ahead/behind
+// SpawnBgPull fires `atelier tools workspaces _bg-pull <repoPath>
+// <defaultBranch> <windowID>` detached. Returns immediately; the pull + ahead/behind
 // compute + option stamping happen in the background.
 //
 // Lives in the workspace primitive (not the workspaces tool) because
@@ -48,27 +48,19 @@ func SpawnBgPull(repoPath, defaultBranch, windowID string) {
 	}
 	self, err := os.Executable()
 	if err != nil {
-		self = "atelier-workspaces"
+		self = "atelier"
 	}
-	// If we're being called from a non-workspaces tool (claude,
-	// k9s, etc.), os.Executable() returns THAT binary's path. The
-	// _bg-pull subcommand lives on atelier-workspaces specifically,
-	// so swap the basename when ours doesn't end in "atelier-workspaces".
-	if !strings.HasSuffix(self, "/atelier-workspaces") && self != "atelier-workspaces" {
-		// Replace the trailing component with atelier-workspaces.
-		if i := strings.LastIndex(self, "/"); i >= 0 {
-			self = self[:i+1] + "atelier-workspaces"
-		} else {
-			self = "atelier-workspaces"
-		}
-	}
-	cmd := exec.Command(self, "_bg-pull", repoPath, defaultBranch, windowID)
+	// One binary now: re-invoke our own in-process workspaces dispatch.
+	// os.Executable() is `atelier` regardless of which tool called us, so
+	// `atelier tools workspaces _bg-pull` always reaches the right
+	// subcommand — no basename patching.
+	cmd := exec.Command(self, "tools", "workspaces", "_bg-pull", repoPath, defaultBranch, windowID)
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	// CRITICAL: put the child in its own process group. Without this,
 	// the spawned _bg-pull inherits our process group; when the
-	// invoking atelier-workspaces process exits (it returns immediately
+	// invoking atelier process exits (it returns immediately
 	// after spawning — that's the FR-7 "snappy open" win), the tmux
 	// popup pty closes, and the kernel sends SIGHUP to everything in
 	// our process group, including our detached child. The child dies
@@ -171,6 +163,18 @@ func OpenDefaultBranch(
 // and runWorkspacePrompt with subtle drift between copies.
 func EnsureSession(h *tmuxhost.Client, session, repoPath, defaultBranch string) (created bool, err error) {
 	if has, _ := h.HasSession(session); has {
+		// The session exists, but it may be a BARE shell with no atelier
+		// metadata — the launcher's `new-session -A -s <name>` recreates a
+		// killed workspace as a plain session, stamping nothing. The M-s
+		// picker includes a window only if its session carries @repo_path, so
+		// an unstamped session (and any window we later add via open/recover)
+		// silently vanishes from the switcher. Re-stamp @repo_path idempotently
+		// to heal it — cheap (one set-option) and safe (session name == repo).
+		if repoPath != "" {
+			if _, e := h.Run("set-option", "-t", session, OptRepoPath, repoPath); e != nil {
+				debuglog.LogErr("workspace.EnsureSession restamp @repo_path", e)
+			}
+		}
 		return false, nil
 	}
 	if _, err := h.Run("new-session", "-d", "-s", session, "-c", repoPath); err != nil {

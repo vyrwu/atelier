@@ -50,7 +50,7 @@ jobs:
       - name: Install tmux + fzf (for `go test` hook in goreleaser)
         run: sudo apt-get update && sudo apt-get install -y tmux fzf
 
-      - name: Verify build for all tool binaries
+      - name: Verify build
         run: make build
 
       - name: Run unit tests
@@ -73,6 +73,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # PAT with write access to vyrwu/homebrew-tap (set up at:
           # github.com/vyrwu/atelier → Settings → Secrets and variables).
-          # Used by goreleaser's brews: block to push the per-formula
-          # Ruby files into the tap repo on every release.
+          # Used by goreleaser's homebrew_casks block to push the cask
+          # Ruby file into the tap repo on every release.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

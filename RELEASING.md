@@ -15,8 +15,8 @@ Three pieces work together:
 2. **You** review and merge the Release PR when you're ready to ship. That
    IS the release gesture.
 3. **goreleaser** fires automatically on the tag release-please pushes,
-   builds binaries for 4 platforms (linux/darwin × amd64/arm64), publishes
-   a GitHub Release, and pushes per-formula `*.rb` files to
+   builds the `atelier` binary for 4 platforms (linux/darwin × amd64/arm64),
+   publishes a GitHub Release, and pushes the cask `*.rb` file to
    `vyrwu/homebrew-tap`.
 
 End-to-end: a normal merge to main → release-please updates the Release PR →
@@ -102,9 +102,9 @@ The `Release-As: <version>` trailer is release-please's manual override.
 | `release-please-config.json` | you | What bumps a release, what shows in CHANGELOG, etc. |
 | `.release-please-manifest.json` | the bot | Current version. Don't hand-edit. |
 | `CHANGELOG.md` | the bot | Generated. Don't hand-edit; if you want to add context, do it in commit messages. |
-| `.goreleaser.yaml` | you | Build matrix, archive naming, brews block, GH Release header/footer. |
+| `.goreleaser.yaml` | you | Build matrix, archive naming, homebrew_casks block, GH Release header/footer. |
 | `.github/workflows/release.yml` | you | Test → goreleaser. Fires on every `v*.*.*` tag. |
-| `vyrwu/homebrew-tap` (separate repo) | the bot | Each release rewrites `Formula/atelier*.rb`. |
+| `vyrwu/homebrew-tap` (separate repo) | the bot | Each release rewrites `Casks/atelier.rb`. |
 
 ## When something goes wrong
 
@@ -122,7 +122,7 @@ because the GH token didn't have `contents: write`. Workflow already grants
 it (`permissions:` block), so this should not happen unless the workflow
 file was edited.
 
-### "Goreleaser failed — brews step couldn't push"
+### "Goreleaser failed — casks step couldn't push"
 
 The `HOMEBREW_TAP_GITHUB_TOKEN` secret expired or has wrong scopes. Regen
 the PAT (see `RELEASING.md → "Setup: one-time prerequisites"` below),
@@ -168,9 +168,12 @@ CHANGE:` commit:
    shape, exit code, and output format are part of the contract.
    Locked in by `internal/cli/status_emitters_e2e_test.go`.
 
-2. **Plugin manifest contract** (`--atelier-manifest` JSON schema):
-   The fields atelier reads from a plugin's manifest. Any rename
-   or removal breaks third-party plugins.
+2. **Launcher config schema** (`[tools.<name>]` in config.toml):
+   The fields a user's launcher block may set (`launch`, `popup`,
+   `key`, `requires`, `icon`, `accent_color`, `title`, …). Renaming
+   or removing one breaks user configs. (Built-in tools' `Manifest`
+   is an in-tree Go type — changing it is a normal code change, not a
+   public-contract break.)
 
 3. **Tmux init output structure** (`atelier init` / `atelier init
    --bare`): users source these into their tmux.conf. Adding new
@@ -184,10 +187,10 @@ output against parse errors on a fresh tmux server.
 - **CHANGELOG curation past auto-generation**: release-please writes
   bullet points from your commit subjects. The output quality is exactly
   as good as your commit subjects. Don't try to post-process this in CI.
-- **Brew formula hand-editing**: goreleaser regenerates the Ruby files
+- **Brew cask hand-editing**: goreleaser regenerates the Ruby file
   on every release. Any edits in the tap repo get overwritten next tag.
-  If you need to customize formula behavior, do it in
-  `.goreleaser.yaml`'s `brews:` block.
+  If you need to customize cask behavior, do it in
+  `.goreleaser.yaml`'s `homebrew_casks:` block.
 - **Tagging the first commit**: the manifest starts at `0.0.0`. The
   bot won't open a Release PR until there's a `feat:` or `fix:` commit
   to bump from. If you need to "seed" a version, use `Release-As: x.y.z`

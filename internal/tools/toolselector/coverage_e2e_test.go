@@ -12,18 +12,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/popup"
 	"github.com/vyrwu/atelier/internal/testtmux"
 )
 
-// TestSelector_DispatchToPopupShell_OpensBackingSession asserts that
-// dispatching from the toolselector to a workspace-scoped tool
-// (popupshell) actually opens its backing session with the correct
-// `_atelier_popupshell_<sid>_<wid>` name. This is the bug class where
-// the suffix came up empty (`_atelier_popupshell__`) because globals
-// stored the literal `#{...}` instead of expanded IDs.
+// TestSelector_DispatchToPopupShell_OpensBackingSession asserts that the
+// M-; binding chain stamps the @atelier_outer_* globals with real
+// (expanded) tmux IDs, and that a workspace-scoped backing session opened
+// from those IDs gets the correct `_atelier_popupshell_<sid>_<wid>` name.
+// This is the bug class where the suffix came up empty
+// (`_atelier_popupshell__`) because globals stored the literal `#{...}`
+// instead of expanded IDs.
 //
-// Bypasses fzf by invoking `popup goto-tool` directly (the same
-// dispatcher path the popup-table M-; binding uses).
+// popupshell is now a `[tools.*]` config launcher, so the backing session
+// is opened via the popup primitive directly — exactly what the launcher's
+// workspace path does under the hood.
 func TestSelector_DispatchToPopupShell_OpensBackingSession(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("main")
@@ -48,12 +51,11 @@ func TestSelector_DispatchToPopupShell_OpensBackingSession(t *testing.T) {
 	expected := fmt.Sprintf("_atelier_popupshell_%s_%s",
 		digits(sess), digits(win))
 
-	// Drive the dispatch path directly. We can't use the PTY-driven
-	// fzf because we'd need to navigate the menu, but the dispatcher
-	// is exactly what the selector calls under the hood.
-	if _, err := srv.RunAtelier("tools", "popupshell", "create",
-		"--session", sess, "--window", win); err != nil {
-		t.Fatalf("popupshell create: %v", err)
+	// Open the workspace-scoped backing session from the stamped IDs — the
+	// same call the launcher's workspace path makes under the hood.
+	spec := &popup.WorkspaceScoped{Tool: "popupshell", DefaultCmd: "$SHELL"}
+	if err := spec.Ensure(srv.Client, sess, win, ""); err != nil {
+		t.Fatalf("ensure backing session: %v", err)
 	}
 	srv.MustHaveSession(expected)
 }

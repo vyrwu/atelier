@@ -12,12 +12,13 @@ import (
 )
 
 // TestMain re-invokes the test binary as a toolmain subprocess when the
-// helper env var is set. This is how we test exit codes of toolmain.Run
-// without spawning a separate binary build.
+// helper env var is set. This is how we test the exit codes of
+// toolmain.Dispatch without spawning a separate binary build. The "do"
+// arg on os.Args is forwarded to Dispatch as the tool subcommand.
 func TestMain(m *testing.M) {
 	switch os.Getenv("ATELIER_TOOLMAIN_TEST_MODE") {
 	case "cancel":
-		Run(&manifest.Manifest{APIVersion: manifest.APIVersion, Name: "testtool"},
+		Dispatch(&manifest.Manifest{Name: "testtool"},
 			func(root *cobra.Command) {
 				root.AddCommand(&cobra.Command{
 					Use: "do",
@@ -25,28 +26,28 @@ func TestMain(m *testing.M) {
 						return fzf.ErrCancelled
 					},
 				})
-			})
-		return // unreachable: Run calls os.Exit
+			}, os.Args[1:])
+		return // unreachable: Dispatch calls os.Exit on cancel
 	case "ok":
-		Run(&manifest.Manifest{APIVersion: manifest.APIVersion, Name: "testtool"},
+		Dispatch(&manifest.Manifest{Name: "testtool"},
 			func(root *cobra.Command) {
 				root.AddCommand(&cobra.Command{
 					Use:  "do",
 					RunE: func(*cobra.Command, []string) error { return nil },
 				})
-			})
+			}, os.Args[1:])
 		return
 	}
 	os.Exit(m.Run())
 }
 
-// TestRun_ExitsCancelledOn130 locks in the cancellation propagation fix:
-// when RunE returns fzf.ErrCancelled, toolmain MUST exit with code 130
-// (fzf's cancel status) so a parent fzf.Pick reading our exit status
+// TestDispatch_ExitsCancelledOn130 locks in the cancellation propagation
+// fix: when RunE returns fzf.ErrCancelled, Dispatch MUST exit with code
+// 130 (fzf's cancel status) so a parent fzf.Pick reading our exit status
 // up the become() chain returns ErrCancelled and the chain unwinds
 // cleanly. Returning nil (exit 0) caused upstream callers to see "valid
 // pick of empty output" and proceed with phantom state.
-func TestRun_ExitsCancelledOn130(t *testing.T) {
+func TestDispatch_ExitsCancelledOn130(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "do")
 	cmd.Env = append(os.Environ(), "ATELIER_TOOLMAIN_TEST_MODE=cancel")
 	err := cmd.Run()
@@ -59,9 +60,9 @@ func TestRun_ExitsCancelledOn130(t *testing.T) {
 	}
 }
 
-// TestRun_ExitsZeroOnNil sanity-checks that the new cancellation
+// TestDispatch_ExitsZeroOnNil sanity-checks that the cancellation
 // handling didn't accidentally elevate every successful run to 130.
-func TestRun_ExitsZeroOnNil(t *testing.T) {
+func TestDispatch_ExitsZeroOnNil(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "do")
 	cmd.Env = append(os.Environ(), "ATELIER_TOOLMAIN_TEST_MODE=ok")
 	if err := cmd.Run(); err != nil {

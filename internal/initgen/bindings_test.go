@@ -9,8 +9,7 @@ import (
 
 func TestBindingBlock_FullStyle(t *testing.T) {
 	m := &manifest.Manifest{
-		APIVersion: manifest.APIVersion,
-		Name:       "popupshell",
+		Name: "popupshell",
 		Binding: &manifest.Binding{
 			Key:      "p",
 			Title:    "Popup",
@@ -38,8 +37,7 @@ func TestBindingBlock_FullStyle(t *testing.T) {
 
 func TestBindingBlock_PickerStyle(t *testing.T) {
 	m := &manifest.Manifest{
-		APIVersion: manifest.APIVersion,
-		Name:       "workspaces",
+		Name: "workspaces",
 		Binding: &manifest.Binding{
 			Key:    "M-n",
 			Style:  manifest.StylePicker,
@@ -67,8 +65,7 @@ func TestBindingBlock_PickerStyle(t *testing.T) {
 
 func TestBindingBlock_AlsoInPopup(t *testing.T) {
 	m := &manifest.Manifest{
-		APIVersion: manifest.APIVersion,
-		Name:       "toolselector",
+		Name: "toolselector",
 		Binding: &manifest.Binding{
 			Key:         "M-;",
 			Style:       manifest.StylePicker,
@@ -92,8 +89,7 @@ func TestBindingBlock_AlsoInPopup(t *testing.T) {
 
 func TestBindingBlock_MultipleBindings(t *testing.T) {
 	m := &manifest.Manifest{
-		APIVersion: manifest.APIVersion,
-		Name:       "workspaces",
+		Name: "workspaces",
 		Binding: &manifest.Binding{
 			Key: "M-n", Style: manifest.StylePicker, Invoke: "pick", AlsoInPopup: true,
 		},
@@ -117,7 +113,7 @@ func TestBindingBlock_MultipleBindings(t *testing.T) {
 }
 
 func TestBindingBlock_NoBinding(t *testing.T) {
-	m := &manifest.Manifest{APIVersion: manifest.APIVersion, Name: "headless"}
+	m := &manifest.Manifest{Name: "headless"}
 	if got := BindingBlock("headless", m); got != "" {
 		t.Fatalf("expected empty block for headless tool, got:\n%s", got)
 	}
@@ -175,6 +171,29 @@ func TestThemeBlock_DistroGradeDefaults(t *testing.T) {
 		if !strings.Contains(b, opt) {
 			t.Errorf("ThemeBlock missing %q (%s). full block:\n%s", opt, why, b)
 		}
+	}
+}
+
+// TestThemeBlock_HidesInactiveWindows locks the "only the current workspace
+// in the bar" contract. A repo session holds one window per worktree, so a
+// non-empty window-status-format renders EVERY branch name in the status bar
+// (the bug the user hit — a flood of workspace names). It must be empty so
+// only window-status-current-format renders. Regressing to " #W " floods the
+// bar again.
+func TestThemeBlock_HidesInactiveWindows(t *testing.T) {
+	b := ThemeBlock()
+	// Background windows render only when they need attention; the current
+	// workspace renders via window-status-current-format. So the bar shows
+	// "current + anything waiting", never a flood of every branch name (the
+	// bug) and never hiding a background workspace that needs the user.
+	if !strings.Contains(b, `set -g window-status-format "#{?@needs_attention, #W ,}"`) {
+		t.Errorf("window-status-format must be attention-conditional; block:\n%s", b)
+	}
+	if strings.Contains(b, `set -g window-status-format " #W "`) {
+		t.Error("window-status-format ' #W ' renders EVERY window name in the bar (flood regression)")
+	}
+	if !strings.Contains(b, `set -g window-status-current-format "#[bold] #W #[nobold]"`) {
+		t.Errorf("window-status-current-format missing/changed — current workspace must still render; block:\n%s", b)
 	}
 }
 

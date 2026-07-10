@@ -1,129 +1,93 @@
-// Package plugin discovers atelier tools on PATH.
+// Package plugin is atelier's tool registry.
 //
-// A tool is any executable named `atelier-<name>` on PATH that responds to
-// the manifest.Sentinel flag with valid manifest JSON. The core uses
-// discovery to populate the `atelier tools` dispatcher, the `atelier init`
-// binding aggregator, and `atelier doctor` requirement checks.
+// A tool is one of two things:
 //
-// Discovery never errors on an individual tool's failure: failed tools are
-// returned in Skipped so the core can show a warning without blocking
-// healthy tools.
+//   - A BUILT-IN: a package under internal/tools/* that registers a
+//     manifest + command-tree constructor via RegisterBuiltin (wired in
+//     internal/tools/all). Built-ins are compiled into the single atelier
+//     binary and dispatched in-process — the core knows them at compile
+//     time. There is no subprocess manifest protocol and no PATH scan.
+//
+//   - A LAUNCHER: a `[tools.<name>]` block in the user's config.toml that
+//     names ANY command to run in a popup. atelier launches it and owns
+//     the window/state; the command needn't be an atelier binary. This is
+//     how a user extends atelier without writing Go — e.g. wrap k9s with
+//     AWS auth in a `aws-vault-k9s` script and register it as a launcher.
+//
+// Discover() merges both into one list. Every consumer — the `atelier
+// tools` dispatcher, `atelier init` binding generation, the tool
+// selector, `atelier doctor` — reads that merged view and stays agnostic
+// to whether a tool is built-in or a config launcher.
 package plugin
 
 import (
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
-	"strings"
-	"sync"
+
+	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/manifest"
 )
 
-// Process-scoped cache of the default-PATH discovery. Discover() is
-// called from 7+ places per command (help, doctor, tools list,
-// popup, toolselector, initgen.Render, etc.); each call would
-// otherwise fork ONE subprocess per discovered binary (to read its
-// --atelier-manifest). For 9 plugins × 7 callsites = up to 63 forks
-// per command. Memoize since discovery is idempotent within a
-// process lifetime: PATH doesn't change, plugin binaries don't
-// change.
-//
-// The cache is keyed on (), not on pathDirs — explicit-PATH calls
-// (used only by tests passing tempdirs) bypass the cache entirely.
-var (
-	discoverOnce   sync.Once
-	discoverResult *DiscoveryResult
-	discoverErr    error
-)
-
-// Prefix is the binary-name prefix atelier scans for.
-const Prefix = "atelier-"
-
-// SelfBinary is the core's own binary name; never reported as a plugin even
-// if found on PATH.
+// SelfBinary is the core's own binary name.
 const SelfBinary = "atelier"
 
-// Plugin is a discovered tool, paired with its loaded manifest.
+// Plugin is a registered tool paired with its manifest.
 type Plugin struct {
-	Name     string             // tool name (e.g. "lazygit"), without prefix
-	Binary   string             // absolute path to the binary
-	Manifest *manifest.Manifest // loaded manifest
+	Name     string             // tool name (e.g. "lazygit")
+	Manifest *manifest.Manifest // its manifest
+
+	// add is the built-in command-tree constructor. nil for launchers.
+	add func(root *cobra.Command)
+	// launch is the shell command a launcher runs. "" for built-ins.
+	launch string
 }
+
+// IsBuiltin reports whether this plugin is a compiled-in tool (as opposed
+// to a config-declared launcher).
+func (p *Plugin) IsBuiltin() bool { return p.add != nil }
 
 // DiscoveryResult is the outcome of a Discover() call.
 type DiscoveryResult struct {
 	Plugins []Plugin
-	Skipped map[string]error // absolute binary path → why it was skipped
+	Skipped map[string]error // source (config key) → why it was skipped
 }
 
-// Discover scans the directories given (defaults to $PATH) for atelier-*
-// binaries and loads their manifests. Earlier directories take precedence
-// on name conflict — matches the standard PATH lookup semantics.
+// Discover returns every registered tool: built-ins from the static
+// registry plus launchers parsed from the user's config.toml. Cheap —
+// reading a slice and one small TOML file — so it is intentionally NOT
+// memoized (unlike the old fork-per-binary PATH scan, which had to be).
 //
-// When called with no args, results are memoized for the lifetime of
-// the process. Tests that need fresh discovery should pass explicit
-// pathDirs (they bypass the cache).
-func Discover(pathDirs ...string) (*DiscoveryResult, error) {
-	if len(pathDirs) == 0 {
-		discoverOnce.Do(func() {
-			discoverResult, discoverErr = discoverFresh(
-				filepath.SplitList(os.Getenv("PATH")))
-		})
-		return discoverResult, discoverErr
-	}
-	return discoverFresh(pathDirs)
-}
-
-// discoverFresh is the un-memoized implementation. Called by Discover
-// (via sync.Once for default-PATH) and directly by tests passing
-// explicit pathDirs.
-func discoverFresh(pathDirs []string) (*DiscoveryResult, error) {
+// Built-ins always win a name collision: a launcher that reuses a
+// built-in's name is dropped into Skipped rather than shadowing it.
+func Discover() (*DiscoveryResult, error) {
 	res := &DiscoveryResult{Skipped: map[string]error{}}
-	seen := map[string]bool{}
 
-	for _, dir := range pathDirs {
-		if dir == "" {
+	seen := map[string]bool{}
+	for _, b := range builtinList() {
+		res.Plugins = append(res.Plugins, Plugin{
+			Name:     b.manifest.Name,
+			Manifest: b.manifest,
+			add:      b.add,
+		})
+		seen[b.manifest.Name] = true
+	}
+
+	launchers, skipped := loadLaunchers()
+	for k, v := range skipped {
+		res.Skipped[k] = v
+	}
+	for _, lp := range launchers {
+		if lp.Name == SelfBinary {
+			res.Skipped["[tools."+lp.Name+"]"] = errReservedName(lp.Name)
 			continue
 		}
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue // missing PATH entries are normal
+		if seen[lp.Name] {
+			res.Skipped["[tools."+lp.Name+"]"] = errShadowsBuiltin(lp.Name)
+			continue
 		}
-		for _, entry := range entries {
-			name := entry.Name()
-			if !strings.HasPrefix(name, Prefix) {
-				continue
-			}
-			toolName := strings.TrimPrefix(name, Prefix)
-			if toolName == "" || toolName == SelfBinary {
-				continue
-			}
-			if seen[toolName] {
-				continue // earlier PATH entry wins
-			}
-			seen[toolName] = true
-
-			full := filepath.Join(dir, name)
-			if !isExecutable(full) {
-				continue
-			}
-
-			m, err := manifest.FromBinary(full)
-			if err != nil {
-				res.Skipped[full] = err
-				continue
-			}
-			if m.Name == "" {
-				m.Name = toolName
-			}
-			res.Plugins = append(res.Plugins, Plugin{
-				Name:     toolName,
-				Binary:   full,
-				Manifest: m,
-			})
-		}
+		seen[lp.Name] = true
+		res.Plugins = append(res.Plugins, lp)
 	}
 
 	sort.Slice(res.Plugins, func(i, j int) bool {
@@ -142,8 +106,8 @@ func (r *DiscoveryResult) FindByName(name string) (*Plugin, bool) {
 	return nil, false
 }
 
-// CheckRequirements returns the list of binaries declared by all plugins'
-// manifests that are missing from PATH. Used by `atelier doctor`.
+// CheckRequirements returns, per tool, the binaries its manifest declares
+// (Requires) that are missing from PATH. Used by `atelier doctor`.
 func (r *DiscoveryResult) CheckRequirements() map[string][]string {
 	out := map[string][]string{}
 	for _, p := range r.Plugins {
@@ -158,12 +122,4 @@ func (r *DiscoveryResult) CheckRequirements() map[string][]string {
 		}
 	}
 	return out
-}
-
-func isExecutable(path string) bool {
-	fi, err := os.Stat(path)
-	if err != nil || fi.IsDir() {
-		return false
-	}
-	return fi.Mode().Perm()&0o111 != 0
 }

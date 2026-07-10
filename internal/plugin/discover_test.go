@@ -1,117 +1,172 @@
 package plugin
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/vyrwu/atelier/internal/manifest"
 )
 
-// writeFakeTool creates an executable shell script at dir/atelier-<name> that
-// echoes manifestJSON when called with manifest.Sentinel.
-func writeFakeTool(t *testing.T, dir, name, manifestJSON string) {
+// resetRegistry clears the package-global built-in registry so each test
+// starts from a known-empty state. White-box: this test is in package
+// plugin, so it can touch the unexported globals directly.
+func resetRegistry(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(dir, Prefix+name)
-	script := fmt.Sprintf(`#!/bin/sh
-if [ "$1" = "%s" ]; then
-  cat <<'EOF'
-%s
-EOF
-  exit 0
-fi
-echo "unknown invocation: $@" >&2
-exit 1
-`, manifest.Sentinel, manifestJSON)
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
+	regMu.Lock()
+	builtins = nil
+	regByName = map[string]bool{}
+	regMu.Unlock()
 }
 
-func TestDiscover_FindsValidTool(t *testing.T) {
+// isolateConfig points config.Path() at an empty temp dir so tests never
+// read the developer's real ~/.config/atelier/config.toml, then writes
+// the given config.toml body (empty body = no file).
+func isolateConfig(t *testing.T, body string) {
+	t.Helper()
 	dir := t.TempDir()
-	writeFakeTool(t, dir, "foo", `{"api_version":1,"name":"foo","description":"test tool"}`)
-
-	res, err := Discover(dir)
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if len(res.Plugins) != 1 {
-		t.Fatalf("expected 1 plugin, got %d: %+v", len(res.Plugins), res)
-	}
-	p := res.Plugins[0]
-	if p.Name != "foo" || p.Manifest.Description != "test tool" {
-		t.Fatalf("unexpected plugin: %+v", p)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if body != "" {
+		cfgDir := filepath.Join(dir, "atelier")
+		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(body), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
 	}
 }
 
-func TestDiscover_SkipsInvalidManifest(t *testing.T) {
-	dir := t.TempDir()
-	writeFakeTool(t, dir, "bad", `{"name":"bad"}`) // missing api_version
+func noop(*cobra.Command) {}
 
-	res, err := Discover(dir)
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if len(res.Plugins) != 0 {
-		t.Fatalf("expected 0 plugins, got %d", len(res.Plugins))
-	}
-	if len(res.Skipped) != 1 {
-		t.Fatalf("expected 1 skipped, got %d", len(res.Skipped))
-	}
-}
+func TestRegisterBuiltin_AndDiscover(t *testing.T) {
+	resetRegistry(t)
+	isolateConfig(t, "")
+	RegisterBuiltin(&manifest.Manifest{Name: "foo", Description: "the foo"}, noop)
 
-func TestDiscover_HandlesMultipleTools(t *testing.T) {
-	dir := t.TempDir()
-	writeFakeTool(t, dir, "foo", `{"api_version":1,"name":"foo"}`)
-	writeFakeTool(t, dir, "bar", `{"api_version":1,"name":"bar"}`)
-	writeFakeTool(t, dir, "baz", `{"api_version":1,"name":"baz"}`)
-
-	res, err := Discover(dir)
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if len(res.Plugins) != 3 {
-		t.Fatalf("expected 3 plugins, got %d", len(res.Plugins))
-	}
-	// Verify sorted by name
-	names := []string{res.Plugins[0].Name, res.Plugins[1].Name, res.Plugins[2].Name}
-	if names[0] != "bar" || names[1] != "baz" || names[2] != "foo" {
-		t.Fatalf("plugins not sorted: %v", names)
-	}
-}
-
-func TestDiscover_IgnoresNonPrefixed(t *testing.T) {
-	dir := t.TempDir()
-	writeFakeTool(t, dir, "foo", `{"api_version":1,"name":"foo"}`)
-	if err := os.WriteFile(filepath.Join(dir, "other-tool"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write other-tool: %v", err)
-	}
-	res, err := Discover(dir)
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if len(res.Plugins) != 1 || res.Plugins[0].Name != "foo" {
-		t.Fatalf("expected only foo, got %+v", res.Plugins)
-	}
-}
-
-func TestDiscover_FirstDirWins(t *testing.T) {
-	d1 := t.TempDir()
-	d2 := t.TempDir()
-	writeFakeTool(t, d1, "foo", `{"api_version":1,"name":"foo","description":"first"}`)
-	writeFakeTool(t, d2, "foo", `{"api_version":1,"name":"foo","description":"second"}`)
-
-	res, err := Discover(d1, d2)
+	res, err := Discover()
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 	if len(res.Plugins) != 1 {
 		t.Fatalf("expected 1 plugin, got %d", len(res.Plugins))
 	}
-	if got := res.Plugins[0].Manifest.Description; got != "first" {
-		t.Fatalf("expected first PATH entry to win, got %q", got)
+	p := res.Plugins[0]
+	if p.Name != "foo" || !p.IsBuiltin() {
+		t.Fatalf("expected built-in foo, got %+v (builtin=%v)", p, p.IsBuiltin())
+	}
+}
+
+func TestRegisterBuiltin_IdempotentByName(t *testing.T) {
+	resetRegistry(t)
+	isolateConfig(t, "")
+	RegisterBuiltin(&manifest.Manifest{Name: "foo", Description: "first"}, noop)
+	RegisterBuiltin(&manifest.Manifest{Name: "foo", Description: "second"}, noop)
+
+	res, _ := Discover()
+	if len(res.Plugins) != 1 {
+		t.Fatalf("expected 1 plugin after double register, got %d", len(res.Plugins))
+	}
+	if res.Plugins[0].Manifest.Description != "first" {
+		t.Fatalf("first registration should win, got %q", res.Plugins[0].Manifest.Description)
+	}
+}
+
+func TestDiscover_SortsByName(t *testing.T) {
+	resetRegistry(t)
+	isolateConfig(t, "")
+	RegisterBuiltin(&manifest.Manifest{Name: "foo"}, noop)
+	RegisterBuiltin(&manifest.Manifest{Name: "bar"}, noop)
+	RegisterBuiltin(&manifest.Manifest{Name: "baz"}, noop)
+
+	res, _ := Discover()
+	got := []string{res.Plugins[0].Name, res.Plugins[1].Name, res.Plugins[2].Name}
+	if got[0] != "bar" || got[1] != "baz" || got[2] != "foo" {
+		t.Fatalf("plugins not sorted: %v", got)
+	}
+}
+
+func TestDiscover_LoadsLauncherFromConfig(t *testing.T) {
+	resetRegistry(t)
+	isolateConfig(t, `
+[tools.k9s-aws]
+launch = "aws-vault-k9s"
+popup = "global"
+key = "K"
+requires = ["aws-vault-k9s"]
+title = "K9s (AWS)"
+description = "k9s with AWS auth"
+`)
+	res, err := Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	p, ok := res.FindByName("k9s-aws")
+	if !ok {
+		t.Fatalf("launcher k9s-aws not discovered: %+v", res)
+	}
+	if p.IsBuiltin() {
+		t.Fatalf("launcher should not be a built-in")
+	}
+	if p.Manifest.Popup != manifest.KindGlobal {
+		t.Fatalf("popup: got %q want global", p.Manifest.Popup)
+	}
+	if p.Manifest.Binding == nil || p.Manifest.Binding.Key != "K" {
+		t.Fatalf("binding key not synthesized: %+v", p.Manifest.Binding)
+	}
+	if len(p.Manifest.Requires) != 1 || p.Manifest.Requires[0] != "aws-vault-k9s" {
+		t.Fatalf("requires not carried through: %+v", p.Manifest.Requires)
+	}
+}
+
+func TestDiscover_LauncherShadowingBuiltinSkipped(t *testing.T) {
+	resetRegistry(t)
+	RegisterBuiltin(&manifest.Manifest{Name: "claude", Description: "built-in"}, noop)
+	isolateConfig(t, `
+[tools.claude]
+launch = "some-impostor"
+`)
+	res, _ := Discover()
+	p, _ := res.FindByName("claude")
+	if p == nil || !p.IsBuiltin() {
+		t.Fatalf("built-in claude must win; got %+v", p)
+	}
+	if _, ok := res.Skipped["[tools.claude]"]; !ok {
+		t.Fatalf("expected shadowing launcher to be skipped; skipped=%v", res.Skipped)
+	}
+}
+
+func TestDiscover_LauncherMissingLaunchSkipped(t *testing.T) {
+	resetRegistry(t)
+	isolateConfig(t, `
+[tools.bad]
+popup = "none"
+`)
+	res, _ := Discover()
+	if _, ok := res.FindByName("bad"); ok {
+		t.Fatalf("launcher with no `launch` should be skipped, not registered")
+	}
+	if _, ok := res.Skipped["[tools.bad]"]; !ok {
+		t.Fatalf("expected [tools.bad] in skipped; got %v", res.Skipped)
+	}
+}
+
+func TestCheckRequirements(t *testing.T) {
+	r := &DiscoveryResult{
+		Plugins: []Plugin{
+			{Name: "needy", Manifest: &manifest.Manifest{
+				Name: "needy", Requires: []string{"this-binary-does-not-exist-xyz"}}},
+			{Name: "fine", Manifest: &manifest.Manifest{Name: "fine"}},
+		},
+	}
+	missing := r.CheckRequirements()
+	if _, ok := missing["needy"]; !ok {
+		t.Fatalf("expected needy to report missing requirement; got %v", missing)
+	}
+	if _, ok := missing["fine"]; ok {
+		t.Fatalf("fine should have no missing requirements")
 	}
 }
 

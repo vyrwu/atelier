@@ -3,13 +3,13 @@
 //
 // What this is:
 //
-//   - A single JSON file at $XDG_CACHE_HOME/atelier/state-<hostname>.json
-//     (hostname-namespaced so shared $HOME setups don't clobber each
-//     other across machines).
+//   - A single JSON file at $XDG_CACHE_HOME/atelier/state.json. The name
+//     is fixed — deterministic across relaunches and isolated from any
+//     legacy hostname-keyed cache by construction. See Path for why it is
+//     neither hostname- nor socket-keyed.
 //   - Atomic via write-to-temp + rename.
 //   - Versioned. Version mismatch on read → treat as empty rather than
 //     attempt migration (kept deliberately simple until v2 happens).
-//   - Hostname-scoped to avoid NFS/Syncthing $HOME conflicts.
 //
 // What this isn't:
 //
@@ -43,7 +43,18 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/vyrwu/atelier/internal/debuglog"
 )
+
+// sessionNames extracts session names for diagnostic logging.
+func sessionNames(ws []Workspace) []string {
+	names := make([]string, 0, len(ws))
+	for _, w := range ws {
+		names = append(names, w.SessionName)
+	}
+	return names
+}
 
 // withWriteLock holds an exclusive flock(2) on a sibling lockfile of
 // the state file while fn runs. Serializes read-modify-write
@@ -181,18 +192,31 @@ type Window struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// Path returns the canonical state-file path for this host.
-// $XDG_CACHE_HOME defaults to $HOME/.cache.
+// stateFileName is the fixed cache filename. Deliberately NOT keyed by
+// hostname or tmux socket — see Path.
+const stateFileName = "state.json"
+
+// Path returns the canonical state-file path. $XDG_CACHE_HOME defaults to
+// $HOME/.cache. The filename is FIXED (not hostname- or socket-keyed):
+//
+//   - Hostname-keying (the original) silently split one machine's state
+//     across several files as the network-dependent hostname flapped
+//     (.local / .localdomain / .home) — a different workspace set every
+//     time the network changed.
+//   - Socket-keying fixed the flap but made the key depend on an env var
+//     (ATELIER_TMUX_SOCKET) whose value differs between a launcher and the
+//     subprocesses it spawns, and across a relaunch onto a fresh test
+//     socket — non-deterministic in exactly the seams persistence must be
+//     reliable in.
+//
+// A fixed name is deterministic, survives relaunch, and stays isolated
+// from any legacy hostname-keyed cache by construction (different file).
 func Path() string {
 	cache := os.Getenv("XDG_CACHE_HOME")
 	if cache == "" {
 		cache = filepath.Join(os.Getenv("HOME"), ".cache")
 	}
-	host, _ := os.Hostname()
-	if host == "" {
-		host = "unknown"
-	}
-	return filepath.Join(cache, "atelier", fmt.Sprintf("state-%s.json", host))
+	return filepath.Join(cache, "atelier", stateFileName)
 }
 
 // Load reads the cache file. Returns (nil, nil) if absent or schema
@@ -206,6 +230,7 @@ func loadFrom(path string) (*State, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			debuglog.Logf("statestore.Load: path=%s ABSENT (no prior state)", path)
 			return nil, nil
 		}
 		return nil, fmt.Errorf("statestore: read %s: %w", path, err)
@@ -217,12 +242,16 @@ func loadFrom(path string) (*State, error) {
 	if s.SchemaVersion != SchemaVersion {
 		// Old or future cache — treat as empty rather than crash.
 		// Future versions can add migration here.
+		debuglog.Logf("statestore.Load: path=%s SCHEMA-MISMATCH v%d≠v%d → treated as empty",
+			path, s.SchemaVersion, SchemaVersion)
 		return nil, nil
 	}
 	// Same filter as Save: drop any non-atelier entries on read so a
 	// cache poisoned by older code paths (pre-scope-fix, or test
 	// seeds) doesn't keep resurrecting random sessions on restore.
 	s.Workspaces = filterAtelierManaged(s.Workspaces)
+	debuglog.Logf("statestore.Load: path=%s workspaces=%d sessions=%v last_active=%q",
+		path, len(s.Workspaces), sessionNames(s.Workspaces), s.LastActiveSession)
 	return &s, nil
 }
 
@@ -267,6 +296,8 @@ func saveTo(path string, s *State) error {
 	// owns the timestamp (Save shouldn't lie about WHEN by reading the
 	// clock implicitly). Callers that want a fresh stamp set it before
 	// calling Save.
+	debuglog.Logf("statestore.Save: path=%s workspaces=%d sessions=%v last_active=%q",
+		path, len(s.Workspaces), sessionNames(s.Workspaces), s.LastActiveSession)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("statestore: mkdir: %w", err)
@@ -403,6 +434,7 @@ func RemoveSession(sessionName string) error {
 		if s == nil {
 			return nil
 		}
+		before := len(s.Workspaces)
 		out := s.Workspaces[:0]
 		for _, ws := range s.Workspaces {
 			if ws.SessionName != sessionName {
@@ -410,6 +442,8 @@ func RemoveSession(sessionName string) error {
 			}
 		}
 		s.Workspaces = out
+		debuglog.Logf("statestore.RemoveSession: session=%q dropped=%d (%d→%d) path=%s",
+			sessionName, before-len(out), before, len(out), Path())
 		return Save(s)
 	})
 }
@@ -418,6 +452,7 @@ func RemoveSession(sessionName string) error {
 // up with zero windows, it's removed entirely (an empty session is
 // meaningless to restore).
 func RemoveWindow(sessionName, windowName string) error {
+	debuglog.Logf("statestore.RemoveWindow: session=%q window=%q path=%s", sessionName, windowName, Path())
 	s, err := Load()
 	if err != nil {
 		return err

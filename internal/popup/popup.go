@@ -210,27 +210,13 @@ func (w *WorkspaceScoped) EnsureWithCmd(h Client, parentSessionID, parentWindowI
 	return h.NewSessionWithCommand(name, actualCmd)
 }
 
-// EnsureAndAttach ensures the backing session, then exec()s into tmux
-// attach-session — atelier replaces itself with the tmux client.
-func (w *WorkspaceScoped) EnsureAndAttach(h Client, parentSessionID, parentWindowID, startDir string) error {
-	return w.EnsureAndAttachWithCmd(h, parentSessionID, parentWindowID, startDir, "")
-}
-
-// EnsureAndAttachWithCmd is the Cmd-injected sibling of EnsureAndAttach.
-func (w *WorkspaceScoped) EnsureAndAttachWithCmd(h Client, parentSessionID, parentWindowID, startDir, cmd string) error {
-	if err := w.EnsureWithCmd(h, parentSessionID, parentWindowID, startDir, cmd); err != nil {
-		return err
-	}
-	return h.Attach(w.SessionName(parentSessionID, parentWindowID))
-}
-
 // OpenWorkspaceScoped is the canonical "open a workspace-scoped popup
 // tool" entrypoint: resolve parent context, ensure backing session
 // (using spec.DefaultCmd), apply popup style, attach. Replaces the
 // hand-rolled OpenCommand bodies in popupshell, lazygit, and claude.
 //
 // For tools whose launch command depends on per-window state (claude
-// reading @claude_prompt), use OpenWorkspaceScopedWithCmd to inject a
+// reading @ai_prompt), use OpenWorkspaceScopedWithCmd to inject a
 // resolver function.
 func OpenWorkspaceScoped(h Client, spec *WorkspaceScoped) error {
 	return OpenWorkspaceScopedWithCmd(h, spec, nil)

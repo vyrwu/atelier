@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,19 @@ import (
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
+
+// softClosedMarkerName is the per-worktree marker the delete flow drops to
+// mark a workspace closed-but-recoverable (mirrors workspaces.softClosedMarker).
+const softClosedMarkerName = ".atelier-soft-closed"
+
+// isSoftClosed reports whether the worktree at cwd was soft-closed (present in
+// the cache for M-r recover, but should not be restored as a live window).
+func isSoftClosed(cwd string) bool {
+	if cwd == "" {
+		return false
+	}
+	return pathExists(filepath.Join(cwd, softClosedMarkerName))
+}
 
 // Restore reads the persisted state cache and reproduces missing
 // workspaces / windows / per-window options in tmux. Idempotent:
@@ -136,20 +150,45 @@ func restoreOneWorkspace(h *tmuxhost.Client, ws statestore.Workspace) {
 		debuglog.Logf("workspace.Restore: %s already present, skipping", ws.SessionName)
 		return
 	}
-	debuglog.Logf("workspace.Restore: restoring %s (kind=%s repo=%s windows=%d)",
-		ws.SessionName, ws.Kind, ws.RepoPath, len(ws.Windows))
-
-	// Validate first window's cwd. For worktree workspaces, missing
-	// worktree = orphaned cache entry (user `git worktree remove`d it
-	// without atelier mediation). Skip the whole workspace, warn.
-	first := ws.Windows[0]
-	if !pathExists(first.Cwd) {
-		debuglog.Logf("workspace.Restore: skipping %s: cwd %q gone",
-			ws.SessionName, first.Cwd)
+	// Restore only windows the user has OPEN: worktree present AND not
+	// soft-closed. Soft-closed branches stay in the cache for M-r recover but
+	// MUST NOT come back as live windows — resurrecting them bloats the
+	// session with branches you already closed (and makes `exit` cycle through
+	// all of them). A hard-removed worktree (cwd gone) is skipped likewise.
+	isWorktree := ws.RepoPath != "" || ws.Kind == "worktree"
+	var open []statestore.Window
+	for _, w := range ws.Windows {
+		switch {
+		case isWorktree && w.Cwd == "":
+			// Null-cwd worktree window: launcher-bare-create junk (a bare
+			// "zsh" shell that leaked into the cache). It has no worktree
+			// path to place it at, so restoring it would land a stray shell
+			// in $HOME with the wrong context — the "zsh in M-s" bug. Unlike
+			// a soft-closed or gone worktree (which stay cached for M-r
+			// recover), this is unrecoverable, so PRUNE it from the cache so
+			// an already-polluted cache heals on the next launch.
+			debuglog.Logf("workspace.Restore: prune %s:%s — worktree window with no cwd (junk)", ws.SessionName, w.Name)
+			if err := statestore.RemoveWindow(ws.SessionName, w.Name); err != nil {
+				debuglog.LogErr(fmt.Sprintf("workspace.Restore: prune null-cwd %s:%s", ws.SessionName, w.Name), err)
+			}
+		case w.Cwd != "" && !pathExists(w.Cwd):
+			debuglog.Logf("workspace.Restore: skip %s:%s — worktree gone (%q)", ws.SessionName, w.Name, w.Cwd)
+		case isSoftClosed(w.Cwd):
+			debuglog.Logf("workspace.Restore: skip %s:%s — soft-closed", ws.SessionName, w.Name)
+		default:
+			open = append(open, w)
+		}
+	}
+	if len(open) == 0 {
+		debuglog.Logf("workspace.Restore: %s has no open windows (all gone/soft-closed), skipping", ws.SessionName)
 		return
 	}
+	debuglog.Logf("workspace.Restore: restoring %s (kind=%s repo=%s open=%d/%d)",
+		ws.SessionName, ws.Kind, ws.RepoPath, len(open), len(ws.Windows))
 
-	// Create session with the first window in place.
+	first := open[0]
+
+	// Create session with the first open window in place.
 	args := []string{"new-session", "-d", "-s", ws.SessionName}
 	if first.Cwd != "" {
 		args = append(args, "-c", first.Cwd)
@@ -181,12 +220,7 @@ func restoreOneWorkspace(h *tmuxhost.Client, ws statestore.Workspace) {
 	applyWindowOptionsByName(h, ws.SessionName, first)
 	scheduleBgPullForWindow(h, ws, first)
 
-	for _, w := range ws.Windows[1:] {
-		if !pathExists(w.Cwd) {
-			debuglog.Logf("workspace.Restore: skipping window %s:%s: cwd %q gone",
-				ws.SessionName, w.Name, w.Cwd)
-			continue
-		}
+	for _, w := range open[1:] {
 		args := []string{"new-window", "-d", "-t", ws.SessionName}
 		if w.Cwd != "" {
 			args = append(args, "-c", w.Cwd)

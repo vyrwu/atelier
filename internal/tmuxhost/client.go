@@ -44,7 +44,7 @@ type Client struct {
 // ~/.config/tmux/tmux.conf, which — via atelier's own init emitted
 // there — would trigger `atelier state restore` on the fresh test
 // socket and populate it with production workspaces from
-// ~/.cache/atelier/state-<host>.json.
+// ~/.cache/atelier/state.json.
 //
 // Production code never needs this; a stray `-f /dev/null` in a
 // production tmux invocation would drop the user's own tmux config.

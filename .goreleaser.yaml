@@ -7,6 +7,9 @@ before:
     - go mod tidy
     - go test ./...
 
+# One binary. Built-in tools are compiled into `atelier` and dispatched
+# in-process via `atelier tools <name>`; user launchers come from
+# config.toml. There are no per-tool binaries to build or ship.
 builds:
   - id: atelier
     main: ./cmd/atelier
@@ -18,108 +21,10 @@ builds:
       - -s -w
       - -X main.version={{.Version}}
 
-  - id: atelier-popupshell
-    main: ./cmd/atelier-popupshell
-    binary: atelier-popupshell
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-lazygit
-    main: ./cmd/atelier-lazygit
-    binary: atelier-lazygit
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-claude
-    main: ./cmd/atelier-claude
-    binary: atelier-claude
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-k8s
-    main: ./cmd/atelier-k8s
-    binary: atelier-k8s
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-pg
-    main: ./cmd/atelier-pg
-    binary: atelier-pg
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-aws
-    main: ./cmd/atelier-aws
-    binary: atelier-aws
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-workspaces
-    main: ./cmd/atelier-workspaces
-    binary: atelier-workspaces
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-toolselector
-    main: ./cmd/atelier-toolselector
-    binary: atelier-toolselector
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-ghdash
-    main: ./cmd/atelier-ghdash
-    binary: atelier-ghdash
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-ghenhance
-    main: ./cmd/atelier-ghenhance
-    binary: atelier-ghenhance
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-ghpr
-    main: ./cmd/atelier-ghpr
-    binary: atelier-ghpr
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
-  - id: atelier-ccusage
-    main: ./cmd/atelier-ccusage
-    binary: atelier-ccusage
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags: [-s, -w]
-
 archives:
-  # One archive per binary so each Homebrew formula downloads only the
-  # binary it installs (vs. a bundle archive where every formula would
-  # have to extract one specific binary from the same tar). Naming
-  # convention: <bin>_<version>_<os>_<arch>.tar.gz, with darwin→macos
-  # and amd64→x86_64 substitution to match Homebrew's expectations.
+  # One archive containing the single atelier binary. Naming convention:
+  # atelier_<version>_<os>_<arch>.tar.gz, with darwin→macos and
+  # amd64→x86_64 substitution to match Homebrew's expectations.
   - id: atelier
     ids: [atelier]
     name_template: >-
@@ -131,125 +36,17 @@ archives:
       - LICENSE
       - README.md
 
-  - id: atelier-popupshell
-    ids: [atelier-popupshell]
-    name_template: >-
-      atelier-popupshell_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-lazygit
-    ids: [atelier-lazygit]
-    name_template: >-
-      atelier-lazygit_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-claude
-    ids: [atelier-claude]
-    name_template: >-
-      atelier-claude_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-k8s
-    ids: [atelier-k8s]
-    name_template: >-
-      atelier-k8s_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-pg
-    ids: [atelier-pg]
-    name_template: >-
-      atelier-pg_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-aws
-    ids: [atelier-aws]
-    name_template: >-
-      atelier-aws_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-workspaces
-    ids: [atelier-workspaces]
-    name_template: >-
-      atelier-workspaces_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-toolselector
-    ids: [atelier-toolselector]
-    name_template: >-
-      atelier-toolselector_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-ghdash
-    ids: [atelier-ghdash]
-    name_template: >-
-      atelier-ghdash_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-ghenhance
-    ids: [atelier-ghenhance]
-    name_template: >-
-      atelier-ghenhance_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-ghpr
-    ids: [atelier-ghpr]
-    name_template: >-
-      atelier-ghpr_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-  - id: atelier-ccusage
-    ids: [atelier-ccusage]
-    name_template: >-
-      atelier-ccusage_{{ .Version }}_
-      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    files: [LICENSE]
-
-# Homebrew tap publishing. Every release tag, goreleaser regenerates
-# the cask Ruby files and pushes them to vyrwu/homebrew-tap.
-# Honors the plugin model: each tool is an independent cask that
-# depends_on cask: atelier (the core). Users compose what they
-# want; third-party plugins coexist via PATH discovery.
+# Homebrew tap publishing. A single cask ships the one binary. Its hard
+# runtime deps are tmux + fzf; every tool's optional external dependency
+# (k9s, pgcli, lazygit, gh, aws-vault, node, …) is surfaced by
+# `atelier doctor` rather than forced at install time — install only what
+# the tools you actually use need.
 #
-# `homebrew_casks` replaces the deprecated `brews:` (formulae) key
-# in goreleaser v2.13+. Casks ship pre-built binaries directly —
-# the right model for atelier since we don't build from source in
-# the user's environment. Homebrew now supports Linux casks too, so
-# the cross-platform story stays intact.
+# `homebrew_casks` replaces the deprecated `brews:` (formulae) key in
+# goreleaser v2.13+. Casks ship pre-built binaries directly — the right
+# model for atelier since we don't build from source in the user's
+# environment. Homebrew supports Linux casks too, so the cross-platform
+# story stays intact.
 homebrew_casks:
   - name: atelier
     ids: [atelier]
@@ -261,194 +58,10 @@ homebrew_casks:
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
     directory: Casks
     homepage: https://github.com/vyrwu/atelier
-    description: TUI-native agentic workspaces — engine
+    description: TUI-native agentic workspaces — one binary, tmux-driven
     dependencies:
       - formula: tmux
       - formula: fzf
-
-  - name: atelier-popupshell
-    ids: [atelier-popupshell]
-    binaries:
-      - atelier-popupshell
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — popup shell
-    dependencies:
-      - cask: atelier
-
-  - name: atelier-lazygit
-    ids: [atelier-lazygit]
-    binaries:
-      - atelier-lazygit
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — lazygit launcher
-    dependencies:
-      - cask: atelier
-      - formula: lazygit
-
-  - name: atelier-claude
-    ids: [atelier-claude]
-    binaries:
-      - atelier-claude
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — Claude Code integration
-    dependencies:
-      - cask: atelier
-
-  - name: atelier-k8s
-    ids: [atelier-k8s]
-    binaries:
-      - atelier-k8s
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — k9s + EKS context switcher
-    dependencies:
-      - cask: atelier
-      - formula: k9s
-
-  - name: atelier-pg
-    ids: [atelier-pg]
-    binaries:
-      - atelier-pg
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — Postgres pgcli launcher
-    dependencies:
-      - cask: atelier
-      - formula: pgcli
-
-  - name: atelier-aws
-    ids: [atelier-aws]
-    binaries:
-      - atelier-aws
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — AWS context switcher
-    dependencies:
-      - cask: atelier
-      - formula: awscli
-
-  - name: atelier-workspaces
-    ids: [atelier-workspaces]
-    binaries:
-      - atelier-workspaces
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — workspace + worktree manager
-    dependencies:
-      - cask: atelier
-
-  - name: atelier-toolselector
-    ids: [atelier-toolselector]
-    binaries:
-      - atelier-toolselector
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — M-; tool picker
-    dependencies:
-      - cask: atelier
-
-  # gh-dash isn't in homebrew-core (it's a gh extension). We depend on
-  # `gh` and expect the user to `gh extension install dlvhdr/gh-dash`
-  # separately — atelier doctor flags the missing binary.
-  - name: atelier-ghdash
-    ids: [atelier-ghdash]
-    binaries:
-      - atelier-ghdash
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — gh-dash PR dashboard launcher
-    dependencies:
-      - cask: atelier
-      - formula: gh
-
-  - name: atelier-ghenhance
-    ids: [atelier-ghenhance]
-    binaries:
-      - atelier-ghenhance
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — gh enhance-repo launcher
-    dependencies:
-      - cask: atelier
-      - formula: gh
-
-  # gh-pr reads PR state via `gh pr view --json` and opens PRs with
-  # `gh pr view --web`; depends on `gh` (same as ghdash/ghenhance).
-  - name: atelier-ghpr
-    ids: [atelier-ghpr]
-    binaries:
-      - atelier-ghpr
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — per-workspace GitHub PR status badge
-    dependencies:
-      - cask: atelier
-      - formula: gh
-
-  # ccusage is an npm package invoked via `npx ccusage`. Depending on
-  # `node` gets npx onto PATH; ccusage itself lazy-installs on first
-  # run via npx's cache.
-  - name: atelier-ccusage
-    ids: [atelier-ccusage]
-    binaries:
-      - atelier-ccusage
-    repository:
-      owner: vyrwu
-      name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    directory: Casks
-    homepage: https://github.com/vyrwu/atelier
-    description: Atelier tool — Claude API usage snapshot popup
-    dependencies:
-      - cask: atelier
-      - formula: node
 
 checksum:
   name_template: 'atelier_{{ .Version }}_checksums.txt'
@@ -487,19 +100,19 @@ release:
   header: |
     ## atelier {{ .Tag }}
 
-    Terminal-centric agentic dev framework. Per-workspace tool clusters in tmux, driven by a Go engine with a plugin architecture.
+    Terminal-centric agentic dev framework. Per-workspace tool clusters in tmux, driven by a single Go binary. Built-in tools are compiled in; extend with `[tools.*]` launchers in config.toml.
 
-    See [README](https://github.com/vyrwu/atelier#install) for install instructions and [CONTRIBUTING](https://github.com/vyrwu/atelier/blob/main/CONTRIBUTING.md) for plugin authoring.
+    See [README](https://github.com/vyrwu/atelier#install) for install instructions and [CONTRIBUTING](https://github.com/vyrwu/atelier/blob/main/CONTRIBUTING.md) for adding tools.
 
   footer: |
     ---
 
-    **Installing the binaries:**
+    **Installing the binary:**
 
     1. Download the archive matching your OS + arch.
     2. Extract: `tar -xzf atelier_*.tar.gz`
-    3. Move the binaries onto your PATH: `mv atelier* ~/.local/bin/`
+    3. Move the binary onto your PATH: `mv atelier ~/.local/bin/`
     4. Verify: `atelier doctor`
-    5. Wire into tmux: add `run-shell 'atelier init | tmux source-file -'` to your tmux.conf.
+    5. Launch the bundled runtime: `atelier` — or embed in your tmux with `run-shell 'atelier init | tmux source-file -'`.
 
     For checksums, see `atelier_{{ .Version }}_checksums.txt`.
