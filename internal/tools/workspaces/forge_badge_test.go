@@ -48,7 +48,7 @@ func visibleWidth(s string) int { return len([]rune(ansiRE.ReplaceAllString(s, "
 func TestFormatSessionDisplay_BadgeOrder(t *testing.T) {
 	badge := forgeBadgeColumn(renderForgeBadge(string(integration.ForgeOpen)))
 	glyph := ansiRE.ReplaceAllString(badge, "")[:1] // the PR glyph rune, ANSI-stripped
-	row := formatSessionDisplay("1d ", "O ", badge, "", "36", "myrepo", "mybranch", " · recap")
+	row := formatSessionDisplay("1d ", "O ", badge, "", "36", "myrepo", "mybranch")
 	vis := ansiRE.ReplaceAllString(row, "")
 
 	iIcon := strings.Index(vis, "O")
@@ -57,6 +57,11 @@ func TestFormatSessionDisplay_BadgeOrder(t *testing.T) {
 	if iIcon < 0 || iBadge <= iIcon || iName <= iBadge {
 		t.Errorf("column order wrong: icon@%d badge@%d name@%d in %q (want icon<badge<name)",
 			iIcon, iBadge, iName, vis)
+	}
+	// The recap is no longer part of the name line — it's a separate picker
+	// field so search targets the name alone.
+	if strings.Contains(vis, "recap") || strings.Contains(vis, "\n") {
+		t.Errorf("name line must not contain the recap or a newline: %q", vis)
 	}
 }
 
@@ -144,6 +149,13 @@ func TestParseForgeRow(t *testing.T) {
 	s, w, ok := parseForgeRow("sess\twin\tdisplay")
 	if !ok || s != "sess" || w != "win" {
 		t.Errorf("parseForgeRow ok=%v s=%q w=%q", ok, s, w)
+	}
+	// Multi-line item: the recap lives on a second line inside field 3. The
+	// {} bind passes the whole NUL-framed record; SplitN on tab must still
+	// recover session/window from the first line.
+	s, w, ok = parseForgeRow("sess\twin\ttime  name\n        · recap")
+	if !ok || s != "sess" || w != "win" {
+		t.Errorf("multi-line parseForgeRow ok=%v s=%q w=%q", ok, s, w)
 	}
 	for _, bad := range []string{"", "onlyone", "\twin", "sess\t"} {
 		if _, _, ok := parseForgeRow(bad); ok {

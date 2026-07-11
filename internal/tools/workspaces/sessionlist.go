@@ -14,13 +14,52 @@ import (
 
 // SessionRow is one row in the workspace selector. Lines are emitted as
 //
-//	<session>\t<window>\t<colored-display>
+//	<session>\t<window>\t<name>\t<recap>
 //
-// matching bash tmux_session_list. with-nth=3 in fzf hides the first two.
+// The picker runs --with-nth=3,4 (display the name plus the recap on its own
+// line beneath it) and --nth=1 (search the name only, NOT the recap). Fields
+// 1-2 stay plain for output parsing. Display holds the styled name; Recap holds
+// the indented second line (empty when there's no AI summary → single-line
+// row). No --wrap: a too-wide recap is truncated to the popup width by fzf.
 type SessionRow struct {
 	Session string
 	Window  string
 	Display string
+	Recap   string
+}
+
+// Visible cell widths of the fixed left-hand columns. Their sum is the
+// picker's --wrap-sign width, which hangs wrapped recap text under the
+// workspace name. Kept in sync with the escape sequences that render them.
+const (
+	timeColCells  = 4 // "%3s" (3) + trailing space
+	iconColCells  = 2 // attention glyph (or space) + trailing space
+	badgeColCells = 2 // forge-badge slot (glyph+space or two spaces)
+)
+
+// recapIndentCells is the number of leading spaces that aligns the recap line
+// under the workspace name — the visible width of the fixed columns before the
+// name (time + icon, plus the forge-badge slot when a forge integration is
+// active). Pure.
+func recapIndentCells(showForge bool) int {
+	n := timeColCells + iconColCells
+	if showForge {
+		n += badgeColCells
+	}
+	return n
+}
+
+// formatRecapLine renders the AI recap as an italic dim-grey line beneath the
+// workspace name (fzf multi-line item): a leading newline, `indent` spaces to
+// sit under the name, then `· summary`. The picker runs WITHOUT --wrap, so a
+// recap wider than the popup is truncated to width by fzf with an ellipsis —
+// row height stays a predictable two lines. Empty recap → empty string
+// (single-line row). Pure.
+func formatRecapLine(recap string, indent int) string {
+	if recap == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n%s\033[3;38;5;103m· %s\033[0m", strings.Repeat(" ", indent), recap)
 }
 
 // BuildSessionList replicates tmux_session_list:
@@ -154,14 +193,16 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		isAttn := attention == "1"
 		isCurrent := currentSid != "" && sid == currentSid && wid == currentWid
 
-		// Layout: "<time> <icon><session>/<window>  · <recap>"
+		// Layout (multi-line item):
+		//   <time> <icon> <badge> <session>/<window>
+		//                         · <recap>
 		//
 		// Time is a 3-char right-aligned dim-grey column on the left.
 		// Icon (❯ ⏺ ○) follows after a single space — the icon column
 		// is 2 cells wide (glyph + trailing space) so name text stays
 		// vertically aligned across rows.
 		//
-		// Recap stays at the END (variable; allowed to push right).
+		// Recap drops onto its own line, indented to sit under the name.
 		var ageText string
 		if isCurrent {
 			ageText = "now"
@@ -182,16 +223,17 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			icon = "  "
 		}
 
-		recapStr := ""
 		// Show the persisted AI summary whenever one exists — NOT only when
 		// the agent popup is currently live. Restore re-stamps @attention_recap,
 		// but a fresh launch doesn't recreate the popup, so gating on a live
 		// popup hid every workspace's last summary after relaunch. The recap is
 		// only ever written by the AI agent, so its presence already means the
 		// workspace is agent-associated.
-		if recap != "" {
-			recapStr = fmt.Sprintf(" \033[3;38;5;103m· %s\033[0m", recap)
-		}
+		//
+		// The recap renders on its OWN line beneath the workspace name,
+		// indented to sit under the name column. No wrap — fzf truncates it to
+		// the popup width, keeping row height a predictable two lines.
+		recapStr := formatRecapLine(recap, recapIndentCells(showForge))
 
 		// Bold weight for current.
 		weight := ""
@@ -236,7 +278,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 				}
 			}
 			// session=cyan(36), window=green(32).
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", session, window, recapStr)
+			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", session, window)
 		} else {
 			// Non-git (auto) session.
 			priority = 8
@@ -244,12 +286,12 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 				priority = 0
 			}
 			// session=orange(256:166), window=green(32).
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", session, window, recapStr)
+			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", session, window)
 		}
 
 		entries = append(entries, entry{
 			priority:  priority,
-			row:       SessionRow{Session: session, Window: window, Display: display},
+			row:       SessionRow{Session: session, Window: window, Display: display, Recap: recapStr},
 			lastAtt:   lastAtt,
 			forgeRank: forgeRank,
 		})

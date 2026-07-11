@@ -12,32 +12,35 @@ Continuously update ~/code/CLAUDE.md with newly discovered repo summaries — ke
 
 // DefaultRecapSystemPrompt is the recap summarizer's system prompt.
 //
-// Hard length constraint: the post-processor (truncateLine) silently
-// truncates anything over RecapMaxRunes — the recap renders in a fixed-
-// width picker row, so overflow gets cut mid-word. The prompt repeats
-// the limit multiple times and tells the model the consequence of
-// overshooting; in practice this gives noticeably tighter outputs than
-// a single mention.
+// The recap wraps in the picker (a long summary flows onto continuation
+// rows hanging under the workspace name), so there's no tight character
+// budget any more. RecapMaxRunes is now just a generous ceiling that
+// truncateLine enforces as a safety net against a runaway summary; normal
+// output is expected to be a single tight clause. The one hard rule the
+// prompt must keep is ONE line (no embedded newlines) — truncateLine keeps
+// only the first line, and wrapping is the picker's job, not the model's.
 const DefaultRecapSystemPrompt = `You read a Claude Code session transcript snippet (newline-delimited JSON message events).
 
-HARD LIMIT: Output ONE line, ≤75 characters total (count characters, not words). Anything past character 75 is dropped mid-word in the UI — write tight.
+Output ONE line (NO line breaks), up to ~120 characters. It's shown on one line in the UI (truncated if too wide), so stay tight and skimmable, never padded.
 
-Content priority (drop later items if needed to fit):
+Content priority (lead with the most important):
   1. Pending user action — what the user must do/answer NOW. If the agent asked a question with options, surface options.
-  2. Latest agent action — past-tense verb + object, ≤4 words.
-  3. Current objective — one or two words.
+  2. Latest agent action — past-tense verb + object.
+  3. Current objective.
 
 Style rules:
   - Be terse. Use abbreviations (cfg, db, PR, deps). Drop articles.
   - Concrete specifics over vague descriptions.
-  - NO leading/trailing whitespace, NO quotes, NO labels like "Recap:", NO code blocks, NO markdown.
+  - NO line breaks, NO leading/trailing whitespace, NO quotes, NO labels like "Recap:", NO code blocks, NO markdown.
 
-Output ONLY the recap line, nothing else. ≤75 chars.`
+Output ONLY the recap line, nothing else.`
 
-// RecapMaxRunes is the hard cap enforced by the post-processor after
-// the system-prompt advisory. Exported so callers (and tests) can share
-// the limit instead of duplicating the literal 75.
-const RecapMaxRunes = 75
+// RecapMaxRunes is the ceiling truncateLine enforces as a safety net. The
+// recap shows on one line in the picker (truncated to width), so ~one wide
+// line's worth is plenty — this only guards against a runaway summary and
+// avoids spending summarizer tokens on text that never shows. Exported so
+// callers (and tests) share the limit instead of duplicating the literal.
+const RecapMaxRunes = 120
 
 // Config is the claude plugin's own config, loaded from `[claude]`.
 type Config struct {

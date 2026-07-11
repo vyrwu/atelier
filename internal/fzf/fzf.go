@@ -14,6 +14,13 @@ import (
 	"strings"
 )
 
+// NUL is the record separator fzf uses in --read0 / --print0 mode. A
+// picker that renders multi-line items (a single selectable entry spanning
+// more than one terminal row) MUST feed input and read output NUL-separated,
+// because the item text itself contains newlines. Pass --read0 and/or
+// --print0 via extraArgs and this package switches framing to match.
+const NUL = "\x00"
+
 // Pick presents lines to fzf and returns the selected line.
 // Returns ("", ErrCancelled) if the user dismisses fzf without selecting.
 func Pick(lines []string, extraArgs ...string) (string, error) {
@@ -53,13 +60,17 @@ func PickWithExpect(lines []string, expectKeys []string, extraArgs ...string) (R
 	}
 	args = append(args, extraArgs...)
 	cmd := exec.Command("fzf", args...)
-	// Empty lines slice → empty stdin (matches bash's `fzf ... < /dev/null`).
-	// Without this, "" + "\n" feeds fzf one empty-string item which appears
-	// as a ghost entry and gets selected on Enter.
-	if len(lines) == 0 {
-		cmd.Stdin = strings.NewReader("")
-	} else {
-		cmd.Stdin = strings.NewReader(strings.Join(lines, "\n") + "\n")
+	// Records are newline-separated by default, NUL-separated under --read0
+	// (multi-line items). Empty lines slice → empty stdin (matches bash's
+	// `fzf ... < /dev/null`); without this, one empty-string item appears as
+	// a ghost entry and gets selected on Enter.
+	cmd.Stdin = strings.NewReader(joinRecords(lines, recordSep(extraArgs)))
+	// --print0 makes fzf delimit all output tokens (query, expect key,
+	// selection) with NUL instead of newline — required when a selected
+	// item spans multiple lines.
+	outSep := "\n"
+	if containsFlag(extraArgs, "--print0") {
+		outSep = NUL
 	}
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
@@ -79,14 +90,14 @@ func PickWithExpect(lines []string, expectKeys []string, extraArgs ...string) (R
 			// cancelled ONLY when there's no useful output to parse.
 			if code == 1 {
 				if (hasPQ || len(expectKeys) > 0) && strings.TrimSpace(out.String()) != "" {
-					return parseOutput(out.String(), len(expectKeys) > 0, hasPQ), nil
+					return parseOutput(out.String(), len(expectKeys) > 0, hasPQ, outSep), nil
 				}
 				return Result{}, ErrCancelled
 			}
 		}
 		return Result{}, fmt.Errorf("fzf: %w (%s)", err, strings.TrimSpace(errBuf.String()))
 	}
-	return parseOutput(out.String(), len(expectKeys) > 0, containsPrintQuery(extraArgs)), nil
+	return parseOutput(out.String(), len(expectKeys) > 0, containsPrintQuery(extraArgs), outSep), nil
 }
 
 // PickWithPreview is like Pick but enables fzf's preview window.
@@ -108,9 +119,13 @@ func PickWithPreview(lines []string, previewCmd, previewSize string, extraArgs .
 //
 // (Empty trailing lines are stripped by TrimRight before splitting, so
 // short outputs may have fewer lines than the maximum.)
-func parseOutput(s string, hasExpect, hasPrintQuery bool) Result {
+//
+// sep is the token separator fzf used: "\n" normally, NUL under --print0.
+// A multi-line selection round-trips only under NUL, because splitting on
+// "\n" would break the item apart at its embedded newlines.
+func parseOutput(s string, hasExpect, hasPrintQuery bool, sep string) Result {
 	var r Result
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(s, sep), sep)
 	idx := 0
 	if hasPrintQuery {
 		if idx < len(lines) {
@@ -131,12 +146,36 @@ func parseOutput(s string, hasExpect, hasPrintQuery bool) Result {
 }
 
 func containsPrintQuery(args []string) bool {
+	return containsFlag(args, "--print-query")
+}
+
+// containsFlag reports whether args carries the exact bare flag or its
+// "flag=value" form.
+func containsFlag(args []string, flag string) bool {
 	for _, a := range args {
-		if a == "--print-query" || strings.HasPrefix(a, "--print-query=") {
+		if a == flag || strings.HasPrefix(a, flag+"=") {
 			return true
 		}
 	}
 	return false
+}
+
+// recordSep is the input record separator for the given fzf args: NUL when
+// --read0 is set (multi-line items), newline otherwise.
+func recordSep(args []string) string {
+	if containsFlag(args, "--read0") {
+		return NUL
+	}
+	return "\n"
+}
+
+// joinRecords frames lines for fzf's stdin with a trailing separator. An
+// empty slice yields empty stdin (no ghost entry).
+func joinRecords(lines []string, sep string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, sep) + sep
 }
 
 // ErrCancelled is returned when the user dismisses fzf without selecting.
