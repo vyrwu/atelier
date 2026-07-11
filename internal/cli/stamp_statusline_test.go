@@ -36,8 +36,13 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 			want: `#W`,
 		},
 		{
-			name: "both injections stripped",
-			in:   `#W #(atelier status freshness 'a' 'b' 'c' 'd' 'e')#(atelier status attention --count)`,
+			name: "single forge injection stripped",
+			in:   `#W #(atelier status forge '#{@forge_state}')`,
+			want: `#W`,
+		},
+		{
+			name: "all three injections stripped",
+			in:   `#W #(atelier status freshness 'a' 'b' 'c' 'd' 'e')#(atelier status attention count)#(atelier status forge '#{@forge_state}')`,
 			want: `#W`,
 		},
 		{
@@ -76,19 +81,22 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 	}
 }
 
-// TestSegmentOrder_FreshnessBeforeAttention pins the visual order
-// the user explicitly requested: freshness icon BEFORE attention
-// rollup in window-status-current-format. The bug where attention
-// rendered first was caused by the duplicate-append accumulation.
-func TestSegmentOrder_FreshnessBeforeAttention(t *testing.T) {
-	got := "" + freshnessSegment() + attentionSegment()
-	fIdx := strings.Index(got, "freshness")
-	aIdx := strings.Index(got, "attention")
-	if fIdx < 0 || aIdx < 0 {
-		t.Fatalf("segments missing: freshness=%d attention=%d in %q", fIdx, aIdx, got)
+// TestSegmentOrder_CurrentFormat pins the visual order the user
+// explicitly requested for window-status-current-format: freshness
+// icon, THEN attention rollup, THEN forge PR badge. The bug where
+// attention rendered first was caused by duplicate-append accumulation;
+// the forge badge must land AFTER attention (spec: "after the
+// attention icon").
+func TestSegmentOrder_CurrentFormat(t *testing.T) {
+	got := "" + freshnessSegment() + attentionSegment() + forgeSegment()
+	fIdx := strings.Index(got, freshnessEmitter)
+	aIdx := strings.Index(got, attentionEmitter)
+	gIdx := strings.Index(got, forgeEmitter)
+	if fIdx < 0 || aIdx < 0 || gIdx < 0 {
+		t.Fatalf("segments missing: freshness=%d attention=%d forge=%d in %q", fIdx, aIdx, gIdx, got)
 	}
-	if fIdx >= aIdx {
-		t.Errorf("freshness must come before attention. got %q", got)
+	if fIdx >= aIdx || aIdx >= gIdx {
+		t.Errorf("order must be freshness < attention < forge. got %q", got)
 	}
 }
 

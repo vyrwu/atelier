@@ -94,7 +94,7 @@ func SessionsCommand() *cobra.Command {
 			// poke its refresh once now (fire-and-forget; TTL-throttled) so
 			// the PR badge is current on the NEXT open, and advertise M-o.
 			// When no forge adapter is configured the slot is simply absent.
-			spawnForgeRefresh()
+			workspace.SpawnForgeRefresh()
 			footer := "M-x · delete  |  M-n · creator  |  M-r · history  |  M-u · clone url"
 			if forgeActive() {
 				footer += "  |  M-o · open PR"
@@ -225,6 +225,7 @@ func SessionsCommand() *cobra.Command {
 			// returns immediately. Failure (or no repo) is silent.
 			if bgRepoPath != "" && bgDefaultBranch != "" && targetWid != "" {
 				workspace.SpawnBgPull(bgRepoPath, bgDefaultBranch, targetWid)
+				workspace.SpawnForgeRefresh()
 			}
 			return nil
 		},

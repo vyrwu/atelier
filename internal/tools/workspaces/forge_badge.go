@@ -3,11 +3,9 @@ package workspaces
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -50,7 +48,7 @@ func forgeActive() bool { return integration.Active().Forge != nil }
 
 // agentAutoOpenSkipped reports whether the deferred agent auto-open should be
 // skipped — true in e2e test contexts (atelier-test-* sockets), matching the
-// SpawnBgPull / spawnForgeRefresh discipline: the detached popup process
+// SpawnBgPull / SpawnForgeRefresh discipline: the detached popup process
 // races t.TempDir cleanup, and tests assert landing/state, not the popup.
 func agentAutoOpenSkipped() bool {
 	return strings.HasPrefix(os.Getenv("ATELIER_TMUX_SOCKET"), "atelier-test-")
@@ -68,20 +66,15 @@ func forgeStateRank(state string) int {
 }
 
 // renderForgeBadge returns the spliceable, ANSI-colored badge token (leading
-// space) for a forge state. Each state gets its GitHub-octicon glyph (Nerd
-// Font v3) + a state color: open=green, draft=grey, merged=purple,
-// closed=red. Kernel-owned so every forge adapter renders identically. Pure.
+// space) for a forge state, using the kernel-owned glyph + color spec
+// (integration.ForgeGlyph) so the picker badge and the status-line segment
+// stay in visual lockstep. Empty for ForgeNone/unknown. Pure.
 func renderForgeBadge(state string) string {
-	spec := map[integration.ForgeState]struct{ glyph, color string }{
-		integration.ForgeOpen:   {"", "35"},  // pull request, green
-		integration.ForgeDraft:  {"", "244"}, // draft, grey
-		integration.ForgeMerged: {"", "141"}, // merge, purple
-		integration.ForgeClosed: {"", "203"}, // closed, red
-	}[integration.ForgeState(strings.TrimSpace(state))]
-	if spec.color == "" {
+	glyph, color, ok := integration.ForgeGlyph(integration.ForgeState(strings.TrimSpace(state)))
+	if !ok {
 		return ""
 	}
-	return " \033[38;5;" + spec.color + "m" + spec.glyph + "\033[0m"
+	return " \033[38;5;" + color + "m" + glyph + "\033[0m"
 }
 
 // formatSessionDisplay assembles one session-picker row. The column ORDER is
@@ -135,35 +128,9 @@ func forgeBadgeColumn(badge string) string {
 	return strings.TrimPrefix(badge, " ") + " "
 }
 
-// spawnForgeRefresh fires `atelier tools workspaces _forge-refresh` detached
-// (own process group so it survives the popup pty closing), best-effort.
-// Poked once per picker open when a forge integration is active; the
-// per-window TTL keeps it from hammering the forge API.
-func spawnForgeRefresh() {
-	if !forgeActive() {
-		return
-	}
-	// Skip in e2e test contexts (matches the pre-refactor badge behavior):
-	// the detached `gh` query holds no value in tests and would spawn
-	// network calls. Test sockets are named `atelier-test-*`.
-	if strings.HasPrefix(os.Getenv("ATELIER_TMUX_SOCKET"), "atelier-test-") {
-		return
-	}
-	self, err := os.Executable()
-	if err != nil {
-		self = "atelier"
-	}
-	cmd := exec.Command(self, "tools", "workspaces", "_forge-refresh")
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		debuglog.LogErr("workspaces.spawnForgeRefresh", err)
-		return
-	}
-	pid := cmd.Process.Pid
-	_ = cmd.Process.Release()
-	debuglog.Logf("workspaces.spawnForgeRefresh: pid=%d", pid)
-}
+// The detached spawn recipe lives in the workspace primitive as
+// workspace.SpawnForgeRefresh — fired both here (picker open) and at every
+// workspace-land event so the status-line forge badge stays current.
 
 // ForgeRefreshCommand is the hidden `_forge-refresh`: enumerate repo
 // windows, throttle per window via @forge_ts, ask the active forge adapter

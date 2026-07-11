@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/testtmux"
 )
 
@@ -97,6 +98,28 @@ func TestStatusEmitters_PublicAPIContract(t *testing.T) {
 		if err != nil {
 			t.Fatalf("attention count invocation errored — public API broken: %v\n%s",
 				err, out)
+		}
+	})
+
+	t.Run("forge: open state renders colored PR glyph", func(t *testing.T) {
+		out, err := srv.RunAtelier("status", "forge", "open")
+		if err != nil {
+			t.Fatalf("forge invocation errored: %v\n%s", err, out)
+		}
+		s := string(out)
+		glyph, color, _ := integration.ForgeGlyph(integration.ForgeOpen)
+		if !strings.Contains(s, "fg=colour"+color) || !strings.Contains(s, glyph) {
+			t.Errorf("expected forge open badge (colour%s + glyph); got %q", color, s)
+		}
+	})
+
+	t.Run("forge: no forge item → empty output", func(t *testing.T) {
+		out, err := srv.RunAtelier("status", "forge", "")
+		if err != nil {
+			t.Fatalf("forge invocation errored: %v\n%s", err, out)
+		}
+		if len(strings.TrimSpace(string(out))) != 0 {
+			t.Errorf("expected empty output for empty @forge_state; got %q", string(out))
 		}
 	})
 }
