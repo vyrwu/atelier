@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/testtmux"
 )
 
@@ -248,6 +249,12 @@ func TestCreator_DuplicateBranchName_LoopsForRetry(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	tmp := t.TempDir()
+	// Kill the tmux server before t.TempDir's RemoveAll: creating a
+	// workspace auto-opens a Claude popup whose detached process holds a
+	// cwd inside tmp; on Linux that races t.TempDir cleanup ("directory
+	// not empty"). Re-registering Kill here makes it run (LIFO) before the
+	// TempDir cleanup. Same mitigation as the prompt-flow tests.
+	t.Cleanup(srv.Kill)
 	repoDir := testtmux.TestRepo(t, tmp, "vyrwu", "demo", "main")
 	srv.SetEnv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
 	srv.SetEnv("HOME", tmp)
@@ -483,29 +490,26 @@ func TestCreator_PromptFlow_SlashName_SelectsCorrectWindow(t *testing.T) {
 		t.Fatalf("outer client window=%q, want feat/auto-stub", got)
 	}
 
-	// Verify @claude_prompt landed on the new window (not the default).
-	// Query by listing windows + finding the slash-named one.
-	wlOut, _ := srv.Client.Run("list-windows", "-t", "vyrwu/demo",
-		"-F", "#{window_id}\t#{window_name}")
-	var slashWid string
-	for _, line := range strings.Split(strings.TrimSpace(string(wlOut)), "\n") {
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) == 2 && parts[1] == "feat/auto-stub" {
-			slashWid = parts[0]
-		}
+	// Verify the auto-mode prompt was captured for the NEW workspace.
+	//
+	// @ai_prompt is a ONE-SHOT tmux option: the creator stamps it on the
+	// new window, then the Claude agent auto-open consumes it — reads the
+	// prompt, passes it to `claude`, and unsets the option so it can't
+	// re-fire (see claude.go OpenAgent). Asserting the live option races
+	// that async agent-open and flakes on CI (the consume wins there but
+	// not on a fast local machine). Assert the DURABLE record instead:
+	// RegisterCreatedWorkspace persists Metadata["ai.prompt"] to the state
+	// cache, which the one-shot consume does NOT clear.
+	st, err := statestore.Load()
+	if err != nil || st == nil {
+		t.Fatalf("statestore.Load: st=%v err=%v", st, err)
 	}
-	if slashWid == "" {
-		t.Fatalf("could not resolve window_id for 'feat/auto-stub'")
+	w := st.FindWindow("vyrwu/demo", "feat/auto-stub")
+	if w == nil {
+		t.Fatalf("feat/auto-stub not persisted to state cache; workspaces=%+v", st.Workspaces)
 	}
-	// AI plugin metadata is now stamped under `@ai_prompt` (the
-	// generic <plugin>_<field> convention) — the workspaces creator
-	// writes via Metadata["ai.prompt"]; restore/CreateWorktreeWindow
-	// translates that to the @ai_prompt window option.
-	promptOut, _ := srv.Client.Run("show-window-options", "-v",
-		"-t", slashWid, "@ai_prompt")
-	if strings.TrimSpace(string(promptOut)) != "describe the task" {
-		t.Errorf("@ai_prompt on slash window=%q want 'describe the task'",
-			strings.TrimSpace(string(promptOut)))
+	if got := w.Metadata["ai.prompt"]; got != "describe the task" {
+		t.Errorf("persisted ai.prompt=%q want 'describe the task' (window metadata=%+v)", got, w.Metadata)
 	}
 }
 

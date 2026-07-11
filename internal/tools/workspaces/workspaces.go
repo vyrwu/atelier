@@ -10,6 +10,7 @@ package workspaces
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -26,13 +27,12 @@ import (
 
 	"github.com/vyrwu/atelier/internal/debuglog"
 
-	"github.com/vyrwu/atelier/internal/claudegen"
-	"github.com/vyrwu/atelier/internal/claudeproj"
 	"github.com/vyrwu/atelier/internal/dispatch"
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
 	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
 	"github.com/vyrwu/atelier/internal/initgen"
+	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/perf"
 	"github.com/vyrwu/atelier/internal/spinner"
@@ -90,19 +90,14 @@ func SessionsCommand() *cobra.Command {
 			// popup chrome. `#44475a` is dracula's "current line"
 			// selection grey — dimmer than the purple it replaced, so
 			// `#f8f8f2:bold` text reads with more contrast on it.
-			// Badge providers (e.g. ghpr) contribute a per-row symbol and
-			// an optional keybinding. Poke each provider's refresh once now
-			// so the badges are current on the NEXT open (fire-and-forget;
-			// each tool throttles its own fetches). Then wire their declared
-			// action keys + footer hints generically — the picker never
-			// hard-codes a provider.
-			badgeSpecs := discoverBadges()
-			spawnBadgeRefreshes(badgeSpecs)
+			// Kernel forge-badge slot: when a forge integration is active,
+			// poke its refresh once now (fire-and-forget; TTL-throttled) so
+			// the PR badge is current on the NEXT open, and advertise M-o.
+			// When no forge adapter is configured the slot is simply absent.
+			spawnForgeRefresh()
 			footer := "M-x · delete  |  M-n · creator  |  M-r · history  |  M-u · clone url"
-			for _, s := range badgeSpecs {
-				if s.Action != nil && s.Action.Label != "" {
-					footer += "  |  " + s.Action.Key + " · " + s.Action.Label
-				}
+			if forgeActive() {
+				footer += "  |  M-o · open PR"
 			}
 
 			opts := []fzfstyle.Opt{
@@ -119,12 +114,9 @@ func SessionsCommand() *cobra.Command {
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 			}
-			for _, s := range badgeSpecs {
-				if s.Action == nil || s.Action.Invoke == "" || s.Action.Key == "" {
-					continue
-				}
-				opts = append(opts, fzfstyle.WithBind(keyToFzf(s.Action.Key),
-					"execute-silent("+dispatch.ToolCmd(s.tool, s.Action.Invoke, "{}")+")"))
+			if forgeActive() {
+				opts = append(opts, fzfstyle.WithBind("alt-o",
+					"execute-silent("+dispatch.ToolCmd("workspaces", "_open-forge", "{}")+")"))
 			}
 			opts = append(opts, fzfstyle.WithFooter(footer))
 			args := fzfstyle.Args("栽 ", "Select Workspace", "red", opts...)
@@ -177,9 +169,9 @@ func SessionsCommand() *cobra.Command {
 			//     attaches to the live session.
 			//
 			//  2. Backing popup session does NOT exist BUT the window
-			//     has @claude_active_session_id stamped (from a prior
+			//     has @ai_active_session_id stamped (from a prior
 			//     atelier run, persisted via statestore) → spawn a
-			//     fresh popup which atelier-claude will launch with
+			//     fresh popup which the AI adapter (`atelier ai open`) launches with
 			//     `--resume <id>`. This is the FR-5.2 auto-resume on
 			//     workspace entry: tmux died, atelier restored the
 			//     workspace, user M-s'es back in, Claude picks up where
@@ -187,18 +179,16 @@ func SessionsCommand() *cobra.Command {
 			targetSid, _ := h.DisplayMessageAt(row.Session, "#{session_id}")
 			targetWid, _ := h.DisplayMessageAt(row.Session+":"+row.Window, "#{window_id}")
 			if targetSid != "" && targetWid != "" {
-				claudeSession := claudePopupSessionName(targetSid, targetWid)
-				hasPopup, _ := h.HasSession(claudeSession)
-				// TODO(plugins-refactor): this cross-tool peek into the
-				// AI plugin's namespace (`ai.active_session_id`) is the
-				// last remaining hardcoded plugin dependency in the
-				// foundational workspaces flow. When task #75 lands, the
-				// AI plugin should register a "workspace-selected" hook
-				// instead — workspaces fires the event, plugin decides
-				// whether to spawn the popup.
-				resumeID, _ := h.GetWindowOption(targetWid,
-					statestore.MetadataKeyToOptionName("ai.active_session_id"))
-				shouldSpawn := hasPopup || resumeID != ""
+				// Deferred agent open on switch: (re)open the agent popup
+				// only if the active AI integration has a live popup or a
+				// tracked session for this window. Kernel asks the adapter;
+				// no AI configured → never auto-open. Skipped in e2e.
+				ai := integration.Active().AI
+				shouldSpawn := false
+				if ai != nil && !agentAutoOpenSkipped() {
+					hasPopup, _ := h.HasSession(ai.AgentPopupSession(targetSid, targetWid))
+					shouldSpawn = hasPopup || ai.HasResumableState(h, targetWid, "")
+				}
 				if shouldSpawn {
 					sidNum := strings.TrimPrefix(targetSid, "$")
 					widNum := strings.TrimPrefix(targetWid, "@")
@@ -210,7 +200,7 @@ func SessionsCommand() *cobra.Command {
 					popupCmd := fmt.Sprintf(
 						`sleep 0.2 && tmux display-popup %s -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -E '%s'`,
 						popupOpts, sidNum, widNum,
-						dispatch.ToolCmd("claude", "open"))
+						dispatch.CoreCmd("ai", "open"))
 					_, _ = h.Run("run-shell", "-b", popupCmd)
 				}
 			}
@@ -1099,6 +1089,9 @@ func recoverWindowMetadata(repo, branch string) map[string]string {
 // `run-shell -b` with a 0.2s sleep so the popup fires AFTER LandOuter
 // and the user is visually on the new workspace.
 func spawnClaudeResume(h *tmuxhost.Client, repo, windowID string) {
+	if agentAutoOpenSkipped() {
+		return
+	}
 	sid, err := h.DisplayMessageAt(repo, "#{session_id}")
 	if err != nil {
 		return
@@ -1108,19 +1101,20 @@ func spawnClaudeResume(h *tmuxhost.Client, repo, windowID string) {
 	if sid == "" || wid == "" {
 		return
 	}
-	claudeSession := claudePopupSessionName(sid, wid)
-	hasPopup, _ := h.HasSession(claudeSession)
-	resumeID, _ := h.GetWindowOption(wid,
-		statestore.MetadataKeyToOptionName("ai.active_session_id"))
-	// No live popup and no tracked id — but a prior conversation for this
-	// worktree may still be on disk (soft-close prunes the tracked id from
-	// the statestore, so recover has nothing to re-stamp). Consult the
-	// transcript; if one exists, still open — claude.Open resolves the
-	// latest transcript for the cwd and --resumes it. Without this, the
-	// FIRST recover after a delete lands on a bare shell with no Claude.
-	if !hasPopup && resumeID == "" {
+	// Deferred agent open: only (re)open the agent popup on land when the
+	// active AI integration has something to show — a live popup, or
+	// resumable state (tracked session id, or an on-disk transcript for the
+	// cwd; a soft-close prunes the tracked id, so the on-disk check lets the
+	// FIRST recover-after-delete still resume). No AI configured → never
+	// auto-open; the workspace lands on a bare shell.
+	ai := integration.Active().AI
+	if ai == nil {
+		return
+	}
+	hasPopup, _ := h.HasSession(ai.AgentPopupSession(sid, wid))
+	if !hasPopup {
 		cwd, _ := h.DisplayMessageAt(wid, "#{pane_current_path}")
-		if claudeproj.LatestSessionID(strings.TrimSpace(cwd)) == "" {
+		if !ai.HasResumableState(h, wid, strings.TrimSpace(cwd)) {
 			return
 		}
 	}
@@ -1129,10 +1123,10 @@ func spawnClaudeResume(h *tmuxhost.Client, repo, windowID string) {
 	popupOpts := initgen.PopupOptions(manifest.StyleFull, "Claude Code", false)
 	popupCmd := fmt.Sprintf(
 		`sleep 0.2 && tmux display-popup %s -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -E '%s'`,
-		popupOpts, sidNum, widNum, dispatch.ToolCmd("claude", "open"))
+		popupOpts, sidNum, widNum, dispatch.CoreCmd("ai", "open"))
 	_, _ = h.Run("run-shell", "-b", popupCmd)
-	debuglog.Logf("openWorktreeWorkspace: queued claude resume for %s:%s (hasPopup=%v resumeID=%q)",
-		sid, wid, hasPopup, resumeID)
+	debuglog.Logf("openWorktreeWorkspace: queued agent resume for %s:%s (hasPopup=%v)",
+		sid, wid, hasPopup)
 }
 
 // ensurePaneCwd sends `cd <wtPath>\n` to the active pane of `windowID`
@@ -1530,7 +1524,7 @@ func runWorkspaceBuild(prompt, repo, repoPath, defaultBranch string) error {
 	// selects workspace B, Claude opens in workspace A's worktree.
 	popupCmd := fmt.Sprintf(
 		`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'`,
-		clientArg, sidNum, widNum, wtPath, dispatch.ToolCmd("claude", "open"))
+		clientArg, sidNum, widNum, wtPath, dispatch.CoreCmd("ai", "open"))
 	_, _ = h.Run("run-shell", "-b", popupCmd)
 
 	if err := workspace.LandOuter(h, "="+session, newWid); err != nil {
@@ -1651,21 +1645,18 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 		sp = noopReporter{}
 	}
 	sp.SetStatus("Inferring branch name...")
-	// Sonnet for branch naming. Haiku bounced on ambiguous prompts
-	// (responded with "I need clarification…" despite the system
-	// prompt's explicit ban on questions), failing the conventional-
-	// branch regex check. Sonnet honors the deterministic-naming
-	// contract more reliably. The 400-char truncate (below) keeps the
-	// input small enough that sonnet's slower per-token rate doesn't
-	// push past claudegen's 90s timeout — that was the original reason
-	// we'd dropped to haiku.
-	gen := claudegen.New()
-	gen.Model = "sonnet"
-	raw, err := gen.RunWithSystemPrompt(branchNamingSysPrompt, truncateForBranchPrompt(prompt))
+	// The kernel owns the naming CONTRACT (system prompt + conventional-
+	// commits validation below); the active AI integration only runs its
+	// model to satisfy it. Auto-mode requires an AI integration.
+	ai := integration.Active().AI
+	if ai == nil {
+		return "", "", fmt.Errorf("auto-mode requires an AI integration (set `[integrations] ai` in config.toml)")
+	}
+	raw, err := ai.GenerateName(context.Background(), branchNamingSysPrompt, truncateForBranchPrompt(prompt))
 	if err != nil {
 		return "", "", err
 	}
-	name = strings.ToLower(strings.TrimSpace(strings.SplitN(strings.TrimRight(raw, "\r\n"), "\n", 2)[0]))
+	name = strings.ToLower(strings.TrimSpace(raw))
 	if !conventionalBranchRe.MatchString(name) {
 		return name, "", fmt.Errorf("invalid name: %q", name)
 	}
@@ -1785,18 +1776,18 @@ func runAutoSession(initialPrompt string) error {
 		h := tmuxhost.New("")
 		sp := spinner.NewBox("Building workspace...")
 		err := sp.Run(func() error {
-			sp.SetStatus("Asking Claude for a session name...")
-			// Sonnet — same reasoning as the branch-naming flow: haiku
-			// occasionally bounced with a clarifying question; sonnet
-			// honors the strict-format contract reliably. 400-char
-			// truncate keeps it inside claudegen's 90s timeout.
-			gen := claudegen.New()
-			gen.Model = "sonnet"
-			raw, e := gen.RunWithSystemPrompt(sessionNamingSysPrompt, truncateForBranchPrompt(prompt))
+			sp.SetStatus("Asking the AI for a session name...")
+			// Kernel owns the naming contract (system prompt + validation);
+			// the active AI integration runs its model. Auto-mode needs one.
+			ai := integration.Active().AI
+			if ai == nil {
+				return fmt.Errorf("auto-mode requires an AI integration (set `[integrations] ai` in config.toml)")
+			}
+			raw, e := ai.GenerateName(context.Background(), sessionNamingSysPrompt, truncateForBranchPrompt(prompt))
 			if e != nil {
 				return e
 			}
-			name = strings.ToLower(strings.TrimSpace(strings.SplitN(strings.TrimRight(raw, "\r\n"), "\n", 2)[0]))
+			name = strings.ToLower(strings.TrimSpace(raw))
 			if !autoSessionNameRe.MatchString(name) {
 				return fmt.Errorf("invalid name: %q", name)
 			}
@@ -1861,7 +1852,7 @@ func runAutoSession(initialPrompt string) error {
 			"sleep 0.15 && tmux display-popup %s -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'",
 			initgen.PopupOptions(manifest.StyleFull, "Claude Code", false),
 			sidNum, widNum, base,
-			dispatch.ToolCmd("claude", "open"))
+			dispatch.CoreCmd("ai", "open"))
 		_, _ = h.Run("run-shell", "-b", popupCmd)
 
 		if err := workspace.LandOuter(h, "="+name, "="+name+":1"); err != nil {
@@ -1897,11 +1888,6 @@ func workspaceMultiRepoRoot() string {
 		return v
 	}
 	return filepath.Join(home, "code")
-}
-
-func claudePopupSessionName(sid, wid string) string {
-	return fmt.Sprintf("_atelier_claude_%s_%s",
-		strings.TrimPrefix(sid, "$"), strings.TrimPrefix(wid, "@"))
 }
 
 func splitWorktreePath(p, root string) (repoSlug, branch string) {

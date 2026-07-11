@@ -1,5 +1,10 @@
-// Command atelier is the core binary. It knows nothing about any specific
-// tool — tools are external `atelier-<name>` binaries discovered on PATH.
+// Command atelier is the single atelier binary. It boots the bundled
+// tmux runtime, exposes the engine subcommands, and dispatches to tools.
+//
+// Tools are no longer separate binaries: built-in tools are compiled in
+// and registered via the blank import of internal/tools/all below;
+// user-declared launchers come from config.toml. `atelier tools <name>`
+// dispatches to either in-process. See internal/plugin.
 package main
 
 import (
@@ -9,6 +14,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/cli"
+	"github.com/vyrwu/atelier/internal/integration"
+
+	// Registers every built-in tool into the plugin registry at init.
+	_ "github.com/vyrwu/atelier/internal/tools/all"
 )
 
 // version is set at build time via -ldflags by goreleaser.
@@ -16,6 +25,11 @@ import (
 var version = "dev"
 
 func main() {
+	// Composition root: resolve which adapters realize the kernel's
+	// capability ports from config, and install them before dispatch. Every
+	// atelier invocation (including popup children) is self-configuring.
+	integration.SetActive(composeIntegrations())
+
 	// The root command IS the launch command. Running `atelier` with
 	// no subcommand spawns the bundled tmux runtime on its dedicated
 	// socket — the "primary product" path. Subcommands (init, doctor,
@@ -50,6 +64,7 @@ Subcommands expose the engine for power users:
 	root.AddCommand(cli.InitCommand())
 	root.AddCommand(versionCmd())
 	root.AddCommand(cli.ToolsCommand())
+	root.AddCommand(cli.AICommand())
 	root.AddCommand(cli.WorkspaceCommand())
 	root.AddCommand(cli.PopupCommand())
 	root.AddCommand(cli.StatusCommand())

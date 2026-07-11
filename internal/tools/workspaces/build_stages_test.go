@@ -69,7 +69,7 @@ func TestBuildStages_AppearInWorkspaces_go(t *testing.T) {
 	}
 	wantLabels := []string{
 		"Inferring branch name...",
-		"Asking Claude for a session name...",
+		"Asking the AI for a session name...",
 		"Fetching origin/",
 		"Building worktree...",
 		"Stamping tmux options...",

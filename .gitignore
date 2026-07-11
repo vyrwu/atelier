@@ -1,5 +1,7 @@
 /bin/
 /dist/
+# Stray root build artifact from `go build ./cmd/atelier` (binary name == repo name).
+/atelier
 *.test
 *.out
 result

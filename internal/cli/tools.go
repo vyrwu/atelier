@@ -2,26 +2,25 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/plugin"
 )
 
-// ToolsCommand is the dispatcher: `atelier tools <name> [args...]` discovers
-// the binary `atelier-<name>` on PATH and exec()s it with the remaining args.
+// ToolsCommand is the dispatcher: `atelier tools <name> [args...]` looks up
+// the tool in the registry and runs it in-process — a built-in via its
+// registered command tree, a config launcher via its declared popup.
 //
-// Bare `atelier tools` and `atelier tools list` print the discovered tools.
+// Bare `atelier tools` and `atelier tools list` print the registered tools.
 //
-// This is intentionally tiny: the core does no per-tool logic. Every tool
-// is an external binary the core doesn't know about at compile time.
+// This is intentionally tiny: the core resolves the tool from the static
+// registry (built-ins) plus config launchers. There is no PATH scan and
+// no subprocess manifest protocol.
 func ToolsCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:                "tools <name> [args...]",
-		Short:              "Dispatch to an atelier-<name> binary",
+		Short:              "Dispatch to a registered atelier tool",
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,9 +39,9 @@ func ToolsCommand() *cobra.Command {
 			}
 			p, ok := res.FindByName(toolName)
 			if !ok {
-				return fmt.Errorf("no atelier-%s tool found on PATH (run `atelier tools list`)", toolName)
+				return fmt.Errorf("unknown tool %q (run `atelier tools list`)", toolName)
 			}
-			return execTool(p.Binary, rest)
+			return p.Dispatch(rest)
 		},
 	}
 	return c
@@ -55,23 +54,18 @@ func listTools(cmd *cobra.Command) error {
 	}
 	out := cmd.OutOrStdout()
 	for _, p := range res.Plugins {
-		fmt.Fprintf(out, "%-20s  %s\n", p.Name, p.Manifest.Description)
+		kind := "built-in"
+		if !p.IsBuiltin() {
+			kind = "launcher"
+		}
+		fmt.Fprintf(out, "%-16s  %-9s  %s\n", p.Name, kind, p.Manifest.Description)
 	}
 	if len(res.Skipped) > 0 {
 		fmt.Fprintln(cmd.ErrOrStderr())
-		fmt.Fprintln(cmd.ErrOrStderr(), "Skipped (manifest errors):")
-		for path, err := range res.Skipped {
-			fmt.Fprintf(cmd.ErrOrStderr(), "  %s: %v\n", path, err)
+		fmt.Fprintln(cmd.ErrOrStderr(), "Skipped (config errors):")
+		for src, err := range res.Skipped {
+			fmt.Fprintf(cmd.ErrOrStderr(), "  %s: %v\n", src, err)
 		}
 	}
 	return nil
-}
-
-func execTool(binary string, args []string) error {
-	bin, err := exec.LookPath(binary)
-	if err != nil {
-		return err
-	}
-	argv := append([]string{binary}, args...)
-	return syscall.Exec(bin, argv, os.Environ())
 }

@@ -51,7 +51,7 @@ func TestStampLastActive_E2E_HookEntryWritesCache(t *testing.T) {
 			// guarantee we're seeing what landed on disk, including
 			// any JSON-tag regressions.
 			path := filepath.Join(cacheDir, "atelier")
-			files, _ := filepath.Glob(filepath.Join(path, "state-*.json"))
+			files, _ := filepath.Glob(filepath.Join(path, "state*.json"))
 			if len(files) == 0 {
 				t.Fatalf("no state file written to %s", path)
 			}

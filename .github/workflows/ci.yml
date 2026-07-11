@@ -75,7 +75,7 @@ jobs:
         if: env.RELEASE_PR != 'true'
         run: go mod verify
 
-      - name: Build all binaries
+      - name: Build binary
         if: env.RELEASE_PR != 'true'
         run: make build
 

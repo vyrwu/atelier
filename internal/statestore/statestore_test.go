@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -349,17 +348,21 @@ func TestSave_FiltersNonAtelierWorkspaces(t *testing.T) {
 	}
 }
 
-// TestPath_HostnameNamespaced asserts that the cache filename includes
-// the hostname so shared-$HOME setups (NFS, Syncthing) don't collide.
-func TestPath_HostnameNamespaced(t *testing.T) {
-	setupCacheDir(t)
-	p := Path()
-	h, _ := os.Hostname()
-	if h == "" {
-		h = "unknown"
-	}
-	want := "state-" + h + ".json"
-	if !strings.HasSuffix(p, want) {
-		t.Errorf("Path should include hostname: got %q, want suffix %q", p, want)
+// TestPath_FixedAndEnvIndependent locks in the determinism the cache
+// depends on: the filename is a FIXED `state.json`, regardless of hostname
+// or ATELIER_TMUX_SOCKET. This is what makes a seed and a later read (in
+// the same process, a subprocess, or a fresh server on a different socket)
+// always resolve to the same file — the property hostname- and
+// socket-keying both failed to guarantee.
+func TestPath_FixedAndEnvIndependent(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+	want := filepath.Join(cache, "atelier", "state.json")
+
+	for _, sock := range []string{"", "atelier", "atelier-test-abc123", "/tmp/tmux-501/x"} {
+		t.Setenv("ATELIER_TMUX_SOCKET", sock)
+		if got := Path(); got != want {
+			t.Errorf("Path() with ATELIER_TMUX_SOCKET=%q = %q, want %q (must be env-independent)", sock, got, want)
+		}
 	}
 }

@@ -6,9 +6,9 @@ Terminal-centric agentic dev framework. Per-workspace tool clusters in tmux, dri
 
 - **Repo:** `github.com/vyrwu/atelier`
 - **Language:** Go
-- **Architecture:** Go binary (engine) + tmux plugin (integration shim)
+- **Architecture:** one Go binary — a load-bearing kernel (ports) + config-selected adapters + config launchers.
 - **Multiplexer:** tmux is a hard dependency. Not replaced.
-- **Distribution:** TPM-installable plugin bootstraps the Go binary on first run.
+- **Distribution:** Homebrew / nix binary. Runs as a bundled tmux runtime (`atelier`) or embeds into your own tmux (`atelier init --bare`).
 
 ## Concepts
 
@@ -23,63 +23,132 @@ Workspaces are the substrate. Tools operate on or within workspaces. The workspa
 ## CLI surface
 
 ```
-atelier workspaces list|pick|create|delete
-atelier tools list
-atelier tools <name> <action>     # e.g. atelier tools claude open
-atelier status <component> --format=<...>
-atelier init                       # generates tmux.conf snippet
-atelier doctor                     # verifies tmux, fzf, etc.
+atelier                            # boot the bundled tmux runtime (default)
+atelier workspace list|info|create|switch|delete   # workspace primitive
+atelier tools list                 # list registered tools + their capabilities
+atelier tools <name> <action>      # e.g. atelier tools k8s open
+atelier ai open | set-prompt | on-stop     # drive the configured AI integration
+atelier status freshness ... | attention count     # status-line emitters
+atelier init [--bare]              # generate the tmux.conf snippet
+atelier doctor                     # verify tmux, fzf, tools, requirements
 ```
 
 Plain English. Metaphor lives at the binary name only; not in the API.
 
-## Plugin model
+## Architecture — kernel (ports) + integrations (adapters) + launchers
 
-**Curated monorepo**, not a runtime plugin registry.
+atelier is **one binary**, structured as **ports & adapters
+(hexagonal)**. There is no runtime plugin registry, no subprocess
+manifest protocol, no PATH scan. The kernel is load-bearing and
+predictable; the swappable, capability-specific logic lives in bounded
+adapters selected by config. Predictable over dynamic.
 
-- Each tool is a Go package under `internal/tools/<name>/`
-- New tool support = PR adding a package implementing the `Tool` interface
-- User TOML manifest at `$XDG_CONFIG_HOME/atelier/config.toml` enables/disables tools
-- Disabled tools don't register their subcommands or tmux bindings
+**1. Kernel.** Owns everything structural AND all presentation: the
+workspace lifecycle (worktree + window + session), popup lifecycle,
+window/workspace state, the *views* (workspace creator/selector/history,
+tool picker, help, statusline), and the **capability slots** those views
+expose — the per-row AI *summary*, the *attention* sigil, the code-forge
+*badge*, branch *naming*. The kernel defines what slots exist and how
+they render/sort; it does NOT know who fills them. Lives in
+`internal/workspace`, `internal/popup`, `internal/statestore`, the view
+code (`internal/tools/workspaces`, `internal/tools/toolselector`), and
+the ports in `internal/integration`.
+
+**2. Integrations (adapters).** A capability the kernel can't implement
+itself — an AI summary, a forge status — is a **port** it defines and
+*calls*. An **integration** is an adapter that satisfies a port; it is a
+bounded provider, never a driver. The kernel pulls; integrations don't
+push into open slots.
+
+- `AIIntegration` — the agent that inhabits a workspace: open-in-popup,
+  branch naming, on-stop attention + summary. Adapters:
+  `internal/adapters/claude` (default), `mock` (tests/dev). A
+  codex/gemini adapter would implement the same port.
+- `ForgeIntegration` — per-workspace code-forge status → the picker
+  badge + open-in-browser. Adapter: `internal/adapters/github`. A
+  GitLab adapter would implement the same port.
+
+The kernel keeps the *policy* (naming system-prompt + conventional-commit
+validation; the forge state vocabulary + glyph + sort order); the adapter
+supplies the raw value. Selected + configured via `[integrations]`; when
+unset the capability degrades gracefully (no summary/badge, manual
+naming). **Dependency rule:** integrations import the kernel's ports; the
+kernel imports NO integration; `cmd/atelier` (composition root) is the
+only place that maps config → concrete adapter and installs it via
+`integration.SetActive`.
 
 ```toml
-enabled = ["workspaces", "claude", "k8s", "pg"]
-
-[workspaces]
-code_root      = "~/code/github"
-worktree_root  = "~/code/.worktrees/github"
-multi_repo_root = "~/code"
-
-[claude]
-model_smart = "sonnet"
-model_fast  = "haiku"
-system_prompt = "~/code/CLAUDE.md"
-
-[k8s]
-contexts = "~/.config/atelier/k8s/contexts.yaml"
-
-[pg]
-contexts = "~/.config/atelier/pg/contexts.yaml"
+[integrations]
+ai    = "claude"   # AIIntegration adapter (default: claude; "" disables)
+forge = "github"   # ForgeIntegration adapter (default: off)
 ```
+
+**3. Launchers (config).** A plain TUI is not an integration — it fills
+no capability slot. Register *any* command as a launcher with a
+`[tools.<name>]` block; atelier binds a key, opens it in a popup, and
+owns the window state. This is how a user adds a tool without Go — e.g.
+wrap k9s with AWS SSO in a `aws-vault-k9s` script:
+
+```toml
+[tools.k9s-aws]
+launch       = "aws-vault-k9s"   # any executable on PATH
+popup        = "global"          # workspace | global | none
+key          = "K"               # optional tmux binding
+requires     = ["aws-vault-k9s"] # doctor checks these
+icon         = "胡"
+accent_color = "110"
+title        = "K9s (AWS)"
+```
+
+Built-in **tools** (k8s/pg/aws context+auth pickers) carry real
+pre-launch logic — interactive context/credential selection before the
+TUI opens — so they stay compiled-in as packages under
+`internal/tools/<name>` (registered in `internal/tools/all`, dispatched
+via `atelier tools <name>`). Simpler tools with no pre-launch logic
+(lazygit, the shell popup, gh-dash, gh-enhance, ccusage) are `[tools.*]`
+config launchers, not compiled in. Built-ins + config launchers
+merge into one list at `plugin.Discover()`; every consumer (dispatcher,
+`atelier init`, selector, `doctor`) reads that merged view. Built-ins win
+a name collision.
+
+### Why this shape
+
+When an integration's behavior becomes load-bearing or changes
+presentation, the *kernel* absorbs the feature + its contract (defines a
+port, wires it into a view, owns the rendering); the adapter keeps only
+the irreducible provider logic behind the port. We grow the kernel's
+port surface deliberately — never a dynamic injection mechanism. That
+keeps the kernel both predictable and swappable, and makes it testable:
+inject the `mock` `AIIntegration` and the summary/attention/naming paths
+exercise with zero Claude, zero network.
 
 ## Repo layout
 
 ```
 atelier/
-├── cmd/atelier/             # main binary, cobra root, dispatcher
+├── cmd/atelier/             # the single binary: cobra root + tools dispatcher
 ├── internal/
-│   ├── tool/                # Tool interface, registry
-│   ├── host/                # popup lifecycle, state broker, attention, recap
+│   ├── integration/         # KERNEL PORTS: AIIntegration, ForgeIntegration, active Set
+│   ├── adapters/            # ADAPTERS (imported only by cmd/atelier):
+│   │   ├── claude/          #   AIIntegration (default AI agent)
+│   │   ├── github/          #   ForgeIntegration (PR badge)
+│   │   └── mock/            #   AIIntegration (deterministic; tests/dev)
+│   ├── plugin/              # tool registry: RegisterBuiltin, Discover, launchers
+│   ├── manifest/            # Manifest type (in-tree literal / synthesized)
+│   ├── toolmain/            # in-process tool dispatch (cancel/error → exit code)
+│   ├── workspace/           # workspace-lifecycle primitive (kernel)
+│   ├── popup/               # popup-lifecycle primitive (kernel)
+│   ├── statestore/          # persisted state (kernel)
+│   ├── initgen/             # `atelier init` binding/hook/statusline generation
 │   ├── tmuxhost/            # tmux invocation abstraction (testable)
-│   ├── config/              # TOML loader, manifest
-│   └── tools/
-│       ├── workspaces/      # one package per tool
-│       ├── claude/
-│       ├── k8s/
-│       ├── pg/
-│       ├── aws/
-│       ├── lazygit/
-│       └── popupshell/
+│   ├── config/              # TOML loader
+│   └── tools/               # kernel views + built-in logic-carrying tools
+│       ├── all/             # registers every built-in tool (blank-imported by main)
+│       ├── workspaces/      # kernel view: creator/selector/history + forge-badge slot
+│       ├── toolselector/    # kernel view: M-; tool picker
+│       ├── k8s/             # built-in tool: k9s context+auth picker
+│       ├── pg/              # built-in tool: pgcli/pgcenter picker
+│       └── ...
 ├── tmux-plugin/             # TPM entry, bootstrap script
 ├── flake.nix
 ├── go.mod
@@ -105,25 +174,35 @@ Tmux options and env vars are IPC for invocation only, not authoritative state. 
 Standard `#( ... )` interpolation pattern (parallels `gitmux`, `tmux-cpu`):
 
 ```tmux
-set -g status-right "#( atelier status workspace --format=repo ) | #( atelier status workspace --format=name ) | #( atelier status attention --count )"
+set -g status-right "#( atelier status attention count ) | %H:%M"
 ```
 
-Coexists with any status-line framework. Go binary startup ≤30ms — fine for 3s refresh.
+The per-window freshness segment (git ahead/behind) is injected into
+`window-status-format` automatically by `atelier internal stamp-statusline`
+(wired by `atelier init`), since it needs per-window args. The
+`attention count` rollup is a standalone emitter you can place anywhere.
+Coexists with any status-line framework. Go binary startup ≤30ms — fine
+for 3s refresh.
 
 ## Distribution
 
-**Hybrid TPM plugin + Go binary:**
+Ship one binary; two ways to run it.
 
-```tmux
-set -g @plugin 'vyrwu/atelier'
+```bash
+brew install vyrwu/tap/atelier   # or: nix run github:vyrwu/atelier
 ```
 
-On first run (`prefix+I`), the plugin script:
-1. Checks for `atelier` binary on PATH
-2. If absent: downloads release binary OR runs `nix run` OR prompts the user
-3. Generates the `tmux.conf` snippet via `atelier init`
+1. **Bundled runtime (default).** `atelier` spawns its own tmux server on
+   a dedicated socket (`tmux -L atelier`) with curated defaults — no
+   tmux.conf to write. This is the distribution path.
+2. **Embed into your own tmux.** `run-shell 'atelier init --bare | tmux
+   source-file -'` emits engine wiring only (bindings, hooks, statusline
+   emitters) on top of your existing config.
 
-Also distributable standalone via `brew install vyrwu/tap/atelier` or `nix run github:vyrwu/atelier`.
+A TPM entry (`tmux-plugin/`, `set -g @plugin 'vyrwu/atelier'`) also exists
+to bootstrap the binary + wiring for TPM users, but the binary-on-PATH
+model above is primary. See the README's "Two ways in" and
+[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the load-bearing details.
 
 ## Window management belongs to the workspace primitive
 
@@ -141,156 +220,48 @@ Also distributable standalone via `brew install vyrwu/tap/atelier` or `nix run g
 
 If a tool needs a tmux operation that's not in the primitive, ADD IT TO THE PRIMITIVE — don't reach around it. The primitive stays narrow (no fzf, no picker logic, no spinner) — but it owns the entire workspace-lifecycle surface.
 
-## Tool contract (sketch)
+## Tool contract
+
+A built-in tool contributes two symbols and one registration line:
 
 ```go
-type Tool interface {
-    Name() string
-    Scope() Scope                  // WorkspaceScoped | SessionGlobal
-    Subcommands() []*cobra.Command
-    PopupShape() PopupShape        // PerWindow | Singleton | None
-    TmuxBindings() []Binding       // default keybind suggestions
-    Provides() []string            // shared state this tool publishes
-    Consumes() []string            // shared state this tool reads
-    Doctor() error                 // dependency / config sanity check
+// internal/tools/<name>/register.go
+var Manifest = &manifest.Manifest{
+    Name:     "claude",
+    Popup:    manifest.KindWorkspace,      // launch shape: workspace | global | none
+    Binding:  &manifest.Binding{Key: "...", Style: manifest.StyleFull, Invoke: "open"},
+    Requires: []string{"claude"},          // doctor checks these on PATH
+    Provides: []capability.Kind{capability.Attention, capability.Summary},
+    // Badge *Badge, UI *UI, PickerBindings ..., Tool bool
 }
+
+func AddCommands(root *cobra.Command) { root.AddCommand(OpenCommand(), ...) }
+
+// internal/tools/all/all.go
+plugin.RegisterBuiltin(claude.Manifest, claude.AddCommands)
 ```
 
-Tool lifecycles:
-- **WorkspaceScoped** — popup session per parent window; dies when window dies (Claude, popup shell, lazygit)
-- **SessionGlobal** — singleton across all workspaces (k9s, pgcli, pgcenter)
+The manifest is a compile-time Go literal (built-ins) or synthesized
+from a `[tools.*]` block (launchers) — never marshalled across a
+subprocess boundary. `Popup` classifies the backing-session lifecycle:
 
-## Implementation phases
+- **workspace** — popup session per parent window; dies when the window
+  dies (Claude, popup shell, lazygit)
+- **global** — singleton backing session across all workspaces (k9s,
+  pgcli, pgcenter)
+- **none** — no persistent popup (pickers, providers)
 
-1. **Foundation** — repo skeleton, Go module, flake, CI, lint, license
-2. **Contracts** — `Tool` interface + host services (popup, state, attention, tmuxhost)
-3. **Config** — TOML manifest loader, enabled-list discovery
-4. **First tool: popup-shell** — simplest, validates contract end-to-end, no external deps
-5. **Workspaces** — first-class canvas + workspace-picker tool; pressure-tests the model
-6. **Remaining tools** — claude, k8s, pg, aws, lazygit (one PR each)
-7. **Tmux glue** — `atelier init`, `atelier doctor`, status-line wiring
-8. **Distribution** — nix flake outputs, brew tap, TPM-plugin bootstrap, migration off the bash setup
-
-## Open sub-decisions (non-blocking)
-
-- License (MIT / Apache-2.0 / MPL-2.0)
-- Task runner (Makefile / justfile / plain `go`)
-- Tmux version floor (3.3a / 3.4 / 3.5a)
-- Symbol vocabulary for visual identifiers (hexagrams / Nerd Font / ASCII)
-- Cobra vs urfave-cli for the CLI library
+`Provides` declares capability slots the tool fills beyond the ones
+derived from `Popup`/`Badge`. See [capabilities](#capabilities).
 
 ## Non-goals
 
 - Multiplexer replacement. Tmux stays.
-- Runtime plugin discovery / third-party tool loading. PRs only.
+- A runtime plugin SDK / third-party manifest protocol. Extension is a
+  config `[tools.*]` launcher (any command) or a built-in PR — not a
+  discovered-binary contract. The out-of-process `atelier-<name>`
+  manifest-protocol model was removed; it paid full IPC + versioning +
+  distribution cost for a decoupling the project never wanted (see the
+  single-binary rationale above).
 - Cross-multiplexer abstraction layer. tmux is the only target for v1.
 - IDE features (editor, LSP, debugging). Atelier orchestrates other tools; it isn't one.
-
-## Current bash setup — feature inventory
-
-Source: `dotfiles/scripts/*` and `dotfiles/tmux/tmux.conf`. This is the v1 feature-parity target — atelier must match these before bash scripts are removed.
-
-### Workspaces
-
-| Capability | Bash artifact | Atelier destination |
-|---|---|---|
-| Multi-repo fzf repo picker | `tmux_workspace_picker` | `internal/tools/workspaces` |
-| Manual workspace name → worktree | `tmux_workspace_name` | `internal/tools/workspaces` |
-| Auto-mode (Claude names branch) | `tmux_workspace_prompt` + `tmux_workspace_build` | `internal/tools/workspaces` + Claude integration |
-| Multi-repo session (non-git, kebab name) | `tmux_workspace_auto_session` + `tmux_workspace_session_name` | `internal/tools/workspaces` (multi-repo kind) |
-| Delete + cascade popup cleanup | `tmux_delete_workspace` + `tmux_workspace_delete_prompt` | `internal/tools/workspaces` + `internal/host/popup` |
-| Clone from GitHub URL | `tmux_clone_workspace` | `internal/tools/workspaces` |
-| Session picker w/ sort (claude+attention → claude → attention → plain) | `tmux_session_picker` + `tmux_session_list` | `internal/tools/workspaces` |
-| Default branch resolve / pull | `tmux_default_branch` + `tmux_pull_default` | `internal/tools/workspaces` helpers |
-| Recap from Claude transcripts (≤75 char) | `tmux_generate_recap` | `internal/host/recap` (shared) |
-
-### Tools
-
-| Capability | Bash artifact | Atelier destination |
-|---|---|---|
-| Tool selector (fzf master picker) | `tmux_tool_selector` | `internal/host/selector` |
-| Claude popup (per-window, persistent) | `show_claude_popup` + `claude_start` | `internal/tools/claude` |
-| Generic shell popup (per-window) | `show_tmux_popup` | `internal/tools/popupshell` |
-| Lazygit popup (per-window) | `show_lazygit_popup` | `internal/tools/lazygit` |
-| k9s singleton + context picker + SSO auth | `show_k8s_popup` + `tmux_k8s_*` (5 scripts) | `internal/tools/k8s` |
-| pgcli singleton + endpoint picker + SSM password fetch | `show_pgcli_popup` + `tmux_pg_*` (5 scripts) | `internal/tools/pg` |
-| pgcenter singleton | `show_pgcenter_popup` + shared pg scripts | `internal/tools/pg` (action) |
-| aws-vault profile picker | `tmux_aws_picker` | `internal/tools/aws` |
-
-### Cross-cutting
-
-| Capability | Bash artifact | Atelier destination |
-|---|---|---|
-| Outer popup utility (open picker on outer client) | `tmux_outer_popup` | `internal/host/popup` |
-| Spinner UI for long tasks | `tmux_with_loader` | `internal/host/ui` |
-| Popup orphan cleanup | `tmux_cleanup_popups` | `internal/host/popup` lifecycle owner |
-| Attention notify / count / clear | `tmux_notify_attention` + `tmux_count_attention` + `tmux_clear_popup_attention` | `internal/host/attention` |
-| Per-window state (`@claude_prompt`, `@needs_attention`, `@attention_recap`) | tmux options | `internal/host/state` (typed broker) |
-
-### Stays bash (out of scope for atelier)
-
-- `tmux_recolor_status_left`, `tmux_strip_window_index` — Dracula-specific cosmetics
-- `create-aws-ssm-parameter` — app-specific utility
-- `docker_nuke` — unrelated utility
-- `aws-vault-kube-hook/` — called from zsh function, not tmux
-
-## Migration strategy
-
-**Principle:** bash and atelier coexist; swap one binding at a time; user can revert any tool with a single line change. Zero big-bang cutover.
-
-### Phase 0 — Install, no bindings changed
-
-- Install atelier (`brew install vyrwu/tap/atelier` or `nix run github:vyrwu/atelier`)
-- Bash setup keeps working unchanged
-- `atelier doctor` validates the install
-- Existing workflow is untouched; this phase is a no-op for the user
-
-### Phase 1 — Per-binding swap (incremental)
-
-When a tool's Go package lands, change one line in `tmux.conf`:
-
-```diff
--bind c display-popup -E show_claude_popup
-+bind c display-popup -E 'atelier tools claude open'
-```
-
-Reload (`prefix + r`), test, move on. Per-tool rollback is per-line. If anything breaks, revert that one line — the bash script is still on disk.
-
-Recommended swap order (lowest risk first):
-
-1. `popup-shell` — internal-only, no external deps
-2. `lazygit` — external dep is well-known
-3. `workspaces` — biggest win, validates the model on the most complex case
-4. `claude` — depends on workspaces integration
-5. `k8s`, `pg`, `aws` — each carries its own YAML config
-
-### Phase 2 — Config migration (per tool, when convenient)
-
-- `dotfiles/tmux/custom/k8s/contexts.yaml` → `$XDG_CONFIG_HOME/atelier/k8s/contexts.yaml` (same schema; symlink during transition)
-- `dotfiles/tmux/custom/pg/contexts.yaml` → same pattern
-- SSM password cache moves to `$XDG_CACHE_HOME/atelier/pg/`
-
-Atelier reads the existing YAML schema unchanged. No format break required.
-
-### Phase 3 — Cleanup once all tools ported
-
-- Delete migrated bash scripts (~38 files in `dotfiles/scripts/`)
-- Delete `dotfiles/tmux/custom/` (configs moved)
-- Replace the ~70-line binding block in `tmux.conf` with `run-shell 'atelier init | tmux source-file -'`
-
-End state: `dotfiles/scripts/` has 5 files (cosmetics + unrelated utilities). `tmux.conf` is ~70 lines lighter.
-
-### Compatibility during transition
-
-- **Popup naming:** atelier uses `_atelier_popup_<sid>_<wid>` to avoid collision with current `_popup_*`, `_claudepop_*`, `_k8spop_*`. Bash cleanup and atelier cleanup don't fight.
-- **Tmux options namespace:** atelier reads/writes `@atelier_*`. During transition, atelier also reads existing `@claude_*`, `@needs_attention` so half-migrated state is consistent.
-- **Status-line:** atelier-provided segments (`#( atelier status workspace --format=repo )`) can be added one at a time alongside existing bash segments. No status-line cutover.
-
-### Rollback
-
-If atelier breaks at any point mid-migration:
-1. Revert the affected `tmux.conf` line(s)
-2. `prefix + r`
-3. Bash setup resumes
-
-Worktrees, popups, and YAML configs all survive any rollback. No state destruction in the transition path.

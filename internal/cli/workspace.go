@@ -22,7 +22,7 @@ func WorkspaceCommand() *cobra.Command {
 		Long: `Workspaces are tmux windows with metadata atelier understands directly.
 These commands operate on absolute paths and pane/session/window IDs.
 The opinionated workflow around workspaces (fzf repo picker, git worktree
-creation, recap parsing) lives in tools like atelier-workspaces, not here.`,
+creation, recap parsing) lives in the workspaces tool ` + "(`atelier tools workspaces`)" + `, not here.`,
 	}
 	c.AddCommand(workspaceListCmd(), workspaceInfoCmd(), workspaceCreateCmd(),
 		workspaceSwitchCmd(), workspaceDeleteCmd(),

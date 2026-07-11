@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/perf"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
@@ -25,7 +26,7 @@ type SessionRow struct {
 // BuildSessionList replicates tmux_session_list:
 //
 //   - Repo sessions stamped with @repo_path by the workspace creator
-//   - Auto (multi-repo) sessions stamped with @claude_workspace_kind
+//   - Auto (multi-repo) sessions stamped with @ai_workspace_kind
 //   - Filters out atelier popup sessions (starts with `_`)
 //   - Icons:
 //     red-bold `❯` current workspace
@@ -45,31 +46,17 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		return nil, err
 	}
 
-	// Badge providers (e.g. ghpr's PR-status symbol) declare a window
-	// option the picker splices between the workspace name and the recap.
-	// The picker stays agnostic to what each badge means — it just reads
-	// the declared option and renders its (pre-colored) value. This is the
-	// generic mechanism task #75 will fold @ai_workspace_kind into.
-	badgeSpecs := discoverBadges()
-	badgeKeys := badgeOptionKeys(badgeSpecs)
-	// Providers may also declare a row-sort signal (e.g. ghpr: open →
-	// draft → merged → closed). Read those options too; they're appended
-	// to the format AFTER the badge columns.
-	sorts := badgeSorts(badgeSpecs)
-	sortKeys := sortOptionKeys(sorts)
+	// Kernel forge-badge slot: when a forge integration is active, the
+	// picker reads the kernel-cached @forge_state, renders the glyph itself
+	// (renderForgeBadge), and sorts by it (forgeStateRank). The adapter only
+	// classified the state into @forge_state; the picker owns presentation.
+	// Absent adapter → no column, no extra field.
+	showForge := forgeActive()
 
-	// TODO(plugins-refactor): the `@ai_workspace_kind` field is the AI
-	// plugin's namespace leaking into the foundational picker. When
-	// task #75 lands, the picker should source workspace-kind from
-	// statestore.Workspace.Kind directly (it's already mirrored there)
-	// instead of reading an AI plugin option.
 	const baseFields = 10
 	format := "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{session_last_attached}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{@last_seen}"
-	for _, k := range badgeKeys {
-		format += "|#{" + k + "}"
-	}
-	for _, k := range sortKeys {
-		format += "|#{" + k + "}"
+	if showForge {
+		format += "|#{" + OptForgeState + "}"
 	}
 	out, err := h.Run("list-windows", "-a", "-F", format)
 	if err != nil {
@@ -77,14 +64,17 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	}
 	now := time.Now()
 
+	// Agent-present detection: a row shows the agent sigil + recap when the
+	// active AI integration's backing popup session exists for that window.
+	// Derived via the AIIntegration.AgentPopupSession port — NOT a hardcoded
+	// prefix — so a swapped/mock agent lights up correctly. No AI configured
+	// → no agent anywhere.
 	allSessions, _ := h.ListSessions()
-	hasClaude := make(map[string]bool, len(allSessions))
+	sessionExists := make(map[string]bool, len(allSessions))
 	for _, s := range allSessions {
-		if strings.HasPrefix(s, "_claudepop_") || strings.HasPrefix(s, "_atelier_claude_") {
-			rest := strings.TrimPrefix(strings.TrimPrefix(s, "_atelier_claude_"), "_claudepop_")
-			hasClaude[rest] = true
-		}
+		sessionExists[s] = true
 	}
+	activeAI := integration.Active().AI
 
 	// Memoize DefaultBranch per repo path. Every window of a repo
 	// session shares one @repo_path and one default branch, but the
@@ -103,10 +93,10 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	}
 
 	type entry struct {
-		priority int
-		row      SessionRow
-		lastAtt  string
-		sortRank []int // provider-declared row-sort ranks, in provider order
+		priority  int
+		row       SessionRow
+		lastAtt   string
+		forgeRank int // kernel forge-state sort rank (lower = earlier)
 	}
 	var entries []entry
 
@@ -114,24 +104,32 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		if line == "" {
 			continue
 		}
-		fields := strings.SplitN(line, "|", baseFields+len(badgeKeys)+len(sortKeys))
+		nFields := baseFields
+		if showForge {
+			nFields++
+		}
+		fields := strings.SplitN(line, "|", nFields)
 		if len(fields) < baseFields {
 			continue
 		}
 		sid, wid, session, window, lastAtt := fields[0], fields[1], fields[2], fields[3], fields[4]
 		repoPath, attention, kind, recap, lastSeen := fields[5], fields[6], fields[7], fields[8], fields[9]
-		// Badge values (each already carries its own leading space +
-		// ANSI color) follow the fixed fields, in provider order; the
-		// sort-signal columns follow the badge columns.
-		badgeStr := strings.Join(fields[baseFields:baseFields+len(badgeKeys)], "")
-		sortRank := make([]int, len(sorts))
-		for si, bs := range sorts {
-			fi := baseFields + len(badgeKeys) + si
-			v := ""
-			if fi < len(fields) {
-				v = fields[fi]
-			}
-			sortRank[si] = bs.rankOf(v)
+		// Kernel forge badge: the cached @forge_state field (if present)
+		// follows the fixed fields. The picker renders the glyph itself and
+		// computes the sort rank — the adapter only classified the state.
+		forgeBadge := ""
+		forgeRank := forgeStateRank("")
+		if showForge && len(fields) > baseFields {
+			forgeBadge = renderForgeBadge(fields[baseFields])
+			forgeRank = forgeStateRank(fields[baseFields])
+		}
+		// Fixed-width forge-badge slot rendered between the attention icon and
+		// the workspace name (layout: time · icon · badge · name · recap).
+		// Only present when a forge integration is active; the empty slot keeps
+		// name columns aligned for workspaces with no PR.
+		badgeCol := ""
+		if showForge {
+			badgeCol = forgeBadgeColumn(forgeBadge)
 		}
 		// Prefer @last_seen (stamped by client-session-changed hook on
 		// switch-away) over session_last_attached (frozen at initial
@@ -147,15 +145,12 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		if strings.HasPrefix(session, "_") {
 			continue
 		}
-		// Only include sessions stamped with @repo_path OR @claude_workspace_kind.
+		// Only include sessions stamped with @repo_path OR @ai_workspace_kind.
 		if repoPath == "" && kind == "" {
 			continue
 		}
 
-		sidNum := strings.TrimPrefix(sid, "$")
-		widNum := strings.TrimPrefix(wid, "@")
-		claudeKey := sidNum + "_" + widNum
-		isClaude := hasClaude[claudeKey]
+		isClaude := activeAI != nil && sessionExists[activeAI.AgentPopupSession(sid, wid)]
 		isAttn := attention == "1"
 		isCurrent := currentSid != "" && sid == currentSid && wid == currentWid
 
@@ -188,7 +183,13 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		}
 
 		recapStr := ""
-		if isClaude && recap != "" {
+		// Show the persisted AI summary whenever one exists — NOT only when
+		// the agent popup is currently live. Restore re-stamps @attention_recap,
+		// but a fresh launch doesn't recreate the popup, so gating on a live
+		// popup hid every workspace's last summary after relaunch. The recap is
+		// only ever written by the AI agent, so its presence already means the
+		// workspace is agent-associated.
+		if recap != "" {
 			recapStr = fmt.Sprintf(" \033[3;38;5;103m· %s\033[0m", recap)
 		}
 
@@ -234,41 +235,35 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 					priority = 6
 				}
 			}
-			// session=cyan(36), window=green(32). Badge (if any) sits
-			// between the window name and the recap suffix.
-			display = fmt.Sprintf("%s%s\033[%s36m%s\033[0m/\033[%s32m%s\033[0m%s%s",
-				timeCol, icon, weight, session, weight, window, badgeStr, recapStr)
+			// session=cyan(36), window=green(32).
+			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", session, window, recapStr)
 		} else {
 			// Non-git (auto) session.
 			priority = 8
 			if isAttn {
 				priority = 0
 			}
-			// session=orange(256:166), window=green(32). Badge (if any)
-			// sits between the window name and the recap suffix.
-			display = fmt.Sprintf("%s%s\033[%s38;5;166m%s\033[0m/\033[%s32m%s\033[0m%s%s",
-				timeCol, icon, weight, session, weight, window, badgeStr, recapStr)
+			// session=orange(256:166), window=green(32).
+			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", session, window, recapStr)
 		}
 
 		entries = append(entries, entry{
-			priority: priority,
-			row:      SessionRow{Session: session, Window: window, Display: display},
-			lastAtt:  lastAtt,
-			sortRank: sortRank,
+			priority:  priority,
+			row:       SessionRow{Session: session, Window: window, Display: display},
+			lastAtt:   lastAtt,
+			forgeRank: forgeRank,
 		})
 	}
 
-	// Stable sort by priority, then by any provider-declared row-sort
-	// signal (e.g. ghpr: open → draft → merged → closed), ties finally
-	// broken by reverse last_attached (newest first).
+	// Stable sort by priority, then by the kernel forge-state rank (open →
+	// draft → merged → closed → none), ties finally broken by reverse
+	// last_attached (newest first).
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].priority != entries[j].priority {
 			return entries[i].priority < entries[j].priority
 		}
-		for k := range entries[i].sortRank {
-			if entries[i].sortRank[k] != entries[j].sortRank[k] {
-				return entries[i].sortRank[k] < entries[j].sortRank[k]
-			}
+		if entries[i].forgeRank != entries[j].forgeRank {
+			return entries[i].forgeRank < entries[j].forgeRank
 		}
 		return entries[i].lastAtt > entries[j].lastAtt
 	})

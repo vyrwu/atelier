@@ -48,12 +48,14 @@ func TestDeleteRow_MarksSoftCloseBeforeKill(t *testing.T) {
 	}
 }
 
-// TestSpawnClaudeResume_ConsultsTranscript guards the on-disk fallback:
-// when the window has no tracked id and no live popup, spawnClaudeResume
-// must still consult the worktree's transcript (via claudeproj) before
-// giving up — otherwise the first recover after a delete (which prunes
-// the tracked id) opens no Claude at all.
-func TestSpawnClaudeResume_ConsultsTranscript(t *testing.T) {
+// TestSpawnClaudeResume_ConsultsResumableState guards the on-disk fallback:
+// when the window has no live agent popup, spawnClaudeResume must consult
+// the active AI adapter's HasResumableState (which checks the tracked
+// session id AND the worktree's on-disk transcript) before giving up —
+// otherwise the first recover after a delete (which prunes the tracked id)
+// opens no agent at all. The transcript check now lives behind the port in
+// the adapter; the kernel asks HasResumableState.
+func TestSpawnClaudeResume_ConsultsResumableState(t *testing.T) {
 	src, err := os.ReadFile("workspaces.go")
 	if err != nil {
 		t.Fatalf("read source: %v", err)
@@ -67,7 +69,7 @@ func TestSpawnClaudeResume_ConsultsTranscript(t *testing.T) {
 	if end := strings.Index(body, "\nfunc "); end > 0 {
 		body = body[:end]
 	}
-	if !strings.Contains(body, "claudeproj.LatestSessionID(") {
-		t.Error("spawnClaudeResume must consult claudeproj.LatestSessionID before bailing on an untracked window")
+	if !strings.Contains(body, "HasResumableState(") {
+		t.Error("spawnClaudeResume must consult ai.HasResumableState (tracked id + on-disk transcript) before bailing on an untracked window")
 	}
 }

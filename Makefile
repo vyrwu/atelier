@@ -19,7 +19,7 @@ LDFLAGS    := -s -w -X main.version=$(VERSION)
 help:
 	@echo "atelier — Makefile targets"
 	@echo ""
-	@echo "  build           build all binaries into $(BIN_DIR)/"
+	@echo "  build           build the atelier binary into $(BIN_DIR)/"
 	@echo "  list-binaries   print the names of binaries that would be built"
 	@echo "  test            run unit tests (no tmux required)"
 	@echo "  test-e2e        run e2e tests (spins up isolated tmux servers)"
@@ -61,7 +61,8 @@ test:
 	go test ./...
 
 test-e2e: build
-	@# Put $(BIN_DIR) on PATH so plugin discovery finds the freshly-built tools.
+	@# Put $(BIN_DIR) on PATH so run-shell children in sourced configs
+	@# resolve the freshly-built atelier binary.
 	PATH="$(PWD)/$(BIN_DIR):$$PATH" go test -tags=e2e ./...
 
 # ci runs every step CI runs, in the same order, against the local

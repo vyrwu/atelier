@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"syscall"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
 	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
+	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/plugin"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
@@ -169,6 +169,21 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 	seen := map[string]bool{"toolselector": true}
 	for _, key := range canonical {
 		switch key {
+		case "claude":
+			// The AI agent is a config-selected integration, not a registered
+			// tool. Surface it only when an AI adapter is active, labeled with
+			// the adapter's own product name (e.g. "Claude Code") so a swapped
+			// adapter reads correctly. Dispatch via `atelier ai open`.
+			if ai := integration.Active().AI; ai != nil && !seen["ai"] {
+				entries = append(entries, entry{
+					Icon:        "知",
+					Name:        ai.DisplayName(),
+					Description: "Open the workspace AI agent",
+					AccentColor: "173",
+					Kind:        "ai:open",
+				})
+				seen["ai"] = true
+			}
 		case "pgcli":
 			if p, ok := byName["pg"]; ok && !seen["pg-pgcli"] {
 				entries = append(entries, entry{
@@ -311,6 +326,16 @@ func dispatch(h *tmuxhost.Client, e entry) error {
 		pluginName = e.Kind[:idx]
 		invoke = e.Kind[idx+1:]
 	}
+
+	// The AI agent is a config-selected integration, not a registered tool
+	// (Kind "ai:open"). Dispatch it via the kernel `atelier ai` command on
+	// the outer client with the full agent popup style. No e.Plugin.
+	if pluginName == "ai" {
+		mb := manifest.Binding{Style: manifest.StyleFull, StartCwd: true, Title: entryPopupTitle(e)}
+		styleArgs := hostpopup.PopupStyleArgs(&mb)
+		return hostpopup.OpenOnOuter(h, styleArgs, cmddispatch.CoreCmd("ai", invoke))
+	}
+
 	if e.Plugin == nil {
 		return fmt.Errorf("plugin missing for %q", pluginName)
 	}
@@ -328,12 +353,17 @@ func dispatch(h *tmuxhost.Client, e entry) error {
 	switch dispatchMode(mb.Style) {
 	case dispatchExecInPlace:
 		debuglog.Logf("toolselector.dispatch: exec-in-place %s/%s (picker→picker)", pluginName, invoke)
-		atelierPath, lerr := exec.LookPath("atelier")
-		if lerr != nil {
-			return fmt.Errorf("atelier not on PATH: %w", lerr)
+		// One binary now: re-exec OURSELVES. os.Executable() is `atelier`
+		// (the running process), so we never hard-fail on a missing PATH
+		// entry and never risk exec'ing a different/stale atelier that
+		// PATH happens to resolve first. Matches the self-re-exec pattern
+		// in claude.go / lifecycle.go / forge_badge.go.
+		self, err := os.Executable()
+		if err != nil {
+			self = "atelier"
 		}
-		argv := []string{"atelier", "tools", pluginName, invoke}
-		return execReplace(atelierPath, argv)
+		argv := []string{self, "tools", pluginName, invoke}
+		return execReplace(self, argv)
 	default:
 		styleArgs := hostpopup.PopupStyleArgs(&mb)
 		invocation := cmddispatch.ToolCmd(pluginName, invoke)

@@ -58,7 +58,7 @@ No arguments needed.
 | No window flagged | `` (empty) |
 | N windows flagged | ` #[fg=yellow]⏺ N#[default]` |
 
-The flag is set by atelier-claude's Stop hook when a Claude session
+The flag is set by the Claude integration's Stop hook when a Claude session
 completes work in a window the user wasn't viewing at the time. It
 clears automatically when the user opens that window (via
 `after-select-window` hook) or attaches to its popup (via
@@ -140,7 +140,7 @@ emitters:
   `@workspace_freshness_ts`, `@workspace_pull_error` — set by
   atelier's background-pull worker, which fires on every workspace
   switch and at startup for stale workspaces.
-- `@needs_attention` — set by atelier-claude's Stop hook on
+- `@needs_attention` — set by the Claude integration's Stop hook on
   Claude session completion; cleared by atelier's `after-select-window`
   and `client-session-changed` hooks.
 

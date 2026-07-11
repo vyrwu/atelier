@@ -15,7 +15,31 @@ import (
 	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/initgen"
 	"github.com/vyrwu/atelier/internal/statestore"
+	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
+
+// sessionChecker is the slice of tmuxhost.Client launchTargetForAlive needs —
+// broken out so the launch-target decision is unit-testable without a server.
+type sessionChecker interface {
+	HasSession(name string) (bool, error)
+}
+
+// launchTargetForAlive picks which session to attach to when the atelier
+// server is ALREADY ALIVE. A live session is attached directly. A dead
+// workspace-named session is NOT bare-created: `new-session -A` would leave an
+// unstamped "zsh" shell in that workspace — it shows up in M-s and needs a
+// manual exit — so we land on the neutral fallback ("default") instead. On a
+// FRESH server the RestoreBlock restores the workspace before attach, so this
+// path isn't taken (and the resolved workspace is landed on properly).
+func launchTargetForAlive(h sessionChecker, resolved, fallback string) string {
+	if resolved == fallback {
+		return resolved
+	}
+	if has, _ := h.HasSession(resolved); has {
+		return resolved
+	}
+	return fallback
+}
 
 // probeTimeout caps how long we'll wait for the atelier tmux server to
 // respond to a liveness probe before declaring it wedged. Set short
@@ -80,6 +104,20 @@ func runBundled(cmd *cobra.Command, socket, session string) error {
 	debuglog.Logf("runBundled: launch pid=%d socket=%s session(arg)=%s cwd=%s",
 		os.Getpid(), socket, session, launchCwd)
 
+	// Refuse to nest. Running `atelier` from INSIDE the atelier runtime would
+	// `new-session -A` a second client onto the same session; tmux sizes a
+	// session to its smallest client, so a fresh nested client collapses the
+	// whole session to its dimensions (observed: a 1-row client froze the
+	// outer view). Launching from a DIFFERENT (the user's own) tmux is still
+	// supported — that's the primary-entry case — so this only trips when
+	// $TMUX points at atelier's own socket.
+	if insideAtelierServer(socket) {
+		fmt.Fprintln(os.Stderr,
+			"atelier: already inside the atelier runtime — not nesting (it collapses the session).\n"+
+				"  M-;  pick a tool   M-s  switch workspace   M-n  new workspace   M-q  detach")
+		return nil
+	}
+
 	tmuxBin, err := exec.LookPath("tmux")
 	if err != nil {
 		return fmt.Errorf("tmux not found on PATH: %w", err)
@@ -122,9 +160,16 @@ func runBundled(cmd *cobra.Command, socket, session string) error {
 	// will have already recreated all cached sessions by the time
 	// new-session -A -s <target> runs, so attaching to the resolved
 	// last-active name just attaches to the restored session.
-	resolvedSession := resolveLaunchSession(session)
+	fallback := session // the neutral landing session ("default")
+	resolvedSession := resolveLaunchSession(fallback)
+	if strings.HasPrefix(recoverState, "alive") {
+		// Server already alive: the RestoreBlock won't re-run, so a dead
+		// last-active workspace would be bare-created by `new-session -A`
+		// below. Only attach to it if it's actually live; else land neutral.
+		resolvedSession = launchTargetForAlive(tmuxhost.New(socket), resolvedSession, fallback)
+	}
 	debuglog.Logf("runBundled: resolved session=%s (arg=%s, recoverState=%s)",
-		resolvedSession, session, recoverState)
+		resolvedSession, fallback, recoverState)
 	session = resolvedSession
 
 	tmux := exec.Command(tmuxBin,
@@ -183,10 +228,15 @@ func recoverWedgedServer(tmuxBin, socket string) (string, error) {
 	if probeErr == nil {
 		// Server is alive and responsive — leave it alone, new-session
 		// -A will attach cleanly.
-		live := strings.Count(strings.TrimSpace(string(probeOut)), "\n")
-		if len(strings.TrimSpace(string(probeOut))) > 0 {
+		trimmed := strings.TrimSpace(string(probeOut))
+		live := strings.Count(trimmed, "\n")
+		if len(trimmed) > 0 {
 			live++
 		}
+		// Log the live session NAMES (not just the count) so comparing
+		// consecutive launches pinpoints exactly which session vanished.
+		debuglog.Logf("recoverWedgedServer: alive, %d sessions=[%s]",
+			live, strings.ReplaceAll(trimmed, "\n", ","))
 		return fmt.Sprintf("alive-attaching(sessions=%d)", live), nil
 	}
 	// Probe failed (timed out OR returned non-zero). Either way, the
@@ -208,6 +258,21 @@ func recoverWedgedServer(tmuxBin, socket string) (string, error) {
 		return "wedge-kill-socket-rm-failed", fmt.Errorf("remove stale socket %s: %w", sockPath, err)
 	}
 	return "wedge-killed", nil
+}
+
+// insideAtelierServer reports whether the current process is running inside
+// the atelier tmux server itself (as opposed to a plain shell or the user's
+// own tmux). tmux exports $TMUX = "<socket-path>,<pid>,<session>"; we compare
+// the socket's basename to atelier's socket name. Basename (not full path) is
+// deliberate: it's immune to /tmp↔/private/tmp symlinks and TMUX_TMPDIR
+// differences that would otherwise defeat a full-path match on macOS.
+func insideAtelierServer(socket string) bool {
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return false
+	}
+	sockField, _, _ := strings.Cut(tmuxEnv, ",")
+	return sockField != "" && filepath.Base(sockField) == socket
 }
 
 // tmuxSocketPath returns the filesystem path tmux uses for the

@@ -15,7 +15,7 @@ import (
 // on-disk persistence operations (restore, save, hook callbacks).
 //
 // Atelier's persistent state cache lives at
-// $XDG_CACHE_HOME/atelier/state-<hostname>.json and survives tmux
+// $XDG_CACHE_HOME/atelier/state.json and survives tmux
 // server restarts — restore reads it; the tmux hooks emitted by
 // `atelier init` invoke the remove/rename subcommands to keep it
 // honest when the user kills or renames sessions outside atelier.

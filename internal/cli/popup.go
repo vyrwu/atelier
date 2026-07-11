@@ -46,7 +46,7 @@ to switch contexts without ever issuing a bare detach-client that would
 unattach the user's main session.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if name == "" {
-				return fmt.Errorf("--name is required (atelier-<name>)")
+				return fmt.Errorf("--name is required (a registered tool name)")
 			}
 			res, err := plugin.Discover()
 			if err != nil {
@@ -54,7 +54,7 @@ unattach the user's main session.`,
 			}
 			p, ok := res.FindByName(name)
 			if !ok {
-				return fmt.Errorf("no atelier-%s on PATH", name)
+				return fmt.Errorf("unknown tool %q (run `atelier tools list`)", name)
 			}
 			if invoke == "" {
 				invoke = p.Manifest.Primary()

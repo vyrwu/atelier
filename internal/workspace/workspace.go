@@ -217,7 +217,7 @@ func SetRecap(h *tmuxhost.Client, windowID, recap string) error {
 // failing the user-visible operation.
 //
 // Scoped to atelier-managed sessions: if the session does not have
-// @repo_path or @claude_workspace_kind stamped, we skip the cache
+// @repo_path or @ai_workspace_kind stamped, we skip the cache
 // write. Without this, claude's notify-attention hook firing inside
 // a random user-created tmux session (no atelier metadata) would leak
 // that session into the cache, and restore would resurrect it on

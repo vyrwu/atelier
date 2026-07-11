@@ -5,13 +5,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/plugin"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
@@ -37,15 +36,13 @@ func CheatsheetCommand() *cobra.Command {
 }
 
 func renderCheatsheet(out io.Writer) {
-	fmt.Fprintln(out, "\x1b[1;36m  Keybindings\x1b[0m")
-	rows := topLevelBindings()
-	for _, r := range rows {
-		fmt.Fprintf(out, "    \x1b[1;32m%-6s\x1b[0m %-28s \x1b[2m(%s)\x1b[0m\n",
-			r.key, r.action, r.source)
+	fmt.Fprintln(out, "\x1b[1;36m  Essentials\x1b[0m")
+	for _, s := range essentialShortcuts() {
+		fmt.Fprintf(out, "    \x1b[1;32m%-4s\x1b[0m %s\n", s.key, s.desc)
 	}
 
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "\x1b[1;36m  Diagnostics\x1b[0m")
+	fmt.Fprintln(out, "\x1b[1;36m  Health\x1b[0m")
 	for _, d := range runDiagnostics() {
 		fmt.Fprintf(out, "    %s %s\n", d.icon(), d.message)
 		if d.hint != "" {
@@ -54,33 +51,24 @@ func renderCheatsheet(out io.Writer) {
 	}
 }
 
-type bindingRow struct{ key, action, source string }
+type shortcut struct{ key, desc string }
 
-func topLevelBindings() []bindingRow {
-	rows := []bindingRow{
-		{"M-?", "Cheatsheet (this popup)", "atelier"},
-		{"M-q", "Detach (server keeps running)", "atelier"},
+// essentialShortcuts is the whole atelier loop in a handful of chords,
+// each explained in verbs. Deliberately curated, NOT generated from tool
+// manifests: the cheatsheet teaches the core loop; it does not enumerate
+// every tool's key. M-; already lists the tools, and each picker shows its
+// own context keys in its footer — so no plugin/tool names belong here.
+// These are the kernel's stable bindings (workspaces + tool selector +
+// session), the ones a user must know to drive the tool.
+func essentialShortcuts() []shortcut {
+	return []shortcut{
+		{"M-n", "New workspace — describe a task; the agent names the branch"},
+		{"M-s", "Switch workspace — picker shows recap + git freshness"},
+		{"M-r", "Recover a recently closed workspace"},
+		{"M-;", "Tools — open any tool in the current workspace"},
+		{"M-q", "Detach — server keeps running; reattach with `atelier`"},
+		{"M-?", "This cheatsheet"},
 	}
-	res, err := plugin.Discover()
-	if err == nil {
-		for _, p := range res.Plugins {
-			for _, b := range p.Manifest.AllBindings() {
-				if b.Key == "" {
-					continue
-				}
-				action := b.Title
-				if action == "" && p.Manifest.UI != nil {
-					action = p.Manifest.UI.PopupTitle
-				}
-				if action == "" {
-					action = p.Manifest.Name
-				}
-				rows = append(rows, bindingRow{b.Key, action, p.Manifest.Name})
-			}
-		}
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].key < rows[j].key })
-	return rows
 }
 
 // diagnostic is one row in the Diagnostics section.
@@ -131,17 +119,39 @@ func runDiagnostics() []diagnostic {
 			}
 		}
 		if len(res.Skipped) > 0 {
-			ds = append(ds, diagnostic{1, fmt.Sprintf("%d plugin(s) skipped", len(res.Skipped)), "check $PATH for atelier-* binaries"})
+			ds = append(ds, diagnostic{1, fmt.Sprintf("%d tool(s) skipped", len(res.Skipped)), "fix the [tools.*] blocks in config.toml (see `atelier tools list`)"})
 		}
 	}
 
-	settingsPath := filepath.Join(os.Getenv("HOME"), ".cache/atelier/claude/settings.json")
-	if _, err := os.Stat(settingsPath); err == nil {
-		ds = append(ds, diagnostic{0, "claude settings wired", ""})
-	} else {
-		ds = append(ds, diagnostic{1, "claude settings file missing", settingsPath})
+	ds = append(ds, integrationDiagnostics(integration.Active())...)
+
+	// The github forge adapter shells out to `gh`; without it the adapter
+	// degrades to a blank badge silently. Surface the missing dependency so
+	// the user knows why PR badges are absent (main did this via the ghpr
+	// tool's Requires; the integration isn't a discovered tool, so probe here).
+	if integration.Active().Forge != nil {
+		if _, err := exec.LookPath("gh"); err != nil {
+			ds = append(ds, diagnostic{2, "forge: gh MISSING", "the github forge adapter needs the gh CLI — install gh + `gh auth login`, or PR badges stay blank"})
+		}
 	}
 
+	return ds
+}
+
+// integrationDiagnostics reports the active kernel-capability adapters. A nil
+// capability is intentional (disabled in config): AI defaults to claude, forge
+// defaults off — so a missing forge is a hint, not an error. Pure: takes the
+// resolved set so it's testable without touching global state.
+func integrationDiagnostics(set integration.Set) []diagnostic {
+	var ds []diagnostic
+	if set.AI != nil {
+		ds = append(ds, diagnostic{0, "AI integration: " + set.AI.Name(), ""})
+	}
+	if set.Forge != nil {
+		ds = append(ds, diagnostic{0, "forge integration: " + set.Forge.Name(), ""})
+	} else {
+		ds = append(ds, diagnostic{1, "forge integration: off", `set [integrations] forge = "github" in config.toml for PR badges`})
+	}
 	return ds
 }
 

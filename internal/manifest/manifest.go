@@ -1,48 +1,28 @@
-// Package manifest defines the JSON contract every atelier tool implements.
+// Package manifest defines the in-process descriptor every atelier tool
+// carries.
 //
-// Tools are external binaries named `atelier-<name>`. When invoked with the
-// sentinel flag `--atelier-manifest`, a tool must print its manifest JSON to
-// stdout and exit 0. The core uses this to discover tools, generate the
-// tmux.conf binding block, and check dependencies via `atelier doctor`.
-//
-// The contract is versioned via APIVersion. Tools declare which version they
-// were built against; the core refuses to load tools with a mismatched major.
+// A tool is registered in the static in-process registry (built-in
+// tools under internal/tools/*) or synthesized from a user config
+// `[tools.<name>]` launcher block. In both cases the Manifest is a Go
+// value, not a JSON document marshalled across a subprocess boundary —
+// the core knows its tools at compile time (built-ins) or reads them
+// from config (launchers). The core uses the manifest to build the
+// `atelier tools` dispatcher, generate the tmux.conf binding block via
+// `atelier init`, render the tool selector, and check dependencies via
+// `atelier doctor`.
 package manifest
 
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"os/exec"
-	"strings"
-	"time"
-)
+import "fmt"
 
-// APIVersion is the current manifest contract version. Bump only on
-// breaking changes; the core refuses to load tools with a mismatched value.
-const APIVersion = 1
-
-// Sentinel is the flag a tool must recognize and respond to by emitting its
-// manifest as JSON. Chosen to be obscure enough to never collide with a
-// tool's own subcommands.
-const Sentinel = "--atelier-manifest"
-
-// DiscoveryTimeout is the max time to wait for a tool to emit its manifest.
-// Slow tools are skipped (not errors) — this protects the core from hangs.
-// 5s tolerates shell-script tools under CI load while still bounding the
-// blast radius of a hung binary.
-const DiscoveryTimeout = 5 * time.Second
-
-// Manifest is the JSON contract emitted by every atelier-* binary in
-// response to the Sentinel flag.
+// Manifest is a tool's descriptor: how it binds, how its popup looks, and
+// what it requires. (Presentation CAPABILITIES — AI summary/attention, forge
+// badge — are NOT declared here; they are kernel ports filled by swappable
+// integration adapters. See internal/integration.)
 type Manifest struct {
-	APIVersion  int       `json:"api_version"`
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	Version     string    `json:"version,omitempty"`
-	Binding     *Binding  `json:"binding,omitempty"`  // primary binding (convenience)
-	Bindings    []Binding `json:"bindings,omitempty"` // additional bindings
+	Name        string    `json:"name" toml:"name"`
+	Description string    `json:"description,omitempty" toml:"description"`
+	Binding     *Binding  `json:"binding,omitempty" toml:"-"`  // primary binding (convenience)
+	Bindings    []Binding `json:"bindings,omitempty" toml:"-"` // additional bindings
 
 	// PrimaryInvoke is the subcommand the tool selector launches when this
 	// tool is picked from the master picker. Defaults to "open". Useful for
@@ -53,16 +33,13 @@ type Manifest struct {
 	// it consistently and by popup-dispatch to set the right title.
 	UI *UI `json:"ui,omitempty"`
 
-	Popup       Kind     `json:"popup,omitempty"`
-	Requires    []string `json:"requires,omitempty"`
-	Subcommands []string `json:"subcommands,omitempty"`
+	Popup    Kind     `json:"popup,omitempty"`
+	Requires []string `json:"requires,omitempty"`
 
-	// Tool declares that this plugin registers a launchable entry in the
-	// M-; tool selector. Being a discovered plugin is NOT enough — a
-	// plugin may exist purely to contribute background capabilities
-	// (badges, sort signals, hooks) without being a menu tool. Only
-	// plugins with Tool=true appear in the selector; providers like ghpr
-	// omit it. Discovery, dispatch, and `atelier doctor` are unaffected.
+	// Tool declares that this tool registers a launchable entry in the M-;
+	// tool selector. A registered tool with Tool=false exists but does not
+	// appear in the menu. Only tools with Tool=true appear in the selector;
+	// discovery, dispatch, and `atelier doctor` are unaffected.
 	Tool bool `json:"tool,omitempty"`
 
 	// PickerBindings declares the keys this tool binds INSIDE its own
@@ -75,61 +52,6 @@ type Manifest struct {
 	// one consistent modifier across the whole UI, but tools can deviate
 	// if they have a stronger UX reason.
 	PickerBindings []PickerBinding `json:"picker_bindings,omitempty"`
-
-	// Badge, if set, declares that this tool contributes a per-workspace
-	// status badge to the M-s workspace picker. The picker stays agnostic
-	// to what the badge means: it reads the declared window option, splices
-	// its (already-rendered) value between the workspace name and the AI
-	// summary, and — if Action is set — wires the declared key to invoke a
-	// subcommand on the selected row. See internal/tools/workspaces badge
-	// wiring. The gh-pr tool is the first provider.
-	Badge *Badge `json:"badge,omitempty"`
-}
-
-// Badge is a tool's contribution to the workspace picker: a per-window
-// status symbol plus an optional keybinding that acts on the selected row.
-// The core never interprets the badge's meaning — the tool writes a
-// pre-rendered (ANSI-colored) glyph into the Option window-option and the
-// picker splices it verbatim.
-type Badge struct {
-	// Option is the tmux window-option the picker reads for the badge
-	// value, e.g. "@ghpr_badge". Follows the @<plugin>_<field> convention.
-	Option string `json:"option"`
-
-	// Refresh, if set, is a subcommand the picker spawns (detached, once
-	// per open) so the tool can update its badges. The tool owns its own
-	// staleness throttling — the picker just pokes it. e.g. "_refresh".
-	Refresh string `json:"refresh,omitempty"`
-
-	// Order sorts this badge among multiple providers (ascending). Ties
-	// break on tool name.
-	Order int `json:"order,omitempty"`
-
-	// SortOption + SortOrder let a provider influence the picker's row
-	// order. When set, the picker reads SortOption (a tmux window option
-	// holding a semantic value) and sorts rows by the value's index in
-	// SortOrder (earlier = higher). Values absent from SortOrder (and
-	// windows without the option) sort last. Applied WITHIN the picker's
-	// existing grouping, as a tiebreak before recency. ghpr uses this to
-	// order open → draft → merged → closed.
-	SortOption string   `json:"sort_option,omitempty"`
-	SortOrder  []string `json:"sort_order,omitempty"`
-
-	// Action, if set, binds a key in the picker that runs Invoke on the
-	// selected row.
-	Action *BadgeAction `json:"action,omitempty"`
-}
-
-// BadgeAction binds a picker key to a tool subcommand invoked with the
-// selected row (the full tab-delimited picker line) as its argument.
-type BadgeAction struct {
-	// Key is atelier canonical form ("M-o", "C-o"); the picker translates
-	// it to its rendering library's syntax and shows it in the footer.
-	Key string `json:"key"`
-	// Invoke is the tool subcommand to run, e.g. "open".
-	Invoke string `json:"invoke"`
-	// Label is the short footer text, e.g. "open PR".
-	Label string `json:"label,omitempty"`
 }
 
 // PickerBinding describes one keybinding inside a tool's popup. It is
@@ -229,14 +151,9 @@ const (
 )
 
 // Validate sanity-checks a manifest. Returns the first error found.
+// Used to guard synthesized launcher manifests from user config; built-in
+// manifests are compile-time literals and are covered by tests.
 func (m *Manifest) Validate() error {
-	if m.APIVersion == 0 {
-		return fmt.Errorf("manifest missing api_version")
-	}
-	if m.APIVersion != APIVersion {
-		return fmt.Errorf("manifest api_version %d is incompatible with core api_version %d",
-			m.APIVersion, APIVersion)
-	}
 	if m.Name == "" {
 		return fmt.Errorf("manifest missing name")
 	}
@@ -261,48 +178,4 @@ func (b *Binding) style() Style {
 		return ""
 	}
 	return b.Style
-}
-
-// FromBinary invokes the binary at path with the Sentinel flag and parses
-// the manifest JSON it prints to stdout. Returns an error if the binary
-// doesn't respond within DiscoveryTimeout, returns non-zero, or emits
-// invalid JSON.
-func FromBinary(path string) (*Manifest, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), DiscoveryTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, path, Sentinel)
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("%s %s: timed out after %s", path, Sentinel, DiscoveryTimeout)
-		}
-		return nil, fmt.Errorf("%s %s: %w (%s)", path, Sentinel, err, strings.TrimSpace(errBuf.String()))
-	}
-
-	m, err := FromJSON(out.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return m, nil
-}
-
-// FromJSON parses raw manifest JSON bytes.
-func FromJSON(data []byte) (*Manifest, error) {
-	var m Manifest
-	if err := json.Unmarshal(bytes.TrimSpace(data), &m); err != nil {
-		return nil, fmt.Errorf("invalid manifest JSON: %w", err)
-	}
-	if err := m.Validate(); err != nil {
-		return nil, err
-	}
-	return &m, nil
-}
-
-// AsJSON renders the manifest as pretty-printed JSON. Convenience for
-// tools that want to dump their own manifest.
-func (m *Manifest) AsJSON() ([]byte, error) {
-	return json.MarshalIndent(m, "", "  ")
 }

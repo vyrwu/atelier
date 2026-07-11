@@ -6,6 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/vyrwu/atelier/internal/adapters/claude"
+	"github.com/vyrwu/atelier/internal/integration"
+	"github.com/vyrwu/atelier/internal/manifest"
+	"github.com/vyrwu/atelier/internal/plugin"
 	"github.com/vyrwu/atelier/internal/statestore"
 )
 
@@ -30,7 +36,7 @@ func TestCheckStatestoreParseable_Corrupt(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheRoot)
 	// Write garbage to the path statestore.Load reads.
-	cachePath := filepath.Join(cacheRoot, "atelier", "state-"+statestoreHostSuffix()+".json")
+	cachePath := statestore.Path()
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -48,45 +54,36 @@ func TestCheckStatestoreParseable_Corrupt(t *testing.T) {
 
 // TestCheckClaudeSettings_AutoCreates locks the FR-1.2 spec point:
 // missing settings.json is auto-created (not just warned about).
-// The user shouldn't have to manually mkdir + touch to get past
-// "claude tool errors with cryptic missing-file message."
-func TestCheckClaudeSettings_AutoCreates(t *testing.T) {
-	cacheRoot := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cacheRoot)
-
-	expected := filepath.Join(cacheRoot, "atelier", "claude", "settings.json")
-	if _, err := os.Stat(expected); err == nil {
-		t.Fatalf("precondition failed: %s already exists", expected)
-	}
-
-	r := checkClaudeSettings()
-	if r.Status != StatusWarn {
-		t.Errorf("first-time creation should WARN (so user notices), got %s", r.Status)
-	}
-	data, err := os.ReadFile(expected)
-	if err != nil {
-		t.Fatalf("file not created at %s: %v", expected, err)
-	}
-	if strings.TrimSpace(string(data)) != "{}" {
-		t.Errorf("auto-created file should be `{}`, got %q", string(data))
+// TestCheckAgentHooks_SkipsWithoutAI: no AI integration configured → the
+// check is a no-op SKIP, not a hardcoded-Claude WARN.
+func TestCheckAgentHooks_SkipsWithoutAI(t *testing.T) {
+	integration.SetActive(integration.Set{})
+	defer integration.SetActive(integration.Set{})
+	if r := checkAgentHooks(); r.Status != StatusSkip {
+		t.Errorf("no AI configured should SKIP, got %s (%q)", r.Status, r.Detail)
 	}
 }
 
-// TestCheckClaudeSettings_AlreadyPresent: when the file exists, PASS
-// silently. No bookkeeping noise on every doctor run.
-func TestCheckClaudeSettings_AlreadyPresent(t *testing.T) {
+// TestCheckAgentHooks_InstallsViaClaudeAdapter: with the claude adapter
+// active, EnsureHooks installs the canonical settings (with the Stop hook)
+// and the check PASSes.
+func TestCheckAgentHooks_InstallsViaClaudeAdapter(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheRoot)
-	path := filepath.Join(cacheRoot, "atelier", "claude", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(`{"foo":"bar"}`), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	r := checkClaudeSettings()
+	integration.SetActive(integration.Set{AI: claude.New()})
+	defer integration.SetActive(integration.Set{})
+
+	r := checkAgentHooks()
 	if r.Status != StatusPass {
-		t.Errorf("present-file should PASS, got %s (detail=%q)", r.Status, r.Detail)
+		t.Fatalf("claude adapter should install hooks + PASS, got %s (%q)", r.Status, r.Detail)
+	}
+	path := filepath.Join(cacheRoot, "atelier", "claude", "settings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("settings not written at %s: %v", path, err)
+	}
+	if !strings.Contains(string(data), "atelier ai on-stop") {
+		t.Errorf("settings should wire the kernel stop-hook; got %q", string(data))
 	}
 }
 
@@ -155,31 +152,25 @@ func TestCheckWorktreeDirsExist_AllPresent(t *testing.T) {
 	}
 }
 
-// TestCheckAtelierBinaries_MissingAreReported: doctor must NAME
-// missing binaries so the user knows which install step failed
-// without spelunking `make install` output.
-func TestCheckAtelierBinaries_MissingAreReported(t *testing.T) {
-	// Empty PATH guarantees every required atelier-* binary is missing.
-	t.Setenv("PATH", "")
-	r := checkAtelierBinaries()
-	if r.Status != StatusWarn {
-		t.Errorf("missing binaries should WARN, got %s", r.Status)
-	}
-	for _, bin := range []string{"atelier-workspaces", "atelier-claude"} {
-		if !strings.Contains(r.Detail, bin) {
-			t.Errorf("WARN detail must name missing binary %q, got %q", bin, r.Detail)
-		}
-	}
-}
+// TestCheckToolsRegistered_ReportsBuiltins: in the single-binary model
+// there are no atelier-* binaries to find on PATH. doctor instead reports
+// the in-process registry — PASS naming the built-in count once at least
+// one tool is registered.
+func TestCheckToolsRegistered_ReportsBuiltins(t *testing.T) {
+	// Isolate config so a stray real launcher can't flip PASS→WARN.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// Register a fake built-in so the registry is non-empty in this test
+	// binary (which does not import internal/tools/all). Uniquely named so
+	// it can't collide with anything else the package's tests register.
+	plugin.RegisterBuiltin(
+		&manifest.Manifest{Name: "__doctor_test_tool", Description: "fake"},
+		func(*cobra.Command) {})
 
-// statestoreHostSuffix mirrors statestore's per-host filename
-// derivation just enough for the corrupt-file test to write to
-// the actual path Load() reads. Kept local — production code
-// doesn't need this exposed.
-func statestoreHostSuffix() string {
-	host, _ := os.Hostname()
-	if host == "" {
-		host = "unknown"
+	r := checkToolsRegistered()
+	if r.Status != StatusPass {
+		t.Fatalf("with a built-in registered, expected PASS, got %s (%q)", r.Status, r.Detail)
 	}
-	return host
+	if !strings.Contains(r.Detail, "built-in") {
+		t.Errorf("PASS detail must mention built-in count, got %q", r.Detail)
+	}
 }

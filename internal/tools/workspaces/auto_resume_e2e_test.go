@@ -78,13 +78,13 @@ func TestSessionsCommand_HasResumeTriggerLogic(t *testing.T) {
 		t.Fatalf("read source: %v", err)
 	}
 	for _, want := range []string{
-		// SessionsCommand reads the resume id from the target window
-		// via the canonical metadata-key → option-name translation.
-		`statestore.MetadataKeyToOptionName("ai.active_session_id")`,
-		// The trigger combines popup-presence + resume-id.
-		"shouldSpawn := hasPopup || resumeID != \"\"",
-		// And fires a deferred display-popup invoking atelier-claude.
-		`dispatch.ToolCmd("claude", "open")`,
+		// SessionsCommand asks the active AI adapter for the agent's popup
+		// session name to detect a live popup on the target window.
+		"ai.AgentPopupSession(targetSid, targetWid)",
+		// The trigger combines popup-presence + adapter resumable-state.
+		`shouldSpawn = hasPopup || ai.HasResumableState(h, targetWid, "")`,
+		// And fires a deferred display-popup invoking the kernel agent open.
+		`dispatch.CoreCmd("ai", "open")`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("SessionsCommand source missing %q — auto-resume trigger may have regressed", want)

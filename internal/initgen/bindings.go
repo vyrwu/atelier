@@ -317,12 +317,14 @@ set -g status-left-length 100
 set -g status-right-length 50
 set -g status-left " #S "
 set -g status-right " %H:%M "
-# window-status-format MUST contain #W. stamp-statusline injects the
-# atelier freshness segment AFTER the #W anchor; with an empty / #W-less
-# format the injection falls through to append, producing a bare
-# floating icon for every inactive window in the bar (the "phantom
-# second checkmark" bug).
-set -g window-status-format " #W "
+# Background windows are hidden UNLESS they need attention. A repo session
+# holds one window per worktree, so rendering every branch name floods the bar
+# — but a background workspace waiting on the user MUST still surface. Show a
+# non-current window only when @needs_attention is set; otherwise empty. The
+# CURRENT workspace always renders via window-status-current-format below.
+# stamp-statusline injects the freshness segment after the #W anchor inside
+# the conditional.
+set -g window-status-format "#{?@needs_attention, #W ,}"
 set -g window-status-separator ""
 set -g window-status-current-format "#[bold] #W #[nobold]"
 

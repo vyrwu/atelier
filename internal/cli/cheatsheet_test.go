@@ -8,16 +8,31 @@ import (
 
 // TestRenderCheatsheet_HasBothSections locks in the consolidated layout
 // the user explicitly requested: a single M-? popup carrying both the
-// atelier keybindings cheatsheet AND the doctor-style diagnostics. If
-// either section header disappears from the render (e.g. someone splits
-// them back into separate commands), this test fails.
+// essential shortcuts AND the doctor-style health TLDR. If either section
+// header disappears from the render (e.g. someone splits them back into
+// separate commands), this test fails.
 func TestRenderCheatsheet_HasBothSections(t *testing.T) {
 	var buf bytes.Buffer
 	renderCheatsheet(&buf)
 	out := stripANSI(buf.String())
-	for _, header := range []string{"Keybindings", "Diagnostics"} {
+	for _, header := range []string{"Essentials", "Health"} {
 		if !strings.Contains(out, header) {
 			t.Errorf("cheatsheet output missing %q section. full output:\n%s", header, out)
+		}
+	}
+}
+
+// TestRenderCheatsheet_NoToolPluginNames locks the restructure: the
+// cheatsheet teaches the essential loop in verbs — it must NOT leak
+// internal tool/plugin package names (the old "(source)" column) into the
+// user-facing popup.
+func TestRenderCheatsheet_NoToolPluginNames(t *testing.T) {
+	var buf bytes.Buffer
+	renderCheatsheet(&buf)
+	out := stripANSI(buf.String())
+	for _, leaked := range []string{"toolselector", "workspaces)", "(atelier)"} {
+		if strings.Contains(out, leaked) {
+			t.Errorf("cheatsheet leaks internal name %q into the essentials. full output:\n%s", leaked, out)
 		}
 	}
 }
