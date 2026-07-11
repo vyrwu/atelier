@@ -36,7 +36,7 @@ const (
 
 // forgeRefreshTTL bounds how often the forge is queried per window; repeated
 // picker opens within this window reuse the cached state.
-const forgeRefreshTTL = 5 * time.Minute
+const forgeRefreshTTL = 1 * time.Minute
 
 // forgeStateOrder is the kernel's picker sort order for forge states: open
 // first, then draft, merged, closed. Windows with no forge item sort last.
