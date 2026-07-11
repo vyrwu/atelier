@@ -73,7 +73,7 @@ func SessionsCommand() *cobra.Command {
 			// itself when the user reflexively retries.
 			lines := make([]string, 0, len(rows))
 			for _, r := range rows {
-				lines = append(lines, fmt.Sprintf("%s\t%s\t%s", r.Session, r.Window, r.Display))
+				lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s", r.Session, r.Window, r.Display, r.Recap))
 			}
 			emptyHeader := ""
 			if len(rows) == 0 {
@@ -103,7 +103,20 @@ func SessionsCommand() *cobra.Command {
 			opts := []fzfstyle.Opt{
 				fzfstyle.WithCustomColor("prompt:red:bold,pointer:red,query:red,hl:red,hl+:red:bold,bg+:#44475a,fg+:#f8f8f2:bold,label:103,border:103,footer:103"),
 				fzfstyle.WithDelimiter("\t"),
-				fzfstyle.WithNth("3"),
+				// Display the name (field 3) plus the recap (field 4) on its own
+				// line beneath it. No --wrap, so a too-wide recap is truncated to
+				// the popup width by fzf and row height stays a predictable two
+				// lines. Records are NUL-framed in and out (multi-line items —
+				// see internal/fzf and SessionListCommand's reload output).
+				fzfstyle.WithNth("3,4"),
+				// Search the NAME only (projection field 1), never the recap —
+				// typing matches workspaces by name, not by summary.
+				fzfstyle.WithSearchNth("1"),
+				// Fill the current-row highlight to the window edge, across both
+				// lines of the item.
+				fzfstyle.WithHighlightLine(),
+				fzfstyle.WithReadZero(),
+				fzfstyle.WithPrintZero(),
 				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_delete-prompt", "\"$FZF_PROMPT\"", "{}")),
 				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(y)\"; fi"),
 				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(n)\"; fi"),
@@ -731,8 +744,12 @@ func SessionListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// NUL-terminate records: the session picker runs with --read0
+			// (multi-line items — recap on its own line), so reload() must
+			// frame its input the same way. Four fields:
+			// session, window, name-line, recap-line (matches the initial build).
 			for _, r := range rows {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", r.Session, r.Window, r.Display)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s%s", r.Session, r.Window, r.Display, r.Recap, fzf.NUL)
 			}
 			return nil
 		},

@@ -104,10 +104,16 @@ func (g *Generator) RunWithSystemPrompt(systemPrompt, prompt string) (string, er
 	return firstLine(out.String()), nil
 }
 
+// recapFallbackMaxRunes is the ceiling for the fallback recap path. Mirrors
+// claude.RecapMaxRunes (this package can't import that one without a cycle);
+// ~one wide line, since the recap shows on one truncated-to-width line.
+const recapFallbackMaxRunes = 120
+
 // RecapFromTranscript asks Claude (default: haiku) to summarize the tail
-// of a Claude transcript JSONL file as a single line ≤75 chars describing
-// the latest action and any pending work. Returns ("", nil) for empty
-// transcripts. Bash equivalent: tmux_generate_recap.
+// of a Claude transcript JSONL file as a single line describing the latest
+// action and any pending work. Returns ("", nil) for empty transcripts.
+// Bash equivalent: tmux_generate_recap. This is the fallback path; the
+// primary recap comes from latestRecap → RunWithSystemPrompt + truncateLine.
 func (g *Generator) RecapFromTranscript(transcriptPath string) (string, error) {
 	tail, err := tailTranscript(transcriptPath, 20)
 	if err != nil {
@@ -116,7 +122,7 @@ func (g *Generator) RecapFromTranscript(transcriptPath string) (string, error) {
 	if strings.TrimSpace(tail) == "" {
 		return "", nil
 	}
-	prompt := fmt.Sprintf(`Summarize this Claude Code session as a single line, max 75 characters, lowercase, no trailing period, no quotes. Describe what just happened and what's pending if any. Examples:
+	prompt := fmt.Sprintf(`Summarize this Claude Code session as a single line (no line breaks), up to ~120 characters, lowercase, no trailing period, no quotes. It's shown on one line in the UI, so stay tight. Describe what just happened and what's pending if any. Examples:
   - running auth tests, two failing
   - finished workspace refactor, awaiting review
   - writing migration for users table
@@ -127,11 +133,8 @@ Transcript (last messages):
 	if err != nil {
 		return "", err
 	}
-	if len(out) > 75 {
-		runes := []rune(out)
-		if len(runes) > 72 {
-			out = string(runes[:72]) + "..."
-		}
+	if runes := []rune(out); len(runes) > recapFallbackMaxRunes {
+		out = string(runes[:recapFallbackMaxRunes-1]) + "…"
 	}
 	return out, nil
 }

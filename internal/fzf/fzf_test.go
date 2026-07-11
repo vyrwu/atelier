@@ -9,7 +9,7 @@ func TestParseOutput_EnterOnly(t *testing.T) {
 	//   foo
 	//   (blank line for empty expect key)
 	//   foo
-	r := parseOutput("foo\n\nfoo", true, true)
+	r := parseOutput("foo\n\nfoo", true, true, "\n")
 	if r.Key != "" {
 		t.Fatalf("Key: got %q want empty", r.Key)
 	}
@@ -23,7 +23,7 @@ func TestParseOutput_ExpectKey(t *testing.T) {
 	//   feat
 	//   ctrl-a
 	//   (no selection if no match)
-	r := parseOutput("feat\nctrl-a\n", true, true)
+	r := parseOutput("feat\nctrl-a\n", true, true, "\n")
 	if r.Key != "ctrl-a" {
 		t.Fatalf("Key: got %q want ctrl-a", r.Key)
 	}
@@ -37,7 +37,7 @@ func TestParseOutput_EnterEmptyQueryWithExpect(t *testing.T) {
 	// fzf output:
 	//   (empty query line)
 	//   enter
-	r := parseOutput("\nenter\n", true, true)
+	r := parseOutput("\nenter\n", true, true, "\n")
 	if r.Key != "enter" {
 		t.Fatalf("Key: got %q want enter", r.Key)
 	}
@@ -48,7 +48,7 @@ func TestParseOutput_EnterEmptyQueryWithExpect(t *testing.T) {
 
 func TestParseOutput_QueryOnly(t *testing.T) {
 	// --print-query only, no --expect. Two lines: query, selection.
-	r := parseOutput("typed\nmatch", false, true)
+	r := parseOutput("typed\nmatch", false, true, "\n")
 	if r.Key != "" {
 		t.Fatalf("Key: got %q want empty", r.Key)
 	}
@@ -59,12 +59,28 @@ func TestParseOutput_QueryOnly(t *testing.T) {
 
 func TestParseOutput_PlainSelection(t *testing.T) {
 	// No --expect, no --print-query. One line: selection.
-	r := parseOutput("just-this", false, false)
+	r := parseOutput("just-this", false, false, "\n")
 	if r.Key != "" || r.Query != "" {
 		t.Fatalf("expected key/query empty, got %+v", r)
 	}
 	if r.Selection != "just-this" {
 		t.Fatalf("Selection: got %q", r.Selection)
+	}
+}
+
+// TestParseOutput_NulMultilineSelection is the multi-line guard: under
+// --print0 the selection is one NUL-terminated record whose display text
+// contains newlines. Splitting on NUL keeps it whole; splitting on "\n"
+// (the pre-multiline behavior) would tear the item apart.
+func TestParseOutput_NulMultilineSelection(t *testing.T) {
+	picked := "sess\twin\ttime  name\n        · recap here"
+	r := parseOutput(picked+NUL, false, false, NUL)
+	if r.Selection != picked {
+		t.Fatalf("Selection: got %q want %q", r.Selection, picked)
+	}
+	// The Session\tWindow prefix must still be recoverable by the caller.
+	if got := r.Selection[:len("sess\twin")]; got != "sess\twin" {
+		t.Fatalf("tab prefix corrupted: %q", got)
 	}
 }
 
@@ -77,5 +93,27 @@ func TestContainsPrintQuery(t *testing.T) {
 	}
 	if containsPrintQuery([]string{"--height=100%"}) {
 		t.Fatalf("expected no detection without --print-query")
+	}
+}
+
+func TestRecordSep(t *testing.T) {
+	if got := recordSep([]string{"--ansi", "--reverse"}); got != "\n" {
+		t.Fatalf("recordSep without --read0 = %q, want newline", got)
+	}
+	if got := recordSep([]string{"--ansi", "--read0"}); got != NUL {
+		t.Fatalf("recordSep with --read0 = %q, want NUL", got)
+	}
+}
+
+func TestJoinRecords(t *testing.T) {
+	// Empty slice → empty stdin (no ghost entry), regardless of separator.
+	if got := joinRecords(nil, NUL); got != "" {
+		t.Fatalf("joinRecords(nil) = %q, want empty", got)
+	}
+	if got := joinRecords([]string{"a", "b"}, "\n"); got != "a\nb\n" {
+		t.Fatalf("newline join = %q", got)
+	}
+	if got := joinRecords([]string{"a", "b"}, NUL); got != "a\x00b\x00" {
+		t.Fatalf("NUL join = %q", got)
 	}
 }

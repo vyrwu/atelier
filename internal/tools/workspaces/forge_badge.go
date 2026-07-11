@@ -91,13 +91,17 @@ func renderForgeBadge(state string) string {
 // the rendered-string level, so a future reorder fails loudly regardless of
 // how the badge itself is produced.
 //
-// Layout:  <time> <attention-icon> <forge-badge> <session>/<window> <recap>
+// Layout (the picker's searchable name line):
 //
-// sessionColor is the SGR color body for the session name ("36" cyan for git
-// workspaces, "38;5;166" orange for auto sessions); weight is "" or "1;".
-func formatSessionDisplay(timeCol, icon, badgeCol, weight, sessionColor, session, window, recap string) string {
-	return fmt.Sprintf("%s%s%s\033[%s%sm%s\033[0m/\033[%s32m%s\033[0m%s",
-		timeCol, icon, badgeCol, weight, sessionColor, session, weight, window, recap)
+//	<time> <attention-icon> <forge-badge> <session>/<window>
+//
+// The AI recap is NOT part of this line — it's emitted as a separate picker
+// field so fzf search can target the name alone (see SessionRow). sessionColor
+// is the SGR color body for the session name ("36" cyan for git workspaces,
+// "38;5;166" orange for auto sessions); weight is "" or "1;".
+func formatSessionDisplay(timeCol, icon, badgeCol, weight, sessionColor, session, window string) string {
+	return fmt.Sprintf("%s%s%s\033[%s%sm%s\033[0m/\033[%s32m%s\033[0m",
+		timeCol, icon, badgeCol, weight, sessionColor, session, weight, window)
 }
 
 // forgeWorkspaceCwd returns the CANONICAL directory for a workspace window —

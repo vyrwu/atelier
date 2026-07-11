@@ -94,8 +94,8 @@ func TestRecapFromTranscript_EmptyTranscriptReturnsEmpty(t *testing.T) {
 }
 
 func TestRecapFromTranscript_Truncates(t *testing.T) {
-	// Stub returns a very long string — RecapFromTranscript should truncate.
-	long := strings.Repeat("x", 200)
+	// Stub returns a string past the generous ceiling — it should truncate.
+	long := strings.Repeat("x", 400)
 	withPATH(t, writeStubClaude(t, long))
 	transcript := filepath.Join(t.TempDir(), "session.jsonl")
 	_ = os.WriteFile(transcript, []byte(`{"type":"user","message":{"content":"hi"}}`+"\n"), 0o644)
@@ -103,10 +103,10 @@ func TestRecapFromTranscript_Truncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecapFromTranscript: %v", err)
 	}
-	if len(got) > 75 {
-		t.Fatalf("expected length ≤75, got %d (%q)", len(got), got)
+	if n := len([]rune(got)); n > recapFallbackMaxRunes {
+		t.Fatalf("expected length ≤%d runes, got %d (%q)", recapFallbackMaxRunes, n, got)
 	}
-	if !strings.HasSuffix(got, "...") {
+	if !strings.HasSuffix(got, "…") {
 		t.Fatalf("expected truncation marker, got %q", got)
 	}
 }

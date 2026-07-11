@@ -291,7 +291,9 @@ func TestLifecycle_RecapShownWithoutLivePopup(t *testing.T) {
 	}
 	found := false
 	for _, r := range rows {
-		if r.Session == "vyrwu/demo" && r.Window == branch && strings.Contains(r.Display, summary) {
+		// The recap is now a separate field (its own picker line), not part
+		// of the styled name line in Display.
+		if r.Session == "vyrwu/demo" && r.Window == branch && strings.Contains(r.Recap, summary) {
 			found = true
 		}
 	}

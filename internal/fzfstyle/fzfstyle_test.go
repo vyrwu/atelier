@@ -59,6 +59,13 @@ func TestArgs_WithOptions(t *testing.T) {
 		WithPrintQuery(),
 		WithNoClear(),
 		WithQuery("initial"),
+		WithReadZero(),
+		WithPrintZero(),
+		WithSearchNth("1"),
+		WithWrap(),
+		WithHighlightLine(),
+		WithWrapSign(">>"),
+		WithTabstop(1),
 	)
 	flat := strings.Join(args, "\n")
 	for _, want := range []string{
@@ -71,6 +78,13 @@ func TestArgs_WithOptions(t *testing.T) {
 		"--print-query",
 		"--no-clear",
 		"--query=initial",
+		"--read0",
+		"--print0",
+		"--nth=1",
+		"--wrap",
+		"--highlight-line",
+		"--wrap-sign=>>",
+		"--tabstop=1",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("option not propagated %q:\n%s", want, flat)

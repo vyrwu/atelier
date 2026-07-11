@@ -98,10 +98,57 @@ func WithDelimiter(d string) Opt {
 	}
 }
 
-// WithNth sets which fields are searched (e.g. "1", "2..").
+// WithNth sets which fields are DISPLAYED (--with-nth, e.g. "3", "3,4").
+// Note fzf renumbers fields for WithSearchNth relative to this projection.
 func WithNth(spec string) Opt {
 	return func(args []string) []string {
 		return append(args, "--with-nth="+spec)
+	}
+}
+
+// WithSearchNth restricts the SEARCH scope to specific fields (--nth). The
+// indices count fields of the --with-nth projection (fzf renumbers), so with
+// WithNth("3,4") a WithSearchNth("1") searches only the first displayed field.
+func WithSearchNth(spec string) Opt {
+	return func(args []string) []string {
+		return append(args, "--nth="+spec)
+	}
+}
+
+// WithWrap wraps long items across multiple rows instead of truncating them
+// with an ellipsis (fzf ≥ 0.53). Continuation rows are marked with the fzf
+// wrap sign.
+func WithWrap() Opt {
+	return func(args []string) []string {
+		return append(args, "--wrap")
+	}
+}
+
+// WithHighlightLine extends the current-line highlight (the bg+ color) across
+// the full width of the window instead of only the item's content, spanning
+// every row of a multi-line item (fzf ≥ 0.53).
+func WithHighlightLine() Opt {
+	return func(args []string) []string {
+		return append(args, "--highlight-line")
+	}
+}
+
+// WithWrapSign sets the string shown at the start of each wrapped
+// continuation row (fzf ≥ 0.53). Pass a run of spaces to indent wrapped text
+// into a hanging indent instead of showing a marker.
+func WithWrapSign(sign string) Opt {
+	return func(args []string) []string {
+		return append(args, "--wrap-sign="+sign)
+	}
+}
+
+// WithTabstop sets the rendered width of a tab character. A picker that packs
+// two --with-nth fields onto one display line uses --tabstop=1 so the tab fzf
+// inserts between them collapses to a single space instead of snapping to the
+// next 8-column tab stop.
+func WithTabstop(n int) Opt {
+	return func(args []string) []string {
+		return append(args, fmt.Sprintf("--tabstop=%d", n))
 	}
 }
 
@@ -124,6 +171,24 @@ func WithPrintQuery() Opt {
 func WithNoClear() Opt {
 	return func(args []string) []string {
 		return append(args, "--no-clear")
+	}
+}
+
+// WithReadZero reads NUL-separated input records instead of newline-separated
+// ones. Required for multi-line items: a single selectable entry whose display
+// text contains newlines. Pair with WithPrintZero so the selection reads back
+// intact. (fzf ≥ 0.53 renders items with embedded newlines across rows.)
+func WithReadZero() Opt {
+	return func(args []string) []string {
+		return append(args, "--read0")
+	}
+}
+
+// WithPrintZero delimits fzf's output with NUL instead of newline, so a
+// multi-line selection survives round-trip. Pair with WithReadZero.
+func WithPrintZero() Opt {
+	return func(args []string) []string {
+		return append(args, "--print0")
 	}
 }
 
