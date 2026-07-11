@@ -93,10 +93,9 @@ func (Adapter) OpenAgent(h *tmuxhost.Client) error {
 			}
 		}
 
-		// One-shot: clear the prompt + kind so they can't be replayed.
+		// One-shot: consume the prompt + kind so they can't be replayed.
 		// @ai_active_session_id stays — the persistent conversation pointer.
-		_ = h.UnsetWindowOption(ctx.WindowID, OptPrompt)
-		_ = h.UnsetWindowOption(ctx.WindowID, OptWorkspaceKind)
+		clearLaunchPrompt(h, ctx.WindowID, prompt, kind)
 
 		cfg, _ := LoadConfig()
 		settingsPath, settingsErr := claudesettings.Ensure()
@@ -126,6 +125,26 @@ func (Adapter) SetPrompt(h *tmuxhost.Client, windowID, prompt, kind string) erro
 		}
 	}
 	return nil
+}
+
+// clearLaunchPrompt consumes the one-shot @ai_prompt / @ai_workspace_kind
+// after OpenAgent has folded them into the launch command — from BOTH the
+// live window AND the restore cache. Clearing only the window option (the old
+// behavior) let a spent prompt survive in the statestore cache and get
+// re-stamped on the next tmux server restart; a restored window then carried
+// both a dead prompt and a live @ai_active_session_id, and buildClaudeStartCmd
+// forked a fresh session off the prompt instead of resuming. Best-effort: the
+// cache mirror is only cleared when there was actually something to clear so a
+// plain resume doesn't leave empty keys behind.
+func clearLaunchPrompt(h *tmuxhost.Client, windowID, prompt, kind string) {
+	_ = h.UnsetWindowOption(windowID, OptPrompt)
+	_ = h.UnsetWindowOption(windowID, OptWorkspaceKind)
+	if prompt != "" {
+		_ = workspace.PersistWindowMetadata(h, windowID, MetaPrompt, "")
+	}
+	if kind != "" {
+		_ = workspace.PersistWindowMetadata(h, windowID, MetaWorkspaceKind, "")
+	}
 }
 
 // GenerateName runs Claude with a kernel-supplied naming instruction and
@@ -275,15 +294,24 @@ func (Adapter) HasResumableState(h *tmuxhost.Client, wid, cwd string) bool {
 //	multi-repo + prompt: claude --settings <atelier.json> --append-system-prompt <sys> <prompt>
 //	worktree   + prompt: claude --settings <atelier.json> <prompt>
 //	no prompt          : claude --settings <atelier.json>
+//
+// A validated resumeSessionID (its transcript exists — resumeIDForLaunch
+// already checked) takes precedence over any prompt still stamped on the
+// window. That conversation already exists and already received its initial
+// prompt; replaying the prompt would fork a fresh session and orphan the
+// history. This is what made respawned workspaces start over instead of
+// resuming: restore re-stamps the one-shot @ai_prompt from the cache, so a
+// restored window carries BOTH a spent prompt and a live session id, and the
+// resume must win.
 func buildClaudeStartCmd(prompt, kind, multiRepoSys, settingsPath, resumeSessionID string) string {
 	settings := ""
 	if settingsPath != "" {
 		settings = "--settings " + shellQuote(settingsPath) + " "
 	}
+	if resumeSessionID != "" {
+		return "claude " + settings + "--resume " + shellQuote(resumeSessionID)
+	}
 	if prompt == "" {
-		if resumeSessionID != "" {
-			return "claude " + settings + "--resume " + shellQuote(resumeSessionID)
-		}
 		return "claude " + settings
 	}
 	if kind == WorkspaceKindMultiRepo {

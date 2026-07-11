@@ -38,10 +38,23 @@ func TestBuildClaudeStartCmd(t *testing.T) {
 			wantNotContains: []string{"--append-system-prompt"},
 		},
 		{
-			name:   "prompt overrides resume (fresh start)",
+			// The respawn bug: restore re-stamps the spent one-shot @ai_prompt
+			// alongside the live @ai_active_session_id, so OpenAgent hands
+			// buildClaudeStartCmd BOTH. A validated resume id must win —
+			// otherwise the workspace forks a fresh session and orphans the
+			// prior conversation.
+			name:   "validated resume wins over stale prompt",
 			prompt: "do a thing", settings: "/s.json", resume: "sess-123",
-			wantContains:    []string{"'do a thing'"},
-			wantNotContains: []string{"--resume"},
+			wantContains:    []string{"--resume 'sess-123'"},
+			wantNotContains: []string{"'do a thing'", "--append-system-prompt"},
+		},
+		{
+			// Multi-repo respawn: same precedence, resume still wins and the
+			// stale prompt / system prompt are not replayed.
+			name:   "validated resume wins over stale multi-repo prompt",
+			prompt: "task", kind: WorkspaceKindMultiRepo, multiRepoSys: "SYS", settings: "/s.json", resume: "sess-9",
+			wantContains:    []string{"--resume 'sess-9'"},
+			wantNotContains: []string{"'task'", "--append-system-prompt"},
 		},
 		{
 			name:   "multi-repo appends system prompt",
