@@ -1,29 +1,39 @@
-// Package mock is a deterministic AIIntegration adapter with no external
-// dependencies. It exists so the kernel's agent-fed capabilities (branch
-// naming, summary, attention, agent popup) are exercisable without Claude,
-// a network, or an API key — both as a real config option
-// (`[integrations] ai = "mock"`) and as the injectable adapter for kernel
-// tests. It is the proof that the AI port is genuinely swappable.
+// Package mock is a deterministic adapter with no external dependencies. It
+// satisfies BOTH kernel ports — AIIntegration and ForgeIntegration — so the
+// kernel's agent-fed capabilities (branch naming, summary, attention, agent
+// popup) and its code-forge capability (per-workspace PR badge) are
+// exercisable without Claude, `gh`, a network, or an API key — both as real
+// config options (`[integrations] ai = "mock"`, `forge = "mock"`) and as the
+// injectable adapters for kernel tests. It is the proof that the ports are
+// genuinely swappable.
 package mock
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/vyrwu/atelier/internal/config"
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/popup"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// Adapter satisfies integration.AIIntegration deterministically.
+// Adapter satisfies integration.AIIntegration + integration.ForgeIntegration
+// deterministically.
 type Adapter struct{}
 
-// New constructs the mock AI adapter.
+// New constructs the mock adapter.
 func New() *Adapter { return &Adapter{} }
 
-var _ integration.AIIntegration = (*Adapter)(nil)
+var (
+	_ integration.AIIntegration    = (*Adapter)(nil)
+	_ integration.ForgeIntegration = (*Adapter)(nil)
+)
 
 func (Adapter) Name() string        { return "mock" }
 func (Adapter) DisplayName() string { return "Mock AI" }
@@ -131,3 +141,44 @@ func (Adapter) AgentPopupSession(parentSessionID, parentWindowID string) string 
 
 // HasResumableState is always false — the mock keeps no state.
 func (Adapter) HasResumableState(_ *tmuxhost.Client, _, _ string) bool { return false }
+
+// --- ForgeIntegration --------------------------------------------------------
+
+// MockForgeFixture is the file the mock forge reads to classify workspaces:
+// a JSON object mapping a workspace's canonical worktree path (WorkspaceRef.Cwd)
+// to a ForgeState string ("open"/"draft"/"merged"/"closed"). It lives under
+// the active config home so it's naturally isolated per XDG_CONFIG_HOME. The
+// demo sandbox (and tests) write it; a missing file means "no PRs anywhere".
+const MockForgeFixture = "mock-forge.json"
+
+// MockForgeFixturePath returns the fixture path under the active config home.
+func MockForgeFixturePath() string {
+	return filepath.Join(config.XDGConfigHome(), "atelier", MockForgeFixture)
+}
+
+// Status classifies the workspace's forge item by looking its worktree path
+// up in the fixture map — deterministic, offline, no `gh`. An absent fixture
+// or unmapped workspace is ForgeNone (badge cleared). This is the proof the
+// forge port is swappable: the kernel's refresh + badge rendering run for
+// real against fixture data.
+func (Adapter) Status(ws integration.WorkspaceRef) (integration.ForgeStatus, error) {
+	return integration.ForgeStatus{State: mockForgeState(ws.Cwd)}, nil
+}
+
+// Open is a no-op — the mock has no real PR to open in a browser.
+func (Adapter) Open(integration.WorkspaceRef) error { return nil }
+
+func mockForgeState(cwd string) integration.ForgeState {
+	if cwd == "" {
+		return integration.ForgeNone
+	}
+	data, err := os.ReadFile(MockForgeFixturePath())
+	if err != nil {
+		return integration.ForgeNone
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return integration.ForgeNone
+	}
+	return integration.ForgeState(m[cwd])
+}

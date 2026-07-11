@@ -1,0 +1,299 @@
+# acme-platform — DevOps org demo/test scenario for the atelier sandbox.
+#
+# ~10 real git repos, several with multiple worktrees, every workspace
+# window carrying an agent recap ("summary"). A mix of states:
+#   - attention (⏺): agent finished while you were away
+#   - forge PR badge (open/draft/merged/closed) via the github integration
+#
+# Everything becomes REAL: git repos with real commits + a local bare
+# origin (so `git fetch` freshness works), real worktrees, real uncommitted
+# edits, real ahead/behind divergence. Only the workspace recap/attention/
+# PR-state values are pre-seeded atelier state — no live agent runs. The
+# sandbox configures ai = "mock" so M-n works offline.
+#
+# Copy + edit + launch:  go run ./sandbox --scenario /path/to/your.yaml
+
+name: acme-platform
+description: "DevOps org: helm, terraform, argocd, k8s, docker, ansible, observability, catalog, CI"
+
+# Land on a workspace WITHOUT attention so attention badges are revealed
+# via M-s rather than landed on.
+lastActive: acme-platform/service-catalog
+
+repos:
+  # === helm-charts — 2 worktrees ===========================================
+  - slug: acme-platform/helm-charts
+    files:
+      README.md: "# helm-charts\n\nUmbrella Helm charts for the acme platform.\n"
+      charts/redis/values.yaml: "replicaCount: 3\nimage:\n  tag: \"7.2.4\"\n"
+      charts/ingress-nginx/Chart.yaml: "name: ingress-nginx\nversion: 0.3.0\ndependencies:\n  - name: ingress-nginx\n    version: \"4.11.2\"\n"
+    worktrees:
+      - branch: feat/bump-ingress-nginx
+        commits:
+          - message: "feat: bump ingress-nginx 4.11.2 -> 4.12.1"
+            files:
+              charts/ingress-nginx/Chart.yaml: "name: ingress-nginx\nversion: 0.3.0\ndependencies:\n  - name: ingress-nginx\n    version: \"4.12.1\"\n"
+        dirty:
+          charts/redis/values.yaml: "replicaCount: 5\nimage:\n  tag: \"7.2.4\"\n"
+      - branch: feat/redis-pdb
+
+  # === terraform-infra — default branch + 1 worktree, diverged ============
+  - slug: acme-platform/terraform-infra
+    files:
+      README.md: "# terraform-infra\n\nVPC, EKS, IRSA. State in S3.\n"
+      eks.tf: "module \"eks\" {\n  cluster_version = \"1.29\"\n  desired_size    = 3\n}\n"
+    originCommits:
+      - message: "docs: on-call runbook note"
+        files:
+          README.md: "# terraform-infra\n\nVPC, EKS, IRSA. State in S3.\n\n> runbook: docs/runbook.md\n"
+    localCommits:
+      - message: "feat: scale node group to 4"
+        files:
+          eks.tf: "module \"eks\" {\n  cluster_version = \"1.29\"\n  desired_size    = 4\n}\n"
+      - message: "feat: raise node group max to 9"
+        files:
+          eks.tf: "module \"eks\" {\n  cluster_version = \"1.29\"\n  desired_size    = 4\n  max_size        = 9\n}\n"
+    worktrees:
+      - branch: feat/eks-1-30-upgrade
+        dirty:
+          eks.tf: "module \"eks\" {\n  cluster_version = \"1.30\"\n  desired_size    = 4\n  max_size        = 9\n}\n"
+
+  # === gitops-argocd — 2 worktrees =========================================
+  - slug: acme-platform/gitops-argocd
+    files:
+      README.md: "# gitops-argocd\n\nArgo CD app-of-apps.\n"
+      apps/root.yaml: "kind: Application\nmetadata:\n  name: root\n  annotations:\n    argocd.argoproj.io/sync-wave: \"0\"\n"
+    worktrees:
+      - branch: chore/sync-wave-annotations
+      - branch: fix/drift-detection
+        dirty:
+          apps/root.yaml: "kind: Application\nmetadata:\n  name: root\n  annotations:\n    argocd.argoproj.io/sync-wave: \"0\"\n    argocd.argoproj.io/compare-options: IgnoreExtraneous\n"
+
+  # === platform-scripts — soft-closed worktree for M-r =====================
+  - slug: acme-platform/platform-scripts
+    files:
+      README.md: "# platform-scripts\n\nBash + CI glue.\n"
+      ci/cache-key.sh: "#!/usr/bin/env bash\nhash=\"$(cat go.sum 2>/dev/null | shasum | cut -d' ' -f1)\"\necho \"acme-ci-${hash:-none}\"\n"
+    worktrees:
+      - branch: fix/ci-cache-key
+        commits:
+          - message: "fix: sha256 cache key to avoid collisions"
+            files:
+              ci/cache-key.sh: "#!/usr/bin/env bash\nhash=\"$(cat go.sum 2>/dev/null | shasum -a 256 | cut -d' ' -f1)\"\necho \"acme-ci-${hash:-none}\"\n"
+        softClosed: true
+
+  # === k8s-manifests =======================================================
+  - slug: acme-platform/k8s-manifests
+    files:
+      README.md: "# k8s-manifests\n\nKustomize bases + overlays.\n"
+      base/deployment.yaml: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n"
+    worktrees:
+      - branch: feat/kustomize-overlays
+        dirty:
+          overlays/staging/kustomization.yaml: "resources:\n  - ../../base\nreplicas:\n  - name: api\n    count: 2\n"
+
+  # === docker-images — diverged (base image CVE) ===========================
+  - slug: acme-platform/docker-images
+    files:
+      README.md: "# docker-images\n\nBase + service images.\n"
+      base/Dockerfile: "FROM debian:12.5-slim\nRUN apt-get update && apt-get install -y ca-certificates\n"
+    originCommits:
+      - message: "chore: security team pinned base to 12.6"
+        files:
+          base/Dockerfile: "FROM debian:12.6-slim\nRUN apt-get update && apt-get install -y ca-certificates\n"
+    worktrees:
+      - branch: chore/base-image-cve
+        dirty:
+          base/Dockerfile: "FROM debian:12.6-slim\nRUN apt-get update && apt-get install -y ca-certificates tzdata\n"
+
+  # === ansible-playbooks ===================================================
+  - slug: acme-platform/ansible-playbooks
+    files:
+      README.md: "# ansible-playbooks\n\nNode provisioning + hardening.\n"
+      site.yml: "- hosts: all\n  roles:\n    - common\n"
+    worktrees:
+      - branch: feat/node-hardening
+
+  # === observability-stack — 2 worktrees ===================================
+  - slug: acme-platform/observability-stack
+    files:
+      README.md: "# observability-stack\n\nPrometheus + Grafana + Alertmanager.\n"
+      prometheus/rules.yaml: "groups:\n  - name: slo\n    rules: []\n"
+    worktrees:
+      - branch: feat/slo-alerts
+        dirty:
+          prometheus/rules.yaml: "groups:\n  - name: slo\n    rules:\n      - alert: ApiErrorBudgetBurn\n        expr: job:slo_errors:ratio > 0.02\n"
+      - branch: chore/grafana-dashboards
+
+  # === service-catalog =====================================================
+  - slug: acme-platform/service-catalog
+    files:
+      README.md: "# service-catalog\n\nBackstage catalog entries.\n"
+      catalog-info.yaml: "apiVersion: backstage.io/v1alpha1\nkind: Component\nmetadata:\n  name: api\n"
+
+  # === ci-pipelines ========================================================
+  - slug: acme-platform/ci-pipelines
+    files:
+      README.md: "# ci-pipelines\n\nReusable GitHub Actions workflows.\n"
+      .github/workflows/e2e.yml: "name: e2e\non: [pull_request]\njobs:\n  e2e:\n    runs-on: ubuntu-latest\n"
+    worktrees:
+      - branch: fix/flaky-e2e
+        dirty:
+          .github/workflows/e2e.yml: "name: e2e\non: [pull_request]\njobs:\n  e2e:\n    runs-on: ubuntu-latest\n    steps:\n      - run: go test -count=1 -race ./...\n"
+
+# Workspaces: one session per repo. Multi-worktree repos get multi-window
+# sessions. Every window has a recap. `attention: true` = ⏺ badge; `pr:`
+# seeds the forge PR badge (open/draft/merged/closed).
+workspaces:
+  - session: acme-platform/helm-charts
+    repoSlug: acme-platform/helm-charts
+    kind: worktree
+    createdAt: 9m
+    windows:
+      - name: feat/bump-ingress-nginx
+        branch: feat/bump-ingress-nginx
+        worktree: feat/bump-ingress-nginx
+        tag: platform
+        attention: true
+        recap: "bumped ingress-nginx 4.11->4.12, values drift in staging"
+        recapAge: 8m
+        pr: open
+      - name: feat/redis-pdb
+        branch: feat/redis-pdb
+        worktree: feat/redis-pdb
+        createdAt: 24m
+        recap: "drafted redis PodDisruptionBudget, needs maxUnavailable review"
+        recapAge: 22m
+        pr: draft
+
+  - session: acme-platform/terraform-infra
+    repoSlug: acme-platform/terraform-infra
+    kind: worktree
+    createdAt: 2m
+    windows:
+      - name: main
+        branch: main
+        recap: "reviewing node group scale-up plan, 2 to change"
+        recapAge: 5m
+      - name: feat/eks-1-30-upgrade
+        branch: feat/eks-1-30-upgrade
+        worktree: feat/eks-1-30-upgrade
+        createdAt: 16m
+        tag: infra
+        attention: true
+        recap: "eks 1.29->1.30 plan clean, awaiting apply approval"
+        recapAge: 14m
+        pr: open
+
+  - session: acme-platform/gitops-argocd
+    repoSlug: acme-platform/gitops-argocd
+    kind: worktree
+    createdAt: 40m
+    windows:
+      - name: chore/sync-wave-annotations
+        branch: chore/sync-wave-annotations
+        worktree: chore/sync-wave-annotations
+        tag: platform
+        recap: "normalized sync-waves so CRDs apply first, lint clean"
+        recapAge: 35m
+        pr: merged
+      - name: fix/drift-detection
+        branch: fix/drift-detection
+        worktree: fix/drift-detection
+        createdAt: 13m
+        attention: true
+        recap: "added IgnoreExtraneous, still 3 objects drifting in prod"
+        recapAge: 11m
+        pr: open
+
+  - session: acme-platform/platform-scripts
+    repoSlug: acme-platform/platform-scripts
+    kind: worktree
+    createdAt: 3h
+    windows:
+      - name: main
+        branch: main
+        recap: "audited release-tag script, no changes needed"
+        recapAge: 2h
+
+  - session: acme-platform/k8s-manifests
+    repoSlug: acme-platform/k8s-manifests
+    kind: worktree
+    createdAt: 25m
+    windows:
+      - name: feat/kustomize-overlays
+        branch: feat/kustomize-overlays
+        worktree: feat/kustomize-overlays
+        recap: "split staging/prod overlays, staging replicas=2"
+        recapAge: 18m
+        pr: closed
+
+  - session: acme-platform/docker-images
+    repoSlug: acme-platform/docker-images
+    kind: worktree
+    createdAt: 55m
+    windows:
+      - name: chore/base-image-cve
+        branch: chore/base-image-cve
+        worktree: chore/base-image-cve
+        tag: infra
+        attention: true
+        recap: "patched base to debian 12.6 + tzdata, rebuild pending"
+        recapAge: 6m
+        pr: open
+
+  - session: acme-platform/ansible-playbooks
+    repoSlug: acme-platform/ansible-playbooks
+    kind: worktree
+    createdAt: 1h
+    windows:
+      - name: feat/node-hardening
+        branch: feat/node-hardening
+        worktree: feat/node-hardening
+        recap: "adding CIS hardening role, sshd + auditd tasks drafted"
+        recapAge: 48m
+
+  - session: acme-platform/observability-stack
+    repoSlug: acme-platform/observability-stack
+    kind: worktree
+    createdAt: 20m
+    windows:
+      - name: feat/slo-alerts
+        branch: feat/slo-alerts
+        worktree: feat/slo-alerts
+        tag: observability
+        attention: true
+        recap: "wrote error-budget burn alert, needs threshold tuning"
+        recapAge: 9m
+        pr: draft
+      - name: chore/grafana-dashboards
+        branch: chore/grafana-dashboards
+        worktree: chore/grafana-dashboards
+        createdAt: 32m
+        recap: "imported RED dashboards as code, wiring datasources"
+        recapAge: 30m
+        pr: merged
+
+  - session: acme-platform/service-catalog
+    repoSlug: acme-platform/service-catalog
+    kind: worktree
+    createdAt: 12m
+    windows:
+      - name: main
+        branch: main
+        recap: "backfilling ownership on 6 components, 2 left"
+        recapAge: 7m
+
+  - session: acme-platform/ci-pipelines
+    repoSlug: acme-platform/ci-pipelines
+    kind: worktree
+    createdAt: 4m
+    windows:
+      - name: fix/flaky-e2e
+        branch: fix/flaky-e2e
+        worktree: fix/flaky-e2e
+        tag: ci
+        attention: true
+        recap: "added -race -count=1, reproducing the flaky e2e locally"
+        recapAge: 3m
+        pr: open
