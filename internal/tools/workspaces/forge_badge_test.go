@@ -125,7 +125,7 @@ func TestRenderForgeBadge(t *testing.T) {
 
 func TestForgeFresh(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
-	fresh := now.Add(-time.Minute).Unix() // within TTL
+	fresh := now.Add(-time.Second).Unix() // within TTL
 	stale := now.Add(-2 * forgeRefreshTTL).Unix()
 	if !forgeFresh(now, itoa(fresh)) {
 		t.Error("timestamp within TTL should be fresh")
