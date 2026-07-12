@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/vyrwu/atelier/compare/v0.2.1...v0.3.0) (2026-07-12)
+
+
+### Features
+
+* **kernel:** single-binary kernel with adapter ports ([#16](https://github.com/vyrwu/atelier/issues/16)) ([4f04dca](https://github.com/vyrwu/atelier/commit/4f04dca40f1557ac8cbb08bb7946da8c6474c842))
+* **statusline:** forge PR badge after attention ([#22](https://github.com/vyrwu/atelier/issues/22)) ([6830b94](https://github.com/vyrwu/atelier/commit/6830b9431b026df63e05eb21917c99d59ddab058))
+* **workspaces:** forge badge TTL 5m→1m ([#19](https://github.com/vyrwu/atelier/issues/19)) ([3e60bc5](https://github.com/vyrwu/atelier/commit/3e60bc5776b4d04ed1a63c72bb97bb5198337ca0))
+* **workspaces:** recap under name in M-s picker ([#21](https://github.com/vyrwu/atelier/issues/21)) ([78243ab](https://github.com/vyrwu/atelier/commit/78243abeac66efa4af3c0bf0fd2fbe3253760952))
+
+
+### Bug fixes
+
+* **claude:** Resume respawned sessions over stale prompt ([#20](https://github.com/vyrwu/atelier/issues/20)) ([26406e9](https://github.com/vyrwu/atelier/commit/26406e9b1b03888ee38b47a65fa3ab7a72e921f1))
+* **workspaces:** stop flaky ai.prompt loss in e2e ([#23](https://github.com/vyrwu/atelier/issues/23)) ([e919576](https://github.com/vyrwu/atelier/commit/e9195764422f9966cb9f934ad4ba8d816c8203e8))
+
 ## [0.2.1](https://github.com/vyrwu/atelier/compare/v0.2.0...v0.2.1) (2026-07-08)
 
 
