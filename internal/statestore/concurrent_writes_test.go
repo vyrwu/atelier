@@ -94,6 +94,75 @@ func TestConcurrentWrites_DoNotClobberEachOther(t *testing.T) {
 	}
 }
 
+// TestConcurrentWrites_RemoveRenameDoNotClobberMetadata is the
+// regression lock for the ai.prompt loss: RemoveWindow and
+// RenameWindow used to do an UNLOCKED load→mutate→save. When they ran
+// concurrently with a locked UpdateWindow (as RegisterCreatedWorkspace
+// does when persisting a fresh window's ai.prompt/ai.workspace_kind),
+// the unlocked writer's stale-read save clobbered the metadata — the
+// window kept its keys but lost their values (map[ai.prompt: ...]).
+//
+// We loop many rounds because the clobber is timing-dependent: one
+// round only fails ~half the time, but across 40 rounds the pre-fix
+// code loses the metadata essentially every run. With both mutators
+// under withWriteLock, it never does.
+func TestConcurrentWrites_RemoveRenameDoNotClobberMetadata(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	const rounds = 40
+	for r := 0; r < rounds; r++ {
+		// Fresh state each round: the metadata target plus two decoy
+		// windows the unlocked writers churn (a rename source and a
+		// removal victim), all doing a full-state read-modify-write.
+		if err := Save(&State{
+			Workspaces: []Workspace{{
+				SessionName: "ws/test",
+				RepoPath:    "/tmp/fake",
+				Kind:        "worktree",
+				Windows: []Window{
+					{Name: "keep"},
+					{Name: "old"},
+					{Name: "victim"},
+				},
+			}},
+		}); err != nil {
+			t.Fatalf("round %d seed: %v", r, err)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(3)
+		// Locked writer: persist the window's metadata (the value that
+		// must survive) — mirrors RegisterCreatedWorkspace.
+		go func() {
+			defer wg.Done()
+			_ = UpdateWindow("ws/test", "keep", func(w *Window) {
+				if w.Metadata == nil {
+					w.Metadata = map[string]string{}
+				}
+				w.Metadata["ai.prompt"] = "describe the task"
+				w.Metadata["ai.workspace_kind"] = "worktree"
+			})
+		}()
+		// Formerly-unlocked writers doing full-state RMW concurrently.
+		go func() { defer wg.Done(); _ = RenameWindow("ws/test", "old", "new") }()
+		go func() { defer wg.Done(); _ = RemoveWindow("ws/test", "victim") }()
+		wg.Wait()
+
+		state, err := Load()
+		if err != nil || state == nil {
+			t.Fatalf("round %d load: %v %v", r, state, err)
+		}
+		w := state.FindWindow("ws/test", "keep")
+		if w == nil {
+			t.Fatalf("round %d: window 'keep' vanished: %+v", r, state.Workspaces)
+		}
+		if w.Metadata["ai.prompt"] != "describe the task" ||
+			w.Metadata["ai.workspace_kind"] != "worktree" {
+			t.Fatalf("round %d: metadata clobbered by unlocked writer: %+v", r, w.Metadata)
+		}
+	}
+}
+
 // TestConcurrentWrites_HighContention exercises the lock under
 // real contention: many goroutines all updating LastSeen on the
 // same workspace. The final value should equal the LAST writer's

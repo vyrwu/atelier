@@ -451,61 +451,75 @@ func RemoveSession(sessionName string) error {
 // RemoveWindow drops one window from a workspace. If the workspace ends
 // up with zero windows, it's removed entirely (an empty session is
 // meaningless to restore).
+//
+// Holds the write lock across load→mutate→save like every other
+// mutator: without it, this read-modify-write interleaves with a
+// concurrent locked write (e.g. RegisterCreatedWorkspace's UpdateWindow)
+// and the stale-read save clobbers the other writer's mutations —
+// e.g. a freshly-persisted window's ai.prompt metadata silently lost.
 func RemoveWindow(sessionName, windowName string) error {
 	debuglog.Logf("statestore.RemoveWindow: session=%q window=%q path=%s", sessionName, windowName, Path())
-	s, err := Load()
-	if err != nil {
-		return err
-	}
-	if s == nil {
-		return nil
-	}
-	for i := range s.Workspaces {
-		ws := &s.Workspaces[i]
-		if ws.SessionName != sessionName {
-			continue
+	return withWriteLock(Path(), func() error {
+		s, err := Load()
+		if err != nil {
+			return err
 		}
-		out := ws.Windows[:0]
-		for _, w := range ws.Windows {
-			if w.Name != windowName {
-				out = append(out, w)
+		if s == nil {
+			return nil
+		}
+		for i := range s.Workspaces {
+			ws := &s.Workspaces[i]
+			if ws.SessionName != sessionName {
+				continue
 			}
+			out := ws.Windows[:0]
+			for _, w := range ws.Windows {
+				if w.Name != windowName {
+					out = append(out, w)
+				}
+			}
+			ws.Windows = out
+			// Drop the now-empty workspace inline rather than calling
+			// RemoveSession — that re-enters withWriteLock on the same
+			// lockfile and would self-deadlock.
+			if len(ws.Windows) == 0 {
+				s.Workspaces = append(s.Workspaces[:i], s.Workspaces[i+1:]...)
+			}
+			break
 		}
-		ws.Windows = out
-		if len(ws.Windows) == 0 {
-			return RemoveSession(sessionName)
-		}
-		break
-	}
-	return Save(s)
+		return Save(s)
+	})
 }
 
 // RenameWindow updates a window's Name in place. Called by the
-// window-renamed hook.
+// window-renamed hook. Holds the write lock across load→mutate→save
+// (see RemoveWindow) so a concurrent locked write isn't clobbered.
 func RenameWindow(sessionName, oldName, newName string) error {
 	if oldName == newName {
 		return nil
 	}
-	s, err := Load()
-	if err != nil {
-		return err
-	}
-	if s == nil {
-		return nil
-	}
-	for i := range s.Workspaces {
-		ws := &s.Workspaces[i]
-		if ws.SessionName != sessionName {
-			continue
+	return withWriteLock(Path(), func() error {
+		s, err := Load()
+		if err != nil {
+			return err
 		}
-		for j := range ws.Windows {
-			if ws.Windows[j].Name == oldName {
-				ws.Windows[j].Name = newName
-				return Save(s)
+		if s == nil {
+			return nil
+		}
+		for i := range s.Workspaces {
+			ws := &s.Workspaces[i]
+			if ws.SessionName != sessionName {
+				continue
+			}
+			for j := range ws.Windows {
+				if ws.Windows[j].Name == oldName {
+					ws.Windows[j].Name = newName
+					return Save(s)
+				}
 			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // FindWindow returns the Window record for a given (session, window)
