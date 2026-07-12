@@ -10,7 +10,7 @@ import (
 var Manifest = &manifest.Manifest{
 	Tool:          true,
 	Name:          "pg",
-	Description:   "Postgres tools (pgcli + pgcenter, singleton popups)",
+	Description:   "Postgres (pgcli, singleton popup)",
 	Popup:         manifest.KindGlobal,
 	PrimaryInvoke: "pgcli",
 	Binding: &manifest.Binding{
@@ -32,7 +32,6 @@ var Manifest = &manifest.Manifest{
 // AddCommands wires pg's subcommands onto the dispatch root.
 func AddCommands(root *cobra.Command) {
 	root.AddCommand(PgcliCommand())
-	root.AddCommand(PgcenterCommand())
 	root.AddCommand(SwitchCommand())
 	root.AddCommand(ContextsCommand())
 	root.AddCommand(LaunchCommand())

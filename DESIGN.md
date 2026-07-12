@@ -147,7 +147,7 @@ atelier/
 │       ├── workspaces/      # kernel view: creator/selector/history + forge-badge slot
 │       ├── toolselector/    # kernel view: M-; tool picker
 │       ├── k8s/             # built-in tool: k9s context+auth picker
-│       ├── pg/              # built-in tool: pgcli/pgcenter picker
+│       ├── pg/              # built-in tool: pgcli picker
 │       └── ...
 ├── tmux-plugin/             # TPM entry, bootstrap script
 ├── flake.nix
@@ -248,7 +248,7 @@ subprocess boundary. `Popup` classifies the backing-session lifecycle:
 - **workspace** — popup session per parent window; dies when the window
   dies (Claude, popup shell, lazygit)
 - **global** — singleton backing session across all workspaces (k9s,
-  pgcli, pgcenter)
+  pgcli)
 - **none** — no persistent popup (pickers, providers)
 
 `Provides` declares capability slots the tool fills beyond the ones
