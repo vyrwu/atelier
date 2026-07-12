@@ -1,6 +1,37 @@
 package cli
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/vyrwu/atelier/internal/integration"
+)
+
+// TestFormatForgeIcon locks in the status-line forge segment: each
+// renderable state produces its kernel-owned glyph wrapped in tmux
+// #[fg=colourN] codes; ForgeNone/unknown/blank render nothing so the
+// slot is simply absent. The expected glyph+color come from
+// integration.ForgeGlyph so this test and the renderer can't drift.
+func TestFormatForgeIcon(t *testing.T) {
+	for _, st := range []integration.ForgeState{
+		integration.ForgeOpen, integration.ForgeDraft,
+		integration.ForgeMerged, integration.ForgeClosed,
+	} {
+		glyph, color, _ := integration.ForgeGlyph(st)
+		want := " #[fg=colour" + color + "]" + glyph + "#[default]"
+		if got := formatForgeIcon(string(st)); got != want {
+			t.Errorf("formatForgeIcon(%q) = %q, want %q", st, got, want)
+		}
+	}
+	for _, s := range []string{"", "   ", "bogus", string(integration.ForgeNone)} {
+		if got := formatForgeIcon(s); got != "" {
+			t.Errorf("formatForgeIcon(%q) = %q, want empty", s, got)
+		}
+	}
+	// Surrounding whitespace is trimmed before the state lookup.
+	if got := formatForgeIcon("  open  "); got == "" {
+		t.Error(`formatForgeIcon("  open  ") should render (whitespace-trimmed)`)
+	}
+}
 
 func TestParsePopupParent_WorkspaceScoped(t *testing.T) {
 	sid, wid, ok := parsePopupParent("_atelier_claude_5_3")

@@ -154,7 +154,7 @@ run-shell -b 'atelier popup cleanup --startup'
 
 // StatuslineBlock returns the statusline wiring block.
 //
-// Two per-window segments are appended to the window-status format:
+// Per-window segments are appended to the window-status format:
 //
 //  1. Freshness icon (FR-7) — shows ✓ / ↓N / ↑N / ↓N↑M / ⚠ for git
 //     workspaces. Empty for foreign (non-git) sessions.
@@ -162,12 +162,15 @@ run-shell -b 'atelier popup cleanup --startup'
 //  2. Attention rollup — global ⏺ count of windows flagged for
 //     attention (Claude Stop hook fires on a non-attached popup).
 //
-// Order matters: freshness comes BEFORE attention so the layout reads
-// `<window-name> <freshness> ⏺<n>` — local sync state next to the
-// window, global attention to the right. Both segments are appended
-// to BOTH window-status-format and window-status-current-format so the
-// freshness icon shows on every window in the bar, not only the active
-// one.
+//  3. Forge PR badge — the current window's cached @forge_state as a
+//     colored PR glyph (open/draft/merged/closed). Empty when the
+//     workspace has no PR or no forge integration is configured.
+//
+// Order matters: the layout reads `<window-name> <freshness> ⏺<n> <PR>`
+// — local sync state next to the window, then global attention, then
+// the current workspace's forge status. Freshness is appended to BOTH
+// window-status-format and window-status-current-format so it shows on
+// every window; attention + forge only decorate the current window.
 func StatuslineBlock() string {
 	return `# --- statusline ---
 set -g status-interval 3

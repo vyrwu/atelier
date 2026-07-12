@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
+	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
@@ -21,7 +22,59 @@ func StatusCommand() *cobra.Command {
 	}
 	c.AddCommand(attentionStatusCmd())
 	c.AddCommand(freshnessStatusCmd())
+	c.AddCommand(forgeStatusCmd())
 	return c
+}
+
+// forgeStatusCmd is the per-window forge (PR) badge emitter. Invoked from
+// window-status-current-format with the window's cached @forge_state inlined
+// via tmux's #{...} expansion:
+//
+//	set -ag window-status-current-format "#(atelier status forge '#{@forge_state}')"
+//
+// Outputs the state's colored glyph, or empty when the window has no forge
+// item (ForgeNone) or no forge integration is configured. Sits AFTER the
+// attention rollup in the current-window format.
+//
+// @forge_state is populated/refreshed by the forge-refresh path
+// (workspace.SpawnForgeRefresh, fired at each workspace-land event and on
+// picker open); this emitter only renders the cached value.
+func forgeStatusCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:    forgeEmitter + " <forge_state>",
+		Short:  "Per-window forge (PR) badge for window-status-current-format",
+		Hidden: true,
+		// Best-effort: an empty/absent @forge_state must render nothing,
+		// never error — this runs on every status redraw.
+		Args: cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			state := ""
+			if len(args) > 0 {
+				state = args[0]
+			}
+			if out := formatForgeIcon(state); out != "" {
+				fmt.Fprint(cmd.OutOrStdout(), out)
+			}
+		},
+	}
+	return c
+}
+
+// formatForgeIcon renders the status-line forge (PR) segment from a window's
+// cached @forge_state. Pure helper for unit testing.
+//
+//	Empty        — no forge item (ForgeNone) or forge integration absent
+//	 <glyph>     — open (green) / draft (grey) / merged (purple) / closed (red)
+//
+// Leading space so it doesn't kiss the segment before it. Uses the
+// kernel-owned glyph + 256-color spec (integration.ForgeGlyph) so the
+// status-line badge matches the picker badge exactly.
+func formatForgeIcon(state string) string {
+	glyph, color, ok := integration.ForgeGlyph(integration.ForgeState(strings.TrimSpace(state)))
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(" #[fg=colour%s]%s#[default]", color, glyph)
 }
 
 // freshnessStatusCmd is the per-window sync-state emitter (FR-7).

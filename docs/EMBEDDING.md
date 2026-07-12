@@ -1,6 +1,6 @@
 # Embedding atelier into your tmux statusline
 
-This is the load-bearing integration doc. Atelier exposes two
+This is the load-bearing integration doc. Atelier exposes three
 shell-runnable data emitters as its **public statusline API**. You
 plug them into your tmux `window-status-format` (or anywhere else
 that accepts `#(...)` shell-out) to surface atelier's per-workspace
@@ -11,7 +11,7 @@ already wired for you. Everyone else: this is how.
 
 ---
 
-## The two emitters
+## The three emitters
 
 Both are subcommands of the `atelier` binary. They print to stdout
 and exit 0 in all states (so tmux `#(...)` never produces noise).
@@ -64,6 +64,34 @@ clears automatically when the user opens that window (via
 `after-select-window` hook) or attaches to its popup (via
 `client-session-changed` hook).
 
+### `atelier status forge '<forge_state>'`
+
+Renders the workspace's code-forge (PR/MR) status as a colored Nerd
+Font glyph. The single argument is the window's cached `@forge_state`,
+classified by the active forge adapter (GitHub, …) and refreshed in the
+background (`SpawnForgeRefresh`) on every workspace-land event and on
+picker open. When no forge integration is configured the option is
+unset and the emitter renders nothing.
+
+| Argument | Source | Type |
+|---|---|---|
+| `forge_state` | `#{@forge_state}` | one of `open` / `draft` / `merged` / `closed` (empty = no PR) |
+
+**Output shapes** — each state renders a distinct Nerd Font v3 Codicon
+(shared with the picker badge), reinforced by a 256-palette color that
+resolves against the user's theme:
+
+| State | Glyph (Codicon) | Output |
+|---|---|---|
+| No PR / no forge integration (`forge_state` empty) | — | `` (empty) |
+| Open PR | git-pull-request `U+EA64` | ` #[fg=colour35]<glyph>#[default]` (green) |
+| Draft PR | git-pull-request-draft `U+EBDB` | ` #[fg=colour244]<glyph>#[default]` (grey) |
+| Merged | git-merge `U+EAFE` | ` #[fg=colour141]<glyph>#[default]` (purple) |
+| Closed | git-pull-request-closed `U+EBDA` | ` #[fg=colour203]<glyph>#[default]` (red) |
+
+The glyph + color come from the kernel-owned spec (`integration.ForgeGlyph`),
+so this status-line badge and the workspace picker's badge always match.
+
 ---
 
 ## Worked examples
@@ -76,32 +104,34 @@ Add to your `~/.config/tmux/tmux.conf` after sourcing atelier:
 run-shell 'atelier init --bare | tmux source-file -'
 
 # Show only the active window in the status bar, with atelier's
-# freshness icon next to the window name and the attention rollup
-# at the end.
-set -g window-status-current-format "#W #(atelier status freshness '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')#(atelier status attention count)"
+# freshness icon next to the window name, then the attention rollup,
+# then the forge PR badge.
+set -g window-status-current-format "#W #(atelier status freshness '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')#(atelier status attention count)#(atelier status forge '#{@forge_state}')"
 ```
 
 ### Idempotent stamping (recommended)
 
-Hand-writing the freshness emitter into your format gets tedious.
-Atelier ships a stamp command that injects the canonical pair after
+Hand-writing the emitters into your format gets tedious. Atelier
+ships a stamp command that injects the canonical segments after
 `#W` in your existing format:
 
 ```tmux
 run-shell 'atelier init --bare | tmux source-file -'
 
 # Set whatever format you want. Atelier's stamp-statusline (run via
-# init) will inject the freshness + attention segments AFTER `#W`
-# and before any other content. Safe to re-source the config any
-# number of times — the stamp strips prior injections before
-# adding the canonical pair.
+# init) will inject the freshness + attention + forge segments
+# AFTER `#W` and before any other content. Safe to re-source the
+# config any number of times — the stamp strips prior injections
+# before adding the canonical segments.
 set -g window-status-current-format "#W"
 ```
 
 The stamp regex matches and strips any prior `#(atelier status
-(freshness|attention)...)` injection, then re-injects the canonical
-pair AFTER `#W` and any trailing color/glyph blocks (so the icon
-lands in the right segment of a powerline-style format).
+(freshness|attention|forge)...)` injection, then re-injects the
+canonical segments AFTER `#W` and any trailing color/glyph blocks (so
+the icons land in the right segment of a powerline-style format).
+(`window-status-format`, for inactive windows, gets only the freshness
+segment; attention and forge decorate the current window.)
 
 ### Powerline-style
 
@@ -117,7 +147,7 @@ run-shell 'atelier init --bare | tmux source-file -'
 
 Final format (after stamp):
 ```
-#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]#(atelier status freshness …)#(atelier status attention count)
+#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]#(atelier status freshness …)#(atelier status attention count)#(atelier status forge '#{@forge_state}')
 ```
 
 ### Dracula
@@ -143,6 +173,10 @@ emitters:
 - `@needs_attention` — set by the Claude integration's Stop hook on
   Claude session completion; cleared by atelier's `after-select-window`
   and `client-session-changed` hooks.
+- `@forge_state` — set by the forge-refresh worker
+  (`SpawnForgeRefresh`), which classifies each workspace's PR/MR via
+  the active forge adapter. Fires on every workspace-land event and on
+  picker open; per-window TTL throttles the underlying forge queries.
 
 All four atelier hooks (`window-unlinked`, `session-closed`,
 `after-select-window`, `client-session-changed`) are emitted by
@@ -152,16 +186,19 @@ All four atelier hooks (`window-unlinked`, `session-closed`,
 
 ## Performance
 
-Both emitters are fast and side-effect-free:
+All three emitters are fast and side-effect-free:
 
 - `freshness` is a pure function — no subprocess, no tmux call,
   just arg-to-output string mapping.
+- `forge` is likewise pure — it maps the pre-cached `@forge_state`
+  argument to a glyph. The forge query happens out-of-band in the
+  refresh worker, never in the emitter.
 - `attention count` does one `tmux list-windows -a` (~5ms typical)
   and counts matching lines.
 
 tmux invokes `#(...)` shell-outs once per `status-interval` (default
 15s; atelier sets it to 3s in its `StatuslineBlock`). 8 windows ×
-0.3 Hz × 2 emitters = ~5 invocations/second. Trivial.
+0.3 Hz × 3 emitters = ~8 invocations/second. Trivial.
 
 ---
 

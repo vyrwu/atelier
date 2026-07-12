@@ -44,6 +44,30 @@ const (
 	ForgeClosed ForgeState = "closed" // closed without merge
 )
 
+// forgeGlyphs is the kernel-owned glyph + 256-color palette index for each
+// renderable forge state. Single source of truth so the picker badge (ANSI)
+// and the status-line segment (tmux #[fg=colourN]) render identically. Uses
+// the Codicon git-pull-request family — centered on the monospace baseline
+// (Octicons render low in some fonts) — with a DISTINCT glyph AND color per
+// state: open=pull-request/green, draft=pull-request-draft/grey,
+// merged=git-merge/purple, closed=pull-request-closed/red. ForgeNone/unknown
+// has no entry — the slot is simply absent.
+var forgeGlyphs = map[ForgeState]struct{ Glyph, Color string }{
+	ForgeOpen:   {"\uea64", "35"},  // codicon git-pull-request, green
+	ForgeDraft:  {"\uebdb", "244"}, // codicon git-pull-request-draft, grey
+	ForgeMerged: {"\ueafe", "141"}, // codicon git-merge, purple
+	ForgeClosed: {"\uebda", "203"}, // codicon git-pull-request-closed, red
+}
+
+// ForgeGlyph returns the Nerd Font glyph and 256-color palette index for a
+// forge state. ok is false for ForgeNone or any unknown state, which callers
+// render as an absent badge. Pure; the KERNEL owns this mapping (adapters
+// classify state, they never render).
+func ForgeGlyph(state ForgeState) (glyph, color string, ok bool) {
+	spec, ok := forgeGlyphs[state]
+	return spec.Glyph, spec.Color, ok
+}
+
 // ForgeStatus is what a ForgeIntegration reports for one workspace.
 type ForgeStatus struct {
 	State ForgeState

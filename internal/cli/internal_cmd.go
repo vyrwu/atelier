@@ -199,8 +199,9 @@ func internalStampLastSeenCmd() *cobra.Command {
 }
 
 // internalStampStatuslineCmd idempotently injects atelier's
-// status-line segments (freshness icon + attention rollup) into the
-// user's window-status formats. Fired once at init time via run-shell.
+// status-line segments (freshness icon + attention rollup + forge PR
+// badge) into the user's window-status formats. Fired once at init
+// time via run-shell.
 //
 // Why this exists: the prior approach used `set -ag window-status-...`
 // (append) every init. tmux's set-ag accumulates, so each re-source of
@@ -218,7 +219,7 @@ func internalStampStatuslineCmd() *cobra.Command {
 	var socket string
 	c := &cobra.Command{
 		Use:   "stamp-statusline",
-		Short: "Idempotently inject atelier's status-line segments (freshness, attention)",
+		Short: "Idempotently inject atelier's status-line segments (freshness, attention, forge)",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			h := tmuxhost.New(socket)
 			return stampStatusline(h)
@@ -237,10 +238,12 @@ func internalStampStatuslineCmd() *cobra.Command {
 //   - freshnessSegment / attentionSegment (canonical segment builders)
 //   - status.go (cobra subcommand `Use` fields)
 //
-// If we ever add a third emitter, name it here and update the regex.
+// Adding/renaming an emitter here also updates atelierStatuslineRe (which
+// strips prior injections) since the regex is built from these consts.
 const (
 	freshnessEmitter = "freshness"
 	attentionEmitter = "attention"
+	forgeEmitter     = "forge"
 )
 
 // atelierStatuslineRe matches any of atelier's `#(...)` injections in
@@ -248,7 +251,7 @@ const (
 // we can strip prior copies before re-adding. Built from the emitter
 // const block so adding/renaming an emitter touches one location.
 var atelierStatuslineRe = regexp.MustCompile(
-	`\s*#\(atelier status (` + freshnessEmitter + `|` + attentionEmitter + `)[^)]*\)`)
+	`\s*#\(atelier status (` + freshnessEmitter + `|` + attentionEmitter + `|` + forgeEmitter + `)[^)]*\)`)
 
 // freshnessSegment / attentionSegment are the canonical atelier
 // additions. Built from the emitter consts so the regex above and
@@ -262,6 +265,12 @@ func attentionSegment() string {
 	return `#(atelier status ` + attentionEmitter + ` count)`
 }
 
+// forgeSegment renders the current window's cached @forge_state as a colored
+// PR glyph. Sits AFTER the attention rollup in window-status-current-format.
+func forgeSegment() string {
+	return `#(atelier status ` + forgeEmitter + ` '#{@forge_state}')`
+}
+
 func stampStatusline(h *tmuxhost.Client) error {
 	for _, opt := range []struct {
 		name     string
@@ -273,7 +282,7 @@ func stampStatusline(h *tmuxhost.Client) error {
 		},
 		{
 			name:     "window-status-current-format",
-			segments: []string{freshnessSegment(), attentionSegment()},
+			segments: []string{freshnessSegment(), attentionSegment(), forgeSegment()},
 		},
 	} {
 		curBytes, err := h.Run("show-options", "-gv", opt.name)

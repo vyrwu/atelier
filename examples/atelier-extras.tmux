@@ -17,8 +17,8 @@
 # │ Font) and set it as your terminal font before using this.  │
 # └────────────────────────────────────────────────────────────┘
 #
-# Atelier's freshness + attention segments are injected by
-# stamp-statusline AFTER this file is sourced, so anything you do
+# Atelier's freshness + attention + forge (PR badge) segments are
+# injected by stamp-statusline AFTER this file is sourced, so anything you do
 # to window-status-current-format here is picked up automatically —
 # you don't need to manually splice the `#(atelier status ...)`
 # bits in. They land after the window name marker (#W).

@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
+	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
@@ -81,6 +82,47 @@ func SpawnBgPull(repoPath, defaultBranch, windowID string) {
 		pid, repoPath, windowID, self)
 }
 
+// SpawnForgeRefresh fires `atelier tools workspaces _forge-refresh` detached.
+// Returns immediately; the per-window forge (PR) classification + @forge_state
+// stamping happen in the background.
+//
+// Lives in the workspace primitive (alongside SpawnBgPull) for the same
+// reason: EVERY workspace-lifecycle event that lands the user on a workspace
+// should refresh the forge badge, so the status-line forge icon populates
+// without the user having to M-s into the picker first. The subcommand
+// enumerates all windows itself, so a single spawn refreshes the whole set;
+// its per-window @forge_ts TTL keeps repeated calls from hammering the forge.
+//
+// No-op when no forge integration is configured, and in e2e test contexts
+// (the detached `gh` query would make network calls and races t.TempDir
+// cleanup — same discipline as SpawnBgPull). Best-effort: a spawn failure is
+// logged, never surfaced.
+func SpawnForgeRefresh() {
+	if strings.HasPrefix(os.Getenv("ATELIER_TMUX_SOCKET"), "atelier-test-") {
+		debuglog.Logf("workspace.SpawnForgeRefresh: SKIP (test socket)")
+		return
+	}
+	if integration.Active().Forge == nil {
+		return // no forge adapter — slot is simply absent
+	}
+	self, err := os.Executable()
+	if err != nil {
+		self = "atelier"
+	}
+	cmd := exec.Command(self, "tools", "workspaces", "_forge-refresh")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
+	// Own process group so the detached child survives the invoking
+	// process exiting (see SpawnBgPull for the SIGHUP rationale).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		debuglog.LogErr("workspace.SpawnForgeRefresh start", err)
+		return
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	debuglog.Logf("workspace.SpawnForgeRefresh: launched pid=%d self=%s", pid, self)
+}
+
 // OpenDefaultBranch is the single primitive for "land the outer
 // client on the default-branch window of a repo". Used by:
 //
@@ -135,6 +177,7 @@ func OpenDefaultBranch(
 	}
 	if defaultWid, _ := h.DisplayMessageAt(session+":"+defaultBranch, "#{window_id}"); defaultWid != "" {
 		SpawnBgPull(repoPath, defaultBranch, defaultWid)
+		SpawnForgeRefresh()
 	}
 	RegisterCreatedWorkspace(NewWorkspaceInfo{
 		Session:    session,
@@ -281,6 +324,7 @@ func CreateWorktreeWindow(h *tmuxhost.Client, spec WorktreeWindowSpec) (windowID
 	if repoPath != "" && kind != "multi-repo" {
 		if defaultBranch, err := computeDefaultBranch(repoPath); err == nil && defaultBranch != "" {
 			SpawnBgPull(repoPath, defaultBranch, windowID)
+			SpawnForgeRefresh()
 		}
 	}
 	return windowID, nil
