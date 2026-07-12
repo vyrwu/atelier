@@ -297,6 +297,12 @@ func TestCreator_BecomeRace_ParentDoesNotOverride_PromptResult(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	tmp := t.TempDir()
+	// Kill the tmux server before t.TempDir's RemoveAll (see the
+	// TestCreator_PromptFlow_MultipleClients_OuterLandsOnNewWindow note):
+	// cleanups are LIFO and testtmux.New registered srv.Kill first, so
+	// without this the still-live server's deferred Claude popup (cwd
+	// inside the worktree) races RemoveAll → "directory not empty" on Linux.
+	t.Cleanup(srv.Kill)
 	repoDir := testtmux.TestRepo(t, tmp, "vyrwu", "demo", "main")
 	srv.SetEnv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
 	srv.SetEnv("HOME", tmp)
