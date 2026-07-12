@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1](https://github.com/vyrwu/atelier/compare/v0.3.0...v0.3.1) (2026-07-12)
+
+
+### Bug fixes
+
+* **workspaces:** kill tmux before TempDir in become-race e2e ([#25](https://github.com/vyrwu/atelier/issues/25)) ([1b1897b](https://github.com/vyrwu/atelier/commit/1b1897b97c1e1cb4e4ec362e00f8f8f8bd3ac627))
+
 ## [0.3.0](https://github.com/vyrwu/atelier/compare/v0.2.1...v0.3.0) (2026-07-12)
 
 
