@@ -39,6 +39,19 @@ func New(t *testing.T) *Server {
 	}
 	socket := fmt.Sprintf("atelier-test-%s", randHex(8))
 
+	// Expose the test-socket signal to IN-PROCESS kernel calls. Several
+	// kernel paths skip work on `atelier-test-*` sockets via
+	// os.Getenv("ATELIER_TMUX_SOCKET"): workspace.Restore's bg-pull
+	// freshness warmup, the forge-badge refresh, and popup-cleanup
+	// --startup. Tests that call these in-process (e.g. workspace.Restore)
+	// otherwise DON'T see the signal — only subprocess invocations got it
+	// (via run()'s env) — so the skips never fire and bg-pull spawns a
+	// detached `git fetch` per window that outlives the killed test server.
+	// Those orphans accumulate across the suite (a real flakiness + CI
+	// resource-exhaustion source). Setting it on the test process closes
+	// the gap; t.Setenv restores it after the test (safe — no t.Parallel).
+	t.Setenv("ATELIER_TMUX_SOCKET", socket)
+
 	// Point tmux at a minimal test config file that both:
 	//   1. Prevents tmux from sourcing the developer's real
 	//      ~/.config/tmux/tmux.conf — which invokes `atelier state
