@@ -1542,7 +1542,14 @@ func runWorkspaceBuild(prompt, repo, repoPath, defaultBranch string) error {
 	popupCmd := fmt.Sprintf(
 		`sleep 0.15 && tmux display-popup%s -b rounded -S "fg=colour103" -T "#[align=centre] Claude Code " -w100%% -h99%% -y S -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'`,
 		clientArg, sidNum, widNum, wtPath, dispatch.CoreCmd("ai", "open"))
-	_, _ = h.Run("run-shell", "-b", popupCmd)
+	// Skip the deferred agent auto-open on test sockets (matching the
+	// spawnClaudeResume / openWorktreeWorkspace guards): the popup's
+	// `ai open` runs clearLaunchPrompt, which consumes the one-shot
+	// prompt and persists ai.prompt="" — that fires ~0.15s later and
+	// races the e2e test's statestore read, flakily wiping the prompt.
+	if !agentAutoOpenSkipped() {
+		_, _ = h.Run("run-shell", "-b", popupCmd)
+	}
 
 	if err := workspace.LandOuter(h, "="+session, newWid); err != nil {
 		return err
@@ -1870,7 +1877,12 @@ func runAutoSession(initialPrompt string) error {
 			initgen.PopupOptions(manifest.StyleFull, "Claude Code", false),
 			sidNum, widNum, base,
 			dispatch.CoreCmd("ai", "open"))
-		_, _ = h.Run("run-shell", "-b", popupCmd)
+		// Skip deferred auto-open on test sockets — see the runWorkspaceBuild
+		// guard: `ai open` → clearLaunchPrompt persists ai.prompt="" and
+		// races the e2e statestore read.
+		if !agentAutoOpenSkipped() {
+			_, _ = h.Run("run-shell", "-b", popupCmd)
+		}
 
 		if err := workspace.LandOuter(h, "="+name, "="+name+":1"); err != nil {
 			return err

@@ -490,16 +490,24 @@ func TestCreator_PromptFlow_SlashName_SelectsCorrectWindow(t *testing.T) {
 		t.Fatalf("outer client window=%q, want feat/auto-stub", got)
 	}
 
-	// Verify the auto-mode prompt was captured for the NEW workspace.
+	// Verify the auto-mode prompt was captured for the NEW workspace and
+	// SURVIVES on a test socket.
 	//
-	// @ai_prompt is a ONE-SHOT tmux option: the creator stamps it on the
-	// new window, then the Claude agent auto-open consumes it — reads the
-	// prompt, passes it to `claude`, and unsets the option so it can't
-	// re-fire (see claude.go OpenAgent). Asserting the live option races
-	// that async agent-open and flakes on CI (the consume wins there but
-	// not on a fast local machine). Assert the DURABLE record instead:
-	// RegisterCreatedWorkspace persists Metadata["ai.prompt"] to the state
-	// cache, which the one-shot consume does NOT clear.
+	// The creator queues a deferred agent auto-open popup; its `ai open`
+	// runs claude.clearLaunchPrompt, which consumes the one-shot prompt —
+	// it unsets the @ai_prompt window option AND persists ai.prompt="" to
+	// the DURABLE state cache (so a spent prompt can't be replayed on
+	// restore). That consume must not run under e2e: every creator
+	// auto-open site is gated by agentAutoOpenSkipped on test sockets. When
+	// a site drops that guard (as the two build-flow sites once did), the
+	// deferred popup fires ~0.15s later and wipes ai.prompt — flaky on CI,
+	// where the statestore read loses the race.
+	//
+	// The wait below makes that regression deterministic rather than
+	// timing-dependent: it outlasts the deferred popup, so an un-gated
+	// auto-open would have cleared the record before we assert. With the
+	// guards in place nothing is queued and the prompt stands.
+	time.Sleep(500 * time.Millisecond)
 	st, err := statestore.Load()
 	if err != nil || st == nil {
 		t.Fatalf("statestore.Load: st=%v err=%v", st, err)
