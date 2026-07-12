@@ -1,9 +1,9 @@
-// Package pg is atelier's pgcli / pgcenter popups — the bash-exact port
-// of tmux_pg_picker, tmux_pg_setup, tmux_pg_launch, tmux_pg_switch,
-// show_pgcli_popup, show_pgcenter_popup.
+// Package pg is atelier's pgcli popup — the bash-exact port of
+// tmux_pg_picker, tmux_pg_setup, tmux_pg_launch, tmux_pg_switch,
+// show_pgcli_popup.
 //
 // Behavior:
-//   - Two separate singleton sessions: _atelier_pgcli, _atelier_pgcenter
+//   - A singleton session: _atelier_pgcli
 //   - Picker: fzf prompt `庫 ` color 110, label ` Postgres Contexts `, one
 //     row per (context, endpoint) pair, endpoint suffix colored
 //     green(108)=read / red(168)=write / grey(103)=other.
@@ -36,23 +36,13 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-const (
-	OptActivePgcli    = "@atelier_pgcli_active"
-	OptActivePgcenter = "@atelier_pgcenter_active"
-)
+const OptActivePgcli = "@atelier_pgcli_active"
 
-var (
-	PgcliSpec = &popup.SessionGlobal{
-		Tool:        "pgcli",
-		DefaultCmd:  "pgcli",
-		Description: "Singleton pgcli popup (bash-exact)",
-	}
-	PgcenterSpec = &popup.SessionGlobal{
-		Tool:        "pgcenter",
-		DefaultCmd:  "pgcenter top",
-		Description: "Singleton pgcenter popup (bash-exact)",
-	}
-)
+var PgcliSpec = &popup.SessionGlobal{
+	Tool:        "pgcli",
+	DefaultCmd:  "pgcli",
+	Description: "Singleton pgcli popup (bash-exact)",
+}
 
 type Context struct {
 	Name      string              `yaml:"name"`
@@ -95,11 +85,6 @@ func PgcliCommand() *cobra.Command {
 	return openCommand("pgcli", PgcliSpec, OptActivePgcli)
 }
 
-// PgcenterCommand: show_pgcenter_popup port.
-func PgcenterCommand() *cobra.Command {
-	return openCommand("pgcenter", PgcenterSpec, OptActivePgcenter)
-}
-
 func openCommand(tool string, spec *popup.SessionGlobal, activeOpt string) *cobra.Command {
 	var socket string
 	c := &cobra.Command{
@@ -136,20 +121,13 @@ func openCommand(tool string, spec *popup.SessionGlobal, activeOpt string) *cobr
 
 // SwitchCommand: tmux_pg_switch port — always show picker, respawn if changed.
 func SwitchCommand() *cobra.Command {
-	var tool, socket string
+	var socket string
 	c := &cobra.Command{
 		Use:   "switch",
-		Short: "Force-pick a pg endpoint and respawn (default tool: pgcli)",
+		Short: "Force-pick a pg endpoint and respawn pgcli",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if tool == "" {
-				tool = "pgcli"
-			}
 			spec := PgcliSpec
 			activeOpt := OptActivePgcli
-			if tool == "pgcenter" {
-				spec = PgcenterSpec
-				activeOpt = OptActivePgcenter
-			}
 			ctx, role, err := pickEndpoint()
 			if err != nil {
 				if errors.Is(err, fzf.ErrCancelled) {
@@ -164,7 +142,7 @@ func SwitchCommand() *cobra.Command {
 			active, _ := h.ShowGlobalOption(activeOpt)
 			key := ctx.Name + ":" + role
 			if active != key {
-				if err := setup(h, tool, *ctx, role); err != nil {
+				if err := setup(h, "pgcli", *ctx, role); err != nil {
 					return err
 				}
 				if err := workspace.SetPersistedGlobal(h, activeOpt, key); err != nil {
@@ -174,7 +152,6 @@ func SwitchCommand() *cobra.Command {
 			return spec.EnsureAndAttach(h)
 		},
 	}
-	c.Flags().StringVar(&tool, "tool", "pgcli", "pgcli | pgcenter")
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	return c
 }
@@ -207,7 +184,7 @@ func ContextsCommand() *cobra.Command {
 func LaunchCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:    "_launch",
-		Short:  "internal: SSM fetch + URI build + exec pgcli/pgcenter (pane cmd)",
+		Short:  "internal: SSM fetch + URI build + exec pgcli (pane cmd)",
 		Hidden: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			tool := os.Getenv("PG_TOOL")
@@ -260,19 +237,6 @@ func LaunchCommand() *cobra.Command {
 					Path:   "/" + ctx.Database,
 				}
 				return syscall.Exec(bin, []string{"pgcli", u.String()}, os.Environ())
-			case "pgcenter":
-				bin, err := exec.LookPath("pgcenter")
-				if err != nil {
-					return waitOnError(fmt.Errorf("pgcenter not on PATH"))
-				}
-				env := append(os.Environ(), "PGPASSWORD="+pw)
-				return syscall.Exec(bin, []string{
-					"pgcenter", "top",
-					"-h", ep.Host,
-					"-p", fmt.Sprintf("%d", port),
-					"-U", ep.User,
-					"-d", ctx.Database,
-				}, env)
 			default:
 				return waitOnError(fmt.Errorf("unknown tool %q", tool))
 			}
@@ -397,9 +361,6 @@ func orderedRoles(eps map[string]Endpoint) []string {
 // PG_TOOL/PG_CONTEXT_NAME/PG_ENDPOINT from env to do its work.
 func setup(h *tmuxhost.Client, tool string, ctx Context, role string) error {
 	spec := PgcliSpec
-	if tool == "pgcenter" {
-		spec = PgcenterSpec
-	}
 
 	atelierBin, err := exec.LookPath("atelier")
 	if err != nil {
