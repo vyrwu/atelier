@@ -13,6 +13,20 @@ name: release-please
 # PR is only created / updated when the tip of main has passed CI —
 # a broken main can't produce a Release PR that pretends the world
 # is fine.
+#
+# Auth uses a GitHub App installation token, NOT the default
+# GITHUB_TOKEN. GitHub's loop-prevention rule: events created with
+# GITHUB_TOKEN do not trigger further workflow runs. Under GITHUB_TOKEN,
+# (a) the Release PR's own CI never runs on release-please's pushes
+# (lands in action_required), and (b) the `release: published` event it
+# emits does NOT trigger release.yml — so goreleaser never builds
+# binaries. An App token is a distinct identity, so both downstream
+# workflows fire. This is why v0.2.0–v0.3.0 shipped with zero assets.
+#
+# Setup (one-time): create a GitHub App with repo permissions
+# Contents: read/write + Pull requests: read/write, install it on this
+# repo, then set repo variable RELEASE_APP_ID and repo secret
+# RELEASE_APP_PRIVATE_KEY (the App's generated .pem).
 on:
   workflow_run:
     workflows: [ci]
@@ -30,6 +44,12 @@ jobs:
     # in a state we don't want to advertise as releasable.
     if: github.event.workflow_run.conclusion == 'success'
     steps:
+      # Mint a short-lived installation token for the release App.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@v5
         with:
           # Manifest mode: version + changelog state lives in
@@ -38,4 +58,7 @@ jobs:
           # and multi-package splits cleanly.
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # App token (not GITHUB_TOKEN) so the tag + release-published
+          # event trigger release.yml and the Release PR's CI runs
+          # unattended.
+          token: ${{ steps.app-token.outputs.token }}

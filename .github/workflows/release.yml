@@ -2,10 +2,11 @@ name: release
 
 # Trigger paths:
 #   1. `release: published` — release-please creates the GitHub Release
-#      directly via API; the release-published event fires downstream
-#      workflows even when release-please uses GITHUB_TOKEN. (Tag-push
-#      events from GITHUB_TOKEN do NOT trigger workflows — GitHub's
-#      loop-prevention.)
+#      via API. For this event to trigger THIS workflow, release-please
+#      must authenticate with a GitHub App token, not the default
+#      GITHUB_TOKEN: GitHub's loop-prevention suppresses workflow runs
+#      for events created by GITHUB_TOKEN (tag-push AND release-published
+#      alike). See release-please.yml.
 #   2. `workflow_dispatch` — manual override, e.g. to re-run against
 #      an existing tag if the automated run failed. Provide the tag
 #      as input.
