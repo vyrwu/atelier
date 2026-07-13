@@ -149,7 +149,6 @@ atelier/
 │       ├── k8s/             # built-in tool: k9s context+auth picker
 │       ├── pg/              # built-in tool: pgcli picker
 │       └── ...
-├── tmux-plugin/             # TPM entry, bootstrap script
 ├── flake.nix
 ├── go.mod
 ├── Makefile
@@ -192,17 +191,16 @@ Ship one binary; two ways to run it.
 brew install vyrwu/tap/atelier   # or: nix run github:vyrwu/atelier
 ```
 
-1. **Bundled runtime (default).** `atelier` spawns its own tmux server on
-   a dedicated socket (`tmux -L atelier`) with curated defaults — no
-   tmux.conf to write. This is the distribution path.
-2. **Embed into your own tmux.** `run-shell 'atelier init --bare | tmux
-   source-file -'` emits engine wiring only (bindings, hooks, statusline
-   emitters) on top of your existing config.
+1. **Embed into your own tmux (default).** Add `run-shell 'atelier init
+   --bare | tmux source-file -'` to your `tmux.conf`. Emits engine wiring
+   only (bindings, hooks, statusline emitters) on top of your existing
+   config. This is the author's daily driver.
+2. **Bundled runtime.** `atelier` with no subcommand spawns its own tmux
+   server on a dedicated socket (`tmux -L atelier`) with curated defaults —
+   the zero-config path for anyone without a tmux setup.
 
-A TPM entry (`tmux-plugin/`, `set -g @plugin 'vyrwu/atelier'`) also exists
-to bootstrap the binary + wiring for TPM users, but the binary-on-PATH
-model above is primary. See the README's "Two ways in" and
-[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the load-bearing details.
+See the README and [`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the
+load-bearing details.
 
 ## Window management belongs to the workspace primitive
 
