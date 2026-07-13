@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2](https://github.com/vyrwu/atelier/compare/v0.3.1...v0.3.2) (2026-07-13)
+
+
+### Bug fixes
+
+* **testtmux:** stop leaked bg-pull procs flaking the e2e suite ([#32](https://github.com/vyrwu/atelier/issues/32)) ([1cf3955](https://github.com/vyrwu/atelier/commit/1cf395515e6d67b4a21d2992789a0baece7ac816))
+
+
+### Refactors
+
+* **pg:** drop pgcenter, pgcli only ([#30](https://github.com/vyrwu/atelier/issues/30)) ([bb5ccc3](https://github.com/vyrwu/atelier/commit/bb5ccc3a75f568fc406d28bba87c16441430d0be))
+
+
+### Docs
+
+* redo README + splash; drop TPM plugin ([#29](https://github.com/vyrwu/atelier/issues/29)) ([f60bd80](https://github.com/vyrwu/atelier/commit/f60bd80cc4fdc186e51376bec78868f2949e14f1))
+
 ## [0.3.1](https://github.com/vyrwu/atelier/compare/v0.3.0...v0.3.1) (2026-07-12)
 
 
