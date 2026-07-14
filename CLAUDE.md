@@ -76,6 +76,16 @@ Description` commit subject, concise body, `Co-Authored-By: Claude
 generated-by footer. Don't enumerate files in PR bodies; don't expand
 design rationale.
 
+## GitHub Issue conventions
+
+Feature requests use `.github/ISSUE_TEMPLATE/feature_request.md`:
+**Problem** (the friction/gap) → **Proposal** (the concrete change) →
+**Notes** (where it lands in the code, constraints, alternatives;
+optional). Keep them short and focused. Label every issue `enhancement`
+plus exactly one area label — `ux`, `usability`, or `config`. Prefix the
+title with the area when it aids scanning (e.g. `UX: divider between M-s
+entries`).
+
 ## When the principle doesn't hold
 
 If a future tool genuinely needs a tmux primitive that doesn't exist
