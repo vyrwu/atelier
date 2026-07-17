@@ -81,10 +81,12 @@ func AddCommands(root *cobra.Command) {
 	// Internal subcommands wired up by the fzf transforms in pickers.
 	root.AddCommand(DeletePromptCommand())
 	root.AddCommand(DeleteRowCommand())
+	root.AddCommand(DeleteActionCommand())
 	root.AddCommand(SessionListCommand())
 	root.AddCommand(RecoverRowsCommand())
 	root.AddCommand(RecoverDeletePromptCommand())
 	root.AddCommand(RecoverDeleteRowCommand())
+	root.AddCommand(RecoverDeleteActionCommand())
 	root.AddCommand(AutoSessionCommand())
 	root.AddCommand(PromptCommand())
 	root.AddCommand(BuildCommand())

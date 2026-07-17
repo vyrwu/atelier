@@ -118,10 +118,15 @@ func SessionsCommand() *cobra.Command {
 				fzfstyle.WithReadZero(),
 				fzfstyle.WithPrintZero(),
 				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_delete-prompt", "\"$FZF_PROMPT\"", "{}")),
-				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(y)\"; fi"),
+				// y/enter route through _delete-action (a Go transform target)
+				// instead of an inline `echo "…{}…"`: the picked row carries a
+				// free-form AI recap whose backticks/$() would be shell-
+				// interpreted inside the double-quoted echo — an unbalanced
+				// backtick broke BOTH delete and enter. See fzfDeleteAction.
+				fzfstyle.WithBind("y", "transform:"+dispatch.ToolCmd("workspaces", "_delete-action", "y", "\"$FZF_PROMPT\"", "{}")),
 				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(n)\"; fi"),
 				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"abort\"; fi"),
-				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"accept\"; fi"),
+				fzfstyle.WithBind("enter", "transform:"+dispatch.ToolCmd("workspaces", "_delete-action", "enter", "\"$FZF_PROMPT\"", "{}")),
 				fzfstyle.WithBind("alt-s", "abort"),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
@@ -825,10 +830,13 @@ func RecoverCommand() *cobra.Command {
 				fzfstyle.WithDelimiter("\t"),
 				fzfstyle.WithNth("3"),
 				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_recover-delete-prompt", "\"$FZF_PROMPT\"", "{}")),
-				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"put(y)\"; fi"),
+				// y/enter route through _recover-delete-action for the same
+				// shell-injection reason as the session picker — see
+				// fzfDeleteAction.
+				fzfstyle.WithBind("y", "transform:"+dispatch.ToolCmd("workspaces", "_recover-delete-action", "y", "\"$FZF_PROMPT\"", "{}")),
 				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(復 )\"; else echo \"put(n)\"; fi"),
 				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(復 )\"; else echo \"abort\"; fi"),
-				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"accept\"; fi"),
+				fzfstyle.WithBind("enter", "transform:"+dispatch.ToolCmd("workspaces", "_recover-delete-action", "enter", "\"$FZF_PROMPT\"", "{}")),
 				fzfstyle.WithBind("alt-r", "abort"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
