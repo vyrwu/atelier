@@ -64,6 +64,18 @@ const (
 	// color from its name (stable hash → palette) — no color is persisted.
 	OptWorkspaceTag = "@workspace_tag"
 
+	// OptScopePin is the M-s picker's "pinned scope" — a search-query
+	// prefix the user locks (M-p) so the picker opens pre-filtered to a
+	// focused context (one repo, one tag) instead of an empty query.
+	//
+	// Deliberately a tmux GLOBAL option and NOT mirrored to the
+	// statestore: the pin is session-lived — it lives exactly as long as
+	// the tmux server (the atelier session) and MUST NOT survive a full
+	// atelier restart. `atelier stop` kills the server and drops it, with
+	// no persistence/restore code to maintain. See GetScopePin /
+	// SetScopePin.
+	OptScopePin = "@atelier_scope_pin"
+
 	// AtelierSessionPrefix marks sessions atelier manages as popups; these
 	// are filtered out of workspace listings.
 	AtelierSessionPrefix = "_atelier_"
@@ -250,6 +262,26 @@ func SetTag(h *tmuxhost.Client, windowID, tag string) error {
 	// losing this write only costs the tag on the next tmux restart.
 	_ = PersistWindowMetadata(h, windowID, TagMetadataKey, tag)
 	return nil
+}
+
+// GetScopePin returns the M-s picker's pinned scope query, or "" when no
+// scope is pinned. Read on every picker open to pre-seed the query and
+// light the "Pinned" footer badge. See OptScopePin.
+func GetScopePin(h *tmuxhost.Client) string {
+	pin, _ := h.ShowGlobalOption(OptScopePin)
+	return pin
+}
+
+// SetScopePin pins (or clears, when query == "") the M-s picker scope.
+// Stored as a tmux global option only — session-lived by construction,
+// never mirrored to the statestore, so it evaporates on `atelier stop`
+// (kill-server) rather than surviving a full atelier restart. See
+// OptScopePin.
+func SetScopePin(h *tmuxhost.Client, query string) error {
+	if query == "" {
+		return h.UnsetGlobalOption(OptScopePin)
+	}
+	return h.SetGlobalOption(OptScopePin, query)
 }
 
 // persistWindowOption resolves windowID → (session_name, window_name)
