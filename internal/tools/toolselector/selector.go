@@ -161,9 +161,9 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 		"pgcli", // pg subcommands surfaced separately
 		"pgcenter",
 		"ccusage",
-		"workspaces-selector", // virtual: "Select Workspace" from workspaces tool
+		"workspaces-selector", // virtual: "Active Workspaces" from workspaces tool
 		"workspaces-creator",  // virtual: "New Workspace" from workspaces tool
-		"workspaces-recover",  // virtual: "Recover Workspace" from workspaces tool
+		"workspaces-recover",  // virtual: "Workspace History" from workspaces tool
 	}
 
 	seen := map[string]bool{"toolselector": true}
@@ -217,8 +217,8 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 			if p, ok := byName["workspaces"]; ok && !seen["workspaces-selector"] {
 				entries = append(entries, entry{
 					Icon:        "栽",
-					Name:        "Select Workspace",
-					Description: "Pick an existing workspace session",
+					Name:        "Active Workspaces",
+					Description: "Switch between active workspaces",
 					AccentColor: "168",
 					Kind:        "workspaces:sessions",
 					Plugin:      p,
@@ -243,8 +243,8 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 			if p, ok := byName["workspaces"]; ok && !seen["workspaces-recover"] {
 				entries = append(entries, entry{
 					Icon:        "復",
-					Name:        "Recover Workspace",
-					Description: "Pick or delete a past/present worktree",
+					Name:        "Workspace History",
+					Description: "Reopen or delete a past/present worktree",
 					AccentColor: "141",
 					Kind:        "workspaces:recover",
 					Plugin:      p,

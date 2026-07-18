@@ -175,7 +175,9 @@ func OpenDefaultBranch(
 	if err := LandOuter(h, "="+session, "="+session+":"+defaultBranch); err != nil {
 		debuglog.LogErr("workspace.OpenDefaultBranch: LandOuter (continuing)", err)
 	}
+	var createdTs int64
 	if defaultWid, _ := h.DisplayMessageAt(session+":"+defaultBranch, "#{window_id}"); defaultWid != "" {
+		createdTs = StampCreatedTs(h, defaultWid)
 		SpawnBgPull(repoPath, defaultBranch, defaultWid)
 		SpawnForgeRefresh()
 	}
@@ -186,6 +188,7 @@ func OpenDefaultBranch(
 		WindowName: defaultBranch,
 		Cwd:        repoPath,
 		Branch:     defaultBranch,
+		CreatedTs:  createdTs,
 	})
 	return nil
 }
@@ -300,6 +303,10 @@ func CreateWorktreeWindow(h *tmuxhost.Client, spec WorktreeWindowSpec) (windowID
 	if spec.KillDefaultBranch != "" {
 		_, _ = h.Run("kill-window", "-t", "="+spec.Session+":"+spec.KillDefaultBranch)
 	}
+	// Stamp the creation timestamp on the fresh window so the picker's
+	// Age sort has a real "how old is this workspace" signal immediately
+	// (not only after a restart re-stamps it from the cache).
+	createdTs := StampCreatedTs(h, windowID)
 
 	// Mirror the new workspace + window into the on-disk cache so
 	// restore can reconstruct it after a tmux server restart.
@@ -316,6 +323,7 @@ func CreateWorktreeWindow(h *tmuxhost.Client, spec WorktreeWindowSpec) (windowID
 		WindowName: spec.WindowName,
 		Cwd:        spec.WtPath,
 		Branch:     spec.WindowName,
+		CreatedTs:  createdTs,
 		Metadata:   spec.Metadata,
 	})
 	// Fire bg-pull so the new window's freshness icon populates

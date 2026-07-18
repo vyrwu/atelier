@@ -67,7 +67,7 @@ func TestInsideAtelierServer(t *testing.T) {
 // load-bearing invariant: the bundled launcher's generated tmux
 // config MUST emit `set-environment -g ATELIER_TMUX_SOCKET <socket>`
 // near the top so every `run-shell` child (restore, stamp-statusline,
-// stamp-last-seen, status emitters) routes back to the bundled
+// stamp-last-active, status emitters) routes back to the bundled
 // server via -L.
 //
 // THE BUG THIS GUARDS AGAINST:

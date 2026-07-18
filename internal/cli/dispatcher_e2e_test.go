@@ -64,7 +64,7 @@ func TestInitAggregator_EmitsAllToolBlocks(t *testing.T) {
 		"atelier internal stamp-statusline",
 		`bind -T root "M-;"`,
 		`bind -T root "M-n"`,
-		`bind -T root "M-s"`,
+		`bind -T root "M-a"`,
 		// M-q quit (core binding, no plugin). FR-5.3: detach, not kill,
 		// so background popup agents survive across user sessions.
 		`bind -T root  "M-q" detach-client`,
@@ -75,7 +75,7 @@ func TestInitAggregator_EmitsAllToolBlocks(t *testing.T) {
 		// popup-client context and disturbed underlying tool ptys).
 		`bind -T popup "M-;" display-popup`,
 		`bind -T popup "M-n" display-popup`,
-		`bind -T popup "M-s" display-popup`,
+		`bind -T popup "M-a" display-popup`,
 		// Persistence block emitted at the end so prior tmux state
 		// is restored on every server start. No session-closed /
 		// window-unlinked hooks: tmux exit is the normal case that

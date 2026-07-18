@@ -114,7 +114,7 @@ func runBundled(cmd *cobra.Command, socket, session string) error {
 	if insideAtelierServer(socket) {
 		fmt.Fprintln(os.Stderr,
 			"atelier: already inside the atelier runtime — not nesting (it collapses the session).\n"+
-				"  M-;  pick a tool   M-s  switch workspace   M-n  new workspace   M-q  detach")
+				"  M-;  pick a tool   M-a  active workspaces   M-n  new workspace   M-q  detach")
 		return nil
 	}
 

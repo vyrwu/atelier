@@ -8,9 +8,9 @@ import (
 // TestConcurrentWrites_DoNotClobberEachOther locks in the cross-
 // process race fix: N goroutines each Load+mutate+Save the cache,
 // each touching DIFFERENT fields. Without flock, the second writer
-// clobbers the first's mutations (which is exactly how
-// stamp-last-seen's LastSeen write was getting lost when
-// RegisterCreatedWorkspace ran concurrently).
+// clobbers the first's mutations (which is exactly how a detached
+// _bg-pull's window write was getting lost when RegisterCreatedWorkspace
+// ran concurrently).
 //
 // We use goroutines (intra-process) as a proxy — they share the
 // same file just like separate processes do, but the test is
@@ -23,29 +23,30 @@ import (
 func TestConcurrentWrites_DoNotClobberEachOther(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	// Seed cache with one workspace.
+	// Seed cache with one workspace + window.
 	if err := Save(&State{
 		Workspaces: []Workspace{{
 			SessionName: "ws/test",
 			RepoPath:    "/tmp/fake",
 			Kind:        "default-branch",
+			Windows:     []Window{{Name: "main"}},
 		}},
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Three concurrent writers, each touching a DIFFERENT field of
-	// the same workspace. After all complete, ALL three mutations
-	// must be visible in the final state. The pre-flock code lost
-	// fields due to the load-then-save race.
+	// Three concurrent writers, each touching a DIFFERENT field. After
+	// all complete, ALL three mutations must be visible in the final
+	// state. The pre-flock code lost fields due to the load-then-save race.
 	var wg sync.WaitGroup
 	wg.Add(3)
 
-	// Writer 1: sets LastSeen (simulates stamp-last-seen hook).
+	// Writer 1: sets the window's CreatedTs (mirrors StampCreatedTs's
+	// write-through in RegisterCreatedWorkspace).
 	go func() {
 		defer wg.Done()
-		if err := UpdateWorkspace("ws/test", func(ws *Workspace) {
-			ws.LastSeen = 1700000000
+		if err := UpdateWindow("ws/test", "main", func(w *Window) {
+			w.CreatedTs = 1700000000
 		}); err != nil {
 			t.Errorf("writer 1: %v", err)
 		}
@@ -84,9 +85,8 @@ func TestConcurrentWrites_DoNotClobberEachOther(t *testing.T) {
 		t.Fatalf("len(Workspaces) = %d, want 1: %+v", len(state.Workspaces), state.Workspaces)
 	}
 	ws := state.Workspaces[0]
-	if ws.LastSeen != 1700000000 {
-		t.Errorf("LastSeen = %d, want %d (writer 1 clobbered)",
-			ws.LastSeen, 1700000000)
+	if w := state.FindWindow("ws/test", "main"); w == nil || w.CreatedTs != 1700000000 {
+		t.Errorf("window CreatedTs = %+v, want 1700000000 (writer 1 clobbered)", w)
 	}
 	if ws.RepoPath != "/tmp/fake-updated" {
 		t.Errorf("RepoPath = %q, want %q (writer 3 clobbered)",
@@ -164,14 +164,10 @@ func TestConcurrentWrites_RemoveRenameDoNotClobberMetadata(t *testing.T) {
 }
 
 // TestConcurrentWrites_HighContention exercises the lock under
-// real contention: many goroutines all updating LastSeen on the
-// same workspace. The final value should equal the LAST writer's
-// value. Without flock, writes interleave and the final value is
+// real contention: many goroutines all updating the same window's
+// CreatedTs. The final value should equal one of the writers' values.
+// Without flock, writes interleave and the final value is
 // unpredictable (often an old value because Load saw stale data).
-//
-// We rely on the implementation detail that goroutines launched
-// later sleep briefly to ensure ordering; the test is structural,
-// not perf-sensitive.
 func TestConcurrentWrites_HighContention(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
@@ -179,6 +175,7 @@ func TestConcurrentWrites_HighContention(t *testing.T) {
 		Workspaces: []Workspace{{
 			SessionName: "ws/test",
 			RepoPath:    "/tmp/x",
+			Windows:     []Window{{Name: "main"}},
 		}},
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -191,8 +188,8 @@ func TestConcurrentWrites_HighContention(t *testing.T) {
 		i := i
 		go func() {
 			defer wg.Done()
-			_ = UpdateWorkspace("ws/test", func(ws *Workspace) {
-				ws.LastSeen = int64(1700000000 + i)
+			_ = UpdateWindow("ws/test", "main", func(w *Window) {
+				w.CreatedTs = int64(1700000000 + i)
 			})
 		}()
 	}
@@ -202,12 +199,15 @@ func TestConcurrentWrites_HighContention(t *testing.T) {
 	if err != nil || state == nil || len(state.Workspaces) != 1 {
 		t.Fatalf("post-contention state corrupt: %v %v", state, err)
 	}
-	// Final LastSeen must be one of the values we wrote — i.e. the
-	// last writer's. Pre-flock, a stale Load could write back an
-	// earlier value, leaving LastSeen at something we never wrote.
-	got := state.Workspaces[0].LastSeen
-	if got < 1700000000 || got > 1700000000+N-1 {
-		t.Errorf("LastSeen = %d, expected one of [1700000000..%d] — lock failed",
-			got, 1700000000+N-1)
+	// Final CreatedTs must be one of the values we wrote — i.e. some
+	// writer's. Pre-flock, a stale Load could write back an earlier
+	// value, leaving it at something we never wrote.
+	w := state.FindWindow("ws/test", "main")
+	if w == nil {
+		t.Fatalf("window 'main' vanished: %+v", state.Workspaces)
+	}
+	if w.CreatedTs < 1700000000 || w.CreatedTs > 1700000000+N-1 {
+		t.Errorf("CreatedTs = %d, expected one of [1700000000..%d] — lock failed",
+			w.CreatedTs, 1700000000+N-1)
 	}
 }

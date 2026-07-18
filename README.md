@@ -10,7 +10,7 @@ One Go binary, curated built-in tools, an unopinionated statusline API.
 [![release](https://img.shields.io/github/v/release/vyrwu/atelier?display_name=tag&sort=semver)](https://github.com/vyrwu/atelier/releases)
 [![license](https://img.shields.io/github/license/vyrwu/atelier)](LICENSE)
 
-<img src="docs/demo.png" alt="atelier — the M-s workspace picker: parallel agent workspaces with per-row recap and git freshness" width="800">
+<img src="docs/demo.png" alt="atelier — the M-a workspace picker: parallel agent workspaces with per-row recap and git freshness" width="800">
 
 <!-- TODO: replace this splash with a demo video showcasing atelier. -->
 
@@ -37,7 +37,7 @@ rehydrates on tmux restart.
 ## Features
 
 - **Workspace = window + worktree + tool state.** `M-n` creates a workspace
-  from a natural-language task, `M-s` switches between them, `M-;` opens any
+  from a natural-language task, `M-a` switches between them, `M-;` opens any
   tool for the current workspace, `M-r` recovers one that was soft-closed.
 - **Load-bearing kernel, swappable integrations.** The kernel owns the views
   and their capability slots — a per-row AI summary, an attention sigil, a
@@ -149,8 +149,8 @@ Font).
 |------|--------|
 | `M-;` | Tool selector — fzf list of every discovered tool; picks route to the current workspace. |
 | `M-n` | New workspace — natural-language task → Claude names the branch → worktree + agent session. |
-| `M-s` | Select workspace — switch between workspaces (recap + git freshness per row). |
-| `M-r` | Recover workspace — recently soft-closed workspaces rank to the top; recover or delete. |
+| `M-a` | Active workspaces — switch between workspaces (recap + git freshness per row); `Tab` cycles sort (attention/age/repo/tag/forge). |
+| `M-r` | Workspace history — recently soft-closed workspaces rank to the top; recover or delete. |
 | `M-?` | Cheatsheet — every active binding, scoped to the current context. |
 | `M-q` | Detach — the server keeps running; reattach with `atelier` (or `tmux -L atelier attach`). |
 
@@ -188,7 +188,7 @@ contexts = "~/.config/atelier/pg/contexts.yaml"   # postgres endpoint definition
 
 # Only when [integrations] ai = "claude". Empty prompt = built-in default.
 [claude]
-recap_model              = "haiku"   # model for one-line session recaps (M-s rows)
+recap_model              = "haiku"   # model for one-line session recaps (M-a rows)
 recap_system_prompt      = ""         # override the recap prompt
 multi_repo_system_prompt = ""         # extra system prompt in multi-repo workspaces
 

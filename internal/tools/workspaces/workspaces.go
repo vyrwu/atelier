@@ -95,10 +95,7 @@ func SessionsCommand() *cobra.Command {
 			// the PR badge is current on the NEXT open, and advertise M-o.
 			// When no forge adapter is configured the slot is simply absent.
 			workspace.SpawnForgeRefresh()
-			footer := "M-x · delete  |  M-t · tag  |  M-n · creator  |  M-r · history  |  M-; · tools  |  M-u · clone url"
-			if forgeActive() {
-				footer += "  |  M-o · open PR"
-			}
+			footer := sessionFooter(readSortMode(h), forgeActive())
 
 			opts := []fzfstyle.Opt{
 				fzfstyle.WithCustomColor("prompt:red:bold,pointer:red,query:red,hl:red,hl+:red:bold,bg+:#44475a,fg+:#f8f8f2:bold,label:103,border:103,footer:103"),
@@ -122,7 +119,13 @@ func SessionsCommand() *cobra.Command {
 				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(n)\"; fi"),
 				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"abort\"; fi"),
 				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"accept\"; fi"),
-				fzfstyle.WithBind("alt-s", "abort"),
+				// M-a is this picker's own key — pressing it again dismisses,
+				// matching the toggle-to-close behavior of the other pickers.
+				fzfstyle.WithBind("alt-a", "abort"),
+				// Tab cycles the sort mode: _sort-next advances the persisted
+				// @ms_sort global and emits reload + change-footer so the list
+				// re-sorts and the legend updates in place.
+				fzfstyle.WithBind("tab", "transform:"+dispatch.ToolCmd("workspaces", "_sort-next")),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
@@ -136,7 +139,7 @@ func SessionsCommand() *cobra.Command {
 					"execute-silent("+dispatch.ToolCmd("workspaces", "_open-forge", "{}")+")"))
 			}
 			opts = append(opts, fzfstyle.WithFooter(footer))
-			args := fzfstyle.Args("栽 ", "Select Workspace", "red", opts...)
+			args := fzfstyle.Args("栽 ", "Active Workspaces", "red", opts...)
 			if emptyHeader != "" {
 				args = append(args, "--header="+emptyHeader)
 			}
@@ -291,19 +294,19 @@ func PickCommand() *cobra.Command {
 				}
 			}
 
-			footerRepo := "M-a · auto mode  |  M-s · selector  |  M-r · history  |  M-; · tools  |  M-u · clone url"
-			footerAuto := "M-a · repo mode  |  M-s · selector  |  M-r · history  |  M-; · tools  |  M-u · clone url"
+			footerRepo := "M-m · multi-repo  |  M-a · active  |  M-r · history  |  M-; · tools  |  M-u · clone url"
+			footerAuto := "M-m · pick repo  |  M-a · active  |  M-r · history  |  M-; · tools  |  M-u · clone url"
 
 			args := fzfstyle.Args("製 ", "New Workspace", "green",
 				fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,footer:103"),
 				fzfstyle.WithDelimiter("\t"),
 				fzfstyle.WithNth("2"),
 				fzfstyle.WithBind("alt-n", "abort"),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithBind("alt-a", fmt.Sprintf(
+				fzfstyle.WithBind("alt-m", fmt.Sprintf(
 					`transform:if [[ "$FZF_PROMPT" == '製 ' ]]; then echo 'change-prompt(製? )+disable-search+change-footer(%s)'; else echo 'change-prompt(製 )+enable-search+change-footer(%s)'; fi`,
 					footerAuto, footerRepo)),
 				fzfstyle.WithBind("enter", fmt.Sprintf(`transform:if [[ "$FZF_PROMPT" == "製? " ]]; then echo "become(%s {q})"; else echo "accept"; fi`, dispatch.ToolCmd("workspaces", "_auto-session"))),
@@ -325,10 +328,12 @@ func PickCommand() *cobra.Command {
 			}
 			repoPath := filepath.Join(base, repo)
 			defaultBranch := DefaultBranch(repoPath)
-			debuglog.Logf("workspaces.pick: picked repo=%q → name flow", repo)
+			debuglog.Logf("workspaces.pick: picked repo=%q → prompt (AI-name) flow", repo)
 
 			_ = socket
-			return runWorkspaceName(repo, repoPath, defaultBranch, "")
+			// AI branch-naming is the default; the prompt picker offers M-f to
+			// force a manual name.
+			return runWorkspacePrompt(repo, repoPath, defaultBranch, "")
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
@@ -359,12 +364,12 @@ func CloneCommand() *cobra.Command {
 					fzfstyle.WithNoClear(),
 					fzfstyle.WithPrintQuery(),
 					fzfstyle.WithExpect("enter"),
-					fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+					fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 					fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 					fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 					fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 					fzfstyle.WithHeader(header),
-					fzfstyle.WithFooter("M-s · selector  |  M-n · creator  |  M-r · history  |  M-; · tools"),
+					fzfstyle.WithFooter("M-a · active  |  M-n · creator  |  M-r · history  |  M-; · tools"),
 					fzfstyle.WithQuery(query),
 				)
 				res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -569,7 +574,7 @@ func DeleteRowCommand() *cobra.Command {
 			// Default branch (or non-git row): kill whole session. If the
 			// outer client is parked on this session, land it on another
 			// workspace first — otherwise kill-session detaches the outer
-			// (and tears down the M-s popup) instead of switching.
+			// (and tears down the M-a popup) instead of switching.
 			moveOuterToSiblingSession(h, session)
 			_, _ = h.Run("kill-session", "-t", "="+session)
 			_ = statestore.RemoveSession(session)
@@ -763,6 +768,33 @@ func SessionListCommand() *cobra.Command {
 	}
 }
 
+// SortNextCommand is the hidden `_sort-next`: bound to Tab in the M-a
+// picker. It advances the persisted @ms_sort global to the next mode and
+// prints the fzf actions to re-sort the list and refresh the footer legend
+// in place — its stdout IS an fzf action string (the Tab bind is a
+// `transform`), not human output.
+func SortNextCommand() *cobra.Command {
+	var socket string
+	c := &cobra.Command{
+		Use:    "_sort-next",
+		Short:  "internal: cycle the Active Workspaces sort mode (Tab)",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			h := tmuxhost.New(socket)
+			cur := readSortMode(h)
+			next := cur.next()
+			writeSortMode(h, next)
+			debuglog.Logf("workspaces._sort-next: %s → %s", cur, next)
+			fmt.Fprintf(cmd.OutOrStdout(), "reload(%s)+change-footer(%s)",
+				dispatch.ToolCmd("workspaces", "_session-list"),
+				sessionFooter(next, forgeActive()))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
+	return c
+}
+
 // AutoSessionCommand: port of tmux_workspace_auto_session
 func AutoSessionCommand() *cobra.Command {
 	return &cobra.Command{
@@ -801,7 +833,7 @@ func CreateCommand() *cobra.Command {
 	return c
 }
 
-// RecoverCommand opens the M-r "Recover Workspace" picker: every worktree
+// RecoverCommand opens the M-r "Workspace History" picker: every worktree
 // under WorktreeRoot (whether or not a live tmux session backs it),
 // with Enter to open and M-x to delete. Sibling to:
 //   - M-n (creator) — make a NEW worktree
@@ -826,7 +858,7 @@ func RecoverCommand() *cobra.Command {
 			// Dracula-ish purple (256-color 141 ≈ #af87ff matches the
 			// theme's #bd93f9 closely). 復 = "history/record" — fits a
 			// crawl-the-filesystem-for-existing-worktrees picker.
-			args := fzfstyle.Args("復 ", "Recover Workspace", "141",
+			args := fzfstyle.Args("復 ", "Workspace History", "141",
 				fzfstyle.WithCustomColor("prompt:141:bold,pointer:141,query:141,hl:141,hl+:141:bold,label:103,border:103,footer:103"),
 				fzfstyle.WithDelimiter("\t"),
 				fzfstyle.WithNth("3"),
@@ -836,11 +868,11 @@ func RecoverCommand() *cobra.Command {
 				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(復 )\"; else echo \"abort\"; fi"),
 				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"accept\"; fi"),
 				fzfstyle.WithBind("alt-r", "abort"),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithFooter("M-x · delete  |  M-s · sessions  |  M-n · creator  |  M-; · tools  |  M-u · clone url"),
+				fzfstyle.WithFooter("M-x · delete  |  M-a · active  |  M-n · creator  |  M-; · tools  |  M-u · clone url"),
 			)
 			if emptyHeader != "" {
 				args = append(args, "--header="+emptyHeader)
@@ -1208,14 +1240,14 @@ func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
 				fzfstyle.WithPrintQuery(),
 				fzfstyle.WithExpect("enter"),
 				fzfstyle.WithBind("alt-n", "abort"),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithBind("alt-a", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_prompt"),
+				fzfstyle.WithBind("alt-f", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_prompt"),
 					repo, repoPath, defaultBranch)),
 				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-a · auto mode  |  M-s · selector  |  M-r · history  |  M-; · tools  |  M-u · clone url"),
+				fzfstyle.WithFooter("M-f · AI name  |  M-a · active  |  M-r · history  |  M-; · tools  |  M-u · clone url"),
 				fzfstyle.WithQuery(query),
 			)
 			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -1349,14 +1381,14 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 			fzfstyle.WithPrintQuery(),
 			fzfstyle.WithExpect("enter"),
 			fzfstyle.WithBind("alt-n", "abort"),
-			fzfstyle.WithBind("alt-a", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_name"),
+			fzfstyle.WithBind("alt-f", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_name"),
 				repo, repoPath, defaultBranch)),
-			fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+			fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 			fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 			fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 			fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 			fzfstyle.WithHeader(header),
-			fzfstyle.WithFooter("M-a · manual name  |  M-s · selector  |  M-r · history  |  M-; · tools  |  M-u · clone url"),
+			fzfstyle.WithFooter("M-f · manual name  |  M-a · active  |  M-r · history  |  M-; · tools  |  M-u · clone url"),
 			fzfstyle.WithQuery(initialPrompt),
 		)
 		res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -1779,12 +1811,12 @@ func runAutoSession(initialPrompt string) error {
 				fzfstyle.WithPrintQuery(),
 				fzfstyle.WithExpect("enter"),
 				fzfstyle.WithBind("alt-n", "abort"),
-				fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
+				fzfstyle.WithBind("alt-m", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
+				fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-a · pick repo  |  M-s · selector  |  M-r · history  |  M-; · tools"),
+				fzfstyle.WithFooter("M-m · pick repo  |  M-a · active  |  M-r · history  |  M-; · tools"),
 				fzfstyle.WithQuery(query),
 			)
 			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -1851,11 +1883,13 @@ func runAutoSession(initialPrompt string) error {
 			if defaultWinName == "" {
 				defaultWinName = "1"
 			}
+			createdTs := workspace.StampCreatedTs(h, "="+name+":1")
 			workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
 				Session:    name,
 				Kind:       "multi-repo",
 				WindowName: defaultWinName,
 				Cwd:        base,
+				CreatedTs:  createdTs,
 				Metadata: map[string]string{
 					"ai.prompt":         prompt,
 					"ai.workspace_kind": "multi-repo",

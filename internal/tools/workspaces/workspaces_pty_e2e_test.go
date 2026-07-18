@@ -1,8 +1,8 @@
 //go:build e2e
 
 // PTY-driven integration tests for the workspaces tool. Cover the
-// M-n / M-s binding wiring (M-n → creator, M-s → session picker) and
-// the manual-name creator flow that produces a real worktree + window
+// M-n / M-a binding wiring (M-n → creator, M-a → active workspaces picker)
+// and the manual-name creator flow that produces a real worktree + window
 // against a real test repo on disk.
 package workspaces_test
 
@@ -33,20 +33,20 @@ func TestCreator_MN_FiresBinding(t *testing.T) {
 	})
 }
 
-// TestSessionPicker_MS_FiresBinding asserts M-s triggers the workspaces
-// session picker binding chain.
-func TestSessionPicker_MS_FiresBinding(t *testing.T) {
+// TestSessionPicker_MA_FiresBinding asserts M-a (Active Workspaces)
+// triggers the workspaces session picker binding chain.
+func TestSessionPicker_MA_FiresBinding(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("main")
 	srv.SourceInit(t)
 	client := srv.Attach(t, "main")
 	time.Sleep(300 * time.Millisecond)
 
-	client.Send("\x1bs")
+	client.Send("\x1ba")
 	testtmux.Eventually(t, 3*time.Second, func() error {
 		v, _ := srv.Client.ShowGlobalOption("@atelier_outer_session")
 		if v == "" {
-			return fmt.Errorf("@atelier_outer_session unset; M-s binding did not fire")
+			return fmt.Errorf("@atelier_outer_session unset; M-a binding did not fire")
 		}
 		return nil
 	})

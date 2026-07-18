@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
@@ -34,6 +35,12 @@ const (
 	// was written. Used by the session picker (FR-2.2) to render "· 30s"
 	// freshness suffix alongside the recap line.
 	OptRecapTs = "@attention_recap_ts"
+
+	// OptCreatedTs is the unix-epoch second the workspace window was first
+	// created. Stamped once at creation (StampCreatedTs) and never mutated
+	// on reopen/restore, so the picker's Age sort reads a true "how old is
+	// this workspace" signal for GC decisions — NOT a last-touched clock.
+	OptCreatedTs = "@created_ts"
 
 	// Window-scoped options — async pull freshness (FR-7).
 	//   OptWorkspaceFreshnessTs — unix epoch of the most recent successful fetch.
@@ -375,10 +382,47 @@ type NewWorkspaceInfo struct {
 	WindowName string // tmux window name (the per-window key)
 	Cwd        string // worktree path the window opened at
 	Branch     string // informational
+	// CreatedTs is the unix-epoch second the window was created. Zero =
+	// unknown; RegisterCreatedWorkspace defaults it to now. Mirrored to
+	// the statestore so restore re-stamps @created_ts and the Age sort
+	// survives a tmux restart.
+	CreatedTs int64
 	// Metadata is plugin-namespaced window state to persist alongside
 	// the window — e.g. {"ai.prompt": "build foo", "ai.workspace_kind": "worktree"}.
 	// Empty/nil = no plugin metadata.
 	Metadata map[string]string
+}
+
+// StampCreatedTs sets @created_ts on the target window if not already set,
+// returning the effective creation timestamp (the existing value when
+// present, else now). Idempotent: reopening or rebuilding a workspace
+// preserves its original age, so the picker's Age sort stays a true
+// "how old is this workspace" GC signal. windowTarget is a tmux window id
+// (`@N`) or a `=session:window` reference. Best-effort — the returned
+// timestamp is used for the statestore mirror regardless of a write error.
+func StampCreatedTs(h *tmuxhost.Client, windowTarget string) int64 {
+	if v := readCreatedTs(h, windowTarget); v > 0 {
+		return v
+	}
+	now := time.Now().Unix()
+	if _, err := h.Run("set-option", "-w", "-t", windowTarget,
+		OptCreatedTs, strconv.FormatInt(now, 10)); err != nil {
+		debuglog.LogErr("workspace.StampCreatedTs set @created_ts", err)
+	}
+	debuglog.Logf("workspace.StampCreatedTs: window=%s created=%d", windowTarget, now)
+	return now
+}
+
+func readCreatedTs(h *tmuxhost.Client, windowTarget string) int64 {
+	out, err := h.Run("show-option", "-w", "-t", windowTarget, "-qv", OptCreatedTs)
+	if err != nil {
+		return 0
+	}
+	v, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil || v <= 0 {
+		return 0
+	}
+	return v
 }
 
 // RegisterCreatedWorkspace mirrors a freshly-created workspace + window
@@ -391,7 +435,10 @@ type NewWorkspaceInfo struct {
 // The cost of losing one cache write is at most "this workspace
 // doesn't restore after the next tmux crash" — annoying, not broken.
 func RegisterCreatedWorkspace(info NewWorkspaceInfo) {
-	now := time.Now().Unix()
+	createdTs := info.CreatedTs
+	if createdTs == 0 {
+		createdTs = time.Now().Unix()
+	}
 	_ = statestore.UpdateWorkspace(info.Session, func(ws *statestore.Workspace) {
 		if info.RepoPath != "" {
 			ws.RepoPath = info.RepoPath
@@ -399,22 +446,17 @@ func RegisterCreatedWorkspace(info NewWorkspaceInfo) {
 		if info.Kind != "" {
 			ws.Kind = info.Kind
 		}
-		// Seed LastSeen at creation time. Without this, a workspace
-		// the user creates and then M-q's WITHOUT switching away
-		// would have no last_seen in the cache (the stamp-last-seen
-		// hook only fires on session-CHANGE, not on kill-server).
-		// On next launch the picker would show no age for it,
-		// confusing the user into thinking persistence is broken.
-		//
-		// Only seed when unset — don't overwrite a real last_seen
-		// from a later switch-away event.
-		if ws.LastSeen == 0 {
-			ws.LastSeen = now
-		}
 	})
 	_ = statestore.UpdateWindow(info.Session, info.WindowName, func(w *statestore.Window) {
 		w.Cwd = info.Cwd
 		w.Branch = info.Branch
+		// Seed CreatedTs at creation time, only when unset — don't
+		// overwrite the original age when a later flow re-registers the
+		// same window (reopen, restamp). The picker's Age sort is a
+		// "how old is this workspace" GC signal, not a last-touched clock.
+		if w.CreatedTs == 0 {
+			w.CreatedTs = createdTs
+		}
 		if len(info.Metadata) > 0 {
 			if w.Metadata == nil {
 				w.Metadata = map[string]string{}

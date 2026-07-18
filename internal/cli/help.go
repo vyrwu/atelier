@@ -63,8 +63,8 @@ type shortcut struct{ key, desc string }
 func essentialShortcuts() []shortcut {
 	return []shortcut{
 		{"M-n", "New workspace — describe a task; the agent names the branch"},
-		{"M-s", "Switch workspace — picker shows recap + git freshness"},
-		{"M-r", "Recover a recently closed workspace"},
+		{"M-a", "Active workspaces — switch; Tab cycles sort (attention/age/…)"},
+		{"M-r", "Workspace history — reopen a recently closed workspace"},
 		{"M-;", "Tools — open any tool in the current workspace"},
 		{"M-q", "Detach — server keeps running; reattach with `atelier`"},
 		{"M-?", "This cheatsheet"},

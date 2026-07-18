@@ -54,8 +54,8 @@ func Restore(h *tmuxhost.Client) error {
 		debuglog.Logf("workspace.Restore: cache has %d workspaces, last_active=%q",
 			len(cached.Workspaces), cached.LastActiveSession)
 		for _, ws := range cached.Workspaces {
-			debuglog.Logf("workspace.Restore: cache entry session=%s kind=%s repo=%s last_seen=%d windows=%d",
-				ws.SessionName, ws.Kind, ws.RepoPath, ws.LastSeen, len(ws.Windows))
+			debuglog.Logf("workspace.Restore: cache entry session=%s kind=%s repo=%s windows=%d",
+				ws.SessionName, ws.Kind, ws.RepoPath, len(ws.Windows))
 			restoreOneWorkspace(h, ws)
 		}
 		for k, v := range cached.Globals {
@@ -207,15 +207,6 @@ func restoreOneWorkspace(h *tmuxhost.Client, ws statestore.Workspace) {
 			debuglog.LogErr("workspace.Restore: @repo_path", err)
 		}
 	}
-	// Restore the @last_seen timestamp so the picker's "last used"
-	// column shows the actual age across restarts, not empty (which
-	// reads as "brand new" and is wrong).
-	if ws.LastSeen > 0 {
-		if _, err := h.Run("set-option", "-t", ws.SessionName,
-			"@last_seen", strconv.FormatInt(ws.LastSeen, 10)); err != nil {
-			debuglog.LogErr("workspace.Restore: @last_seen", err)
-		}
-	}
 
 	applyWindowOptionsByName(h, ws.SessionName, first)
 	scheduleBgPullForWindow(h, ws, first)
@@ -324,6 +315,10 @@ func applyWindowOptionsByName(h *tmuxhost.Client, session string, w statestore.W
 	if w.RecapTs != 0 {
 		_, _ = h.Run("set-option", "-w", "-t", target, "@attention_recap_ts",
 			strconv.FormatInt(w.RecapTs, 10))
+	}
+	if w.CreatedTs != 0 {
+		_, _ = h.Run("set-option", "-w", "-t", target, OptCreatedTs,
+			strconv.FormatInt(w.CreatedTs, 10))
 	}
 	// Re-stamp every plugin-namespaced metadata entry as the
 	// corresponding tmux window option. Core never knows which

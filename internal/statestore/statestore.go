@@ -22,7 +22,7 @@
 //     via flock(2) on a sibling lockfile. Without this, two atelier
 //     processes performing concurrent Load+mutate+Save would clobber
 //     each other's mutations (e.g. RegisterCreatedWorkspace racing
-//     with the stamp-last-seen hook process).
+//     with a detached _bg-pull stamping freshness on another window).
 //
 // Honest limitations:
 //
@@ -58,10 +58,10 @@ func sessionNames(ws []Workspace) []string {
 
 // withWriteLock holds an exclusive flock(2) on a sibling lockfile of
 // the state file while fn runs. Serializes read-modify-write
-// operations across atelier processes — without this, the
-// stamp-last-seen hook subprocess and the main atelier binary
-// (running RegisterCreatedWorkspace, OpenDefaultBranch, etc.) race
-// on the cache file and the second writer clobbers the first's
+// operations across atelier processes — without this, a detached
+// subprocess (_bg-pull / _forge-refresh stamping window state) and the
+// main atelier binary (running RegisterCreatedWorkspace, OpenDefaultBranch,
+// etc.) race on the cache file and the second writer clobbers the first's
 // mutations.
 //
 // Read-only callers (Load on its own, for restore) don't need this
@@ -138,14 +138,6 @@ type Workspace struct {
 	RepoPath    string   `json:"repo_path,omitempty"` // empty for multi-repo
 	Kind        string   `json:"kind,omitempty"`      // "worktree" | "multi-repo" | ""
 	Windows     []Window `json:"windows,omitempty"`
-
-	// LastSeen mirrors the @last_seen tmux session-level option (unix
-	// epoch of when the user last switched AWAY from this session,
-	// stamped by the client-session-changed hook). Persisted so the
-	// picker's "last used N ago" column survives across atelier
-	// restarts — without this the column shows empty for restored
-	// workspaces, making them look brand-new.
-	LastSeen int64 `json:"last_seen,omitempty"`
 }
 
 // Window is one tmux window in an atelier workspace — typically a git
@@ -166,6 +158,13 @@ type Window struct {
 
 	// Branch (informational; the worktree at Cwd is the source of truth).
 	Branch string `json:"branch,omitempty"`
+
+	// CreatedTs mirrors the @created_ts tmux window option (unix epoch of
+	// when the window was created). Persisted so restore re-stamps it and
+	// the picker's Age sort survives a tmux restart — without this a
+	// restored workspace would look brand-new. Stamped once at creation
+	// and never mutated.
+	CreatedTs int64 `json:"created_ts,omitempty"`
 
 	// Attention is the @needs_attention flag — a generic
 	// "this window wants the user's eyes" signal. Core renders it

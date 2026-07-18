@@ -2,12 +2,11 @@ package workspaces
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/vyrwu/atelier/internal/integration"
+	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/perf"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
@@ -76,20 +75,23 @@ func formatRecapLine(recap string, indent int) string {
 	return fmt.Sprintf("\n%s\033[3;38;5;103m· %s\033[0m", strings.Repeat(" ", indent), recap)
 }
 
-// BuildSessionList replicates tmux_session_list:
+// BuildSessionList builds the Active Workspaces (M-a) picker rows:
 //
 //   - Repo sessions stamped with @repo_path by the workspace creator
 //   - Auto (multi-repo) sessions stamped with @ai_workspace_kind
 //   - Filters out atelier popup sessions (starts with `_`)
 //   - Icons:
 //     red-bold `❯` current workspace
-//     yellow `⏺` attention
-//     dim `○` claude-present (no attention)
+//     yellow `⏺` needs attention
+//     dim `○` no attention (idle — every workspace can host an agent, so
+//     the circle reads "nothing wants you here" rather than "agent present")
 //   - Cyan session / green window; auto sessions use orange (256:166)
 //   - Bold session+window when current
-//   - Italic-grey `· <recap>` suffix when @attention_recap set AND claude-present
-//   - Priority sort: claude+attention < claude < attention < regular
-//     (default-branch row of a repo sorts after non-default within each layer)
+//   - Italic-grey `· <recap>` line when @attention_recap is set
+//   - Time column is age since creation (@created_ts) — a "how old / should
+//     I GC this" signal, not a last-touched clock
+//   - Ordered by the active sort mode (readSortMode / sortEntries), which
+//     the user cycles with Tab; Attention is the default
 func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	defer perf.Start("session-list").End()
 
@@ -105,9 +107,10 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	// classified the state into @forge_state; the picker owns presentation.
 	// Absent adapter → no column, no extra field.
 	showForge := forgeActive()
+	mode := readSortMode(h)
 
-	const baseFields = 11
-	format := "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{session_last_attached}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{@last_seen}|#{" + workspace.OptWorkspaceTag + "}"
+	const baseFields = 10
+	format := "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{" + workspace.OptCreatedTs + "}|#{" + workspace.OptWorkspaceTag + "}"
 	if showForge {
 		format += "|#{" + OptForgeState + "}"
 	}
@@ -116,18 +119,6 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		return nil, err
 	}
 	now := time.Now()
-
-	// Agent-present detection: a row shows the agent sigil + recap when the
-	// active AI integration's backing popup session exists for that window.
-	// Derived via the AIIntegration.AgentPopupSession port — NOT a hardcoded
-	// prefix — so a swapped/mock agent lights up correctly. No AI configured
-	// → no agent anywhere.
-	allSessions, _ := h.ListSessions()
-	sessionExists := make(map[string]bool, len(allSessions))
-	for _, s := range allSessions {
-		sessionExists[s] = true
-	}
-	activeAI := integration.Active().AI
 
 	// Memoize DefaultBranch per repo path. Every window of a repo
 	// session shares one @repo_path and one default branch, but the
@@ -145,13 +136,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		return b
 	}
 
-	type entry struct {
-		priority  int
-		row       SessionRow
-		lastAtt   string
-		forgeRank int // kernel forge-state sort rank (lower = earlier)
-	}
-	var entries []entry
+	var entries []sessionEntry
 
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
@@ -165,9 +150,9 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		if len(fields) < baseFields {
 			continue
 		}
-		sid, wid, session, window, lastAtt := fields[0], fields[1], fields[2], fields[3], fields[4]
-		repoPath, attention, kind, recap, lastSeen := fields[5], fields[6], fields[7], fields[8], fields[9]
-		tag := strings.TrimSpace(fields[10])
+		sid, wid, session, window := fields[0], fields[1], fields[2], fields[3]
+		repoPath, attention, kind, recap, createdStr := fields[4], fields[5], fields[6], fields[7], fields[8]
+		tag := strings.TrimSpace(fields[9])
 		// Kernel forge badge: the cached @forge_state field (if present)
 		// follows the fixed fields. The picker renders the glyph itself and
 		// computes the sort rank — the adapter only classified the state.
@@ -185,15 +170,6 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		if showForge {
 			badgeCol = forgeBadgeColumn(forgeBadge)
 		}
-		// Prefer @last_seen (stamped by client-session-changed hook on
-		// switch-away) over session_last_attached (frozen at initial
-		// attach). last_seen is missing for sessions that haven't
-		// been switched away from since the hook started firing —
-		// fall back to last_attached so those rows still show a
-		// number rather than blank.
-		if strings.TrimSpace(lastSeen) != "" {
-			lastAtt = lastSeen
-		}
 
 		// Filter out atelier-managed popup sessions.
 		if strings.HasPrefix(session, "_") {
@@ -204,27 +180,21 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			continue
 		}
 
-		isClaude := activeAI != nil && sessionExists[activeAI.AgentPopupSession(sid, wid)]
 		isAttn := attention == "1"
 		isCurrent := currentSid != "" && sid == currentSid && wid == currentWid
+		createdTs, _ := strconv.ParseInt(strings.TrimSpace(createdStr), 10, 64)
 
 		// Layout (multi-line item):
-		//   <time> <icon> <badge> <session>/<window>
+		//   <time> <icon> <badge> <window> <session>
 		//                         · <recap>
 		//
-		// Time is a 3-char right-aligned dim-grey column on the left.
-		// Icon (❯ ⏺ ○) follows after a single space — the icon column
-		// is 2 cells wide (glyph + trailing space) so name text stays
-		// vertically aligned across rows.
+		// Time is a 3-char right-aligned dim-grey column showing age since
+		// creation (@created_ts) — a GC signal, uniform across rows. Icon
+		// (❯ ⏺ ○) follows after a single space — the icon column is 2 cells
+		// wide (glyph + trailing space) so name text stays vertically aligned.
 		//
 		// Recap drops onto its own line, indented to sit under the name.
-		var ageText string
-		if isCurrent {
-			ageText = "now"
-		} else {
-			ageText = formatAge(now, lastAtt)
-		}
-		timeCol := fmt.Sprintf("\033[38;5;103m%3s\033[0m ", ageText)
+		timeCol := fmt.Sprintf("\033[38;5;103m%3s\033[0m ", formatAge(now, createdStr))
 
 		var icon string
 		switch {
@@ -232,10 +202,10 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			icon = "\033[1;31m❯\033[0m "
 		case isAttn:
 			icon = "\033[33m⏺\033[0m "
-		case isClaude:
-			icon = "\033[90m○\033[0m "
 		default:
-			icon = "  "
+			// ○ = idle / no attention. Every workspace can host an agent, so
+			// the circle means "nothing wants you here," not "agent present."
+			icon = "\033[90m○\033[0m "
 		}
 
 		// Show the persisted AI summary whenever one exists — NOT only when
@@ -256,79 +226,35 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			weight = "1;"
 		}
 
-		var display string
-		var priority int
+		// Default-branch rows sink within a group; auto (multi-repo) sessions
+		// have no default branch. session=cyan(36) git / orange(256:166) auto.
+		isDefault := false
+		sessionColor := "38;5;166"
 		if repoPath != "" {
-			defaultBranch := defaultBranchFor(repoPath)
-			isDefault := window == defaultBranch
-			// Priority layers (bash):
-			//   0/1 claude+attention (default last)
-			//   2/3 claude
-			//   4/5 attention
-			//   6/7 regular
-			switch {
-			case isAttn && isClaude:
-				if isDefault {
-					priority = 1
-				} else {
-					priority = 0
-				}
-			case isClaude:
-				if isDefault {
-					priority = 3
-				} else {
-					priority = 2
-				}
-			case isAttn:
-				if isDefault {
-					priority = 5
-				} else {
-					priority = 4
-				}
-			default:
-				if isDefault {
-					priority = 7
-				} else {
-					priority = 6
-				}
-			}
-			// session=cyan(36), window=green(32).
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", session, window, tag)
-		} else {
-			// Non-git (auto) session.
-			priority = 8
-			if isAttn {
-				priority = 0
-			}
-			// session=orange(256:166), window=green(32).
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", session, window, tag)
+			isDefault = window == defaultBranchFor(repoPath)
+			sessionColor = "36"
 		}
+		display := formatSessionDisplay(timeCol, icon, badgeCol, weight, sessionColor, session, window, tag)
 
-		entries = append(entries, entry{
-			priority:  priority,
+		entries = append(entries, sessionEntry{
 			row:       SessionRow{Session: session, Window: window, Display: display, Recap: recapStr},
-			lastAtt:   lastAtt,
+			isAttn:    isAttn,
+			isDefault: isDefault,
+			createdTs: createdTs,
+			session:   session,
+			window:    window,
+			tag:       tag,
 			forgeRank: forgeRank,
 		})
 	}
 
-	// Stable sort by priority, then by the kernel forge-state rank (open →
-	// draft → merged → closed → none), ties finally broken by reverse
-	// last_attached (newest first).
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].priority != entries[j].priority {
-			return entries[i].priority < entries[j].priority
-		}
-		if entries[i].forgeRank != entries[j].forgeRank {
-			return entries[i].forgeRank < entries[j].forgeRank
-		}
-		return entries[i].lastAtt > entries[j].lastAtt
-	})
+	sortEntries(entries, mode)
 
 	out2 := make([]SessionRow, 0, len(entries))
 	for _, e := range entries {
 		out2 = append(out2, e.row)
 	}
+	debuglog.Logf("workspaces.BuildSessionList: sort=%s rows=%d forge=%v", mode, len(out2), showForge)
 	return out2, nil
 }
 

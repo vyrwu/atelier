@@ -20,53 +20,55 @@ var Manifest = &manifest.Manifest{
 		AlsoInPopup: true,
 	},
 	Bindings: []manifest.Binding{
-		{Key: "M-s", Title: "Select workspace", Style: manifest.StylePicker, Invoke: "sessions", AlsoInPopup: true},
-		{Key: "M-r", Title: "Recover Workspace", Style: manifest.StylePicker, Invoke: "recover", AlsoInPopup: true},
+		{Key: "M-a", Title: "Active workspaces", Style: manifest.StylePicker, Invoke: "sessions", AlsoInPopup: true},
+		{Key: "M-r", Title: "Workspace history", Style: manifest.StylePicker, Invoke: "recover", AlsoInPopup: true},
 	},
 	UI: &manifest.UI{
 		Icon:        "栽",
 		AccentColor: "168",
-		PopupTitle:  "Select Workspace",
+		PopupTitle:  "Active Workspaces",
 	},
 	Popup:    manifest.KindNone,
 	Requires: []string{"git", "fzf"},
 	PickerBindings: []manifest.PickerBinding{
-		// creator (repo picker)
-		{Picker: "creator", Key: "Enter", Action: "Accept repo (or submit prompt in auto-mode)"},
-		{Picker: "creator", Key: "M-a", Action: "Toggle repo / auto-mode prompt"},
-		{Picker: "creator", Key: "M-s", Action: "Jump to session picker"},
-		{Picker: "creator", Key: "M-r", Action: "Jump to recover workspace picker"},
+		// creator (repo picker) — AI branch-naming is the default; M-f forces
+		// a manual name, M-m switches to a multi-repo (AI-named) session.
+		{Picker: "creator", Key: "Enter", Action: "Accept repo (or submit prompt in multi-repo mode)"},
+		{Picker: "creator", Key: "M-m", Action: "Toggle multi-repo (AI-named) session mode"},
+		{Picker: "creator", Key: "M-a", Action: "Jump to active workspaces"},
+		{Picker: "creator", Key: "M-r", Action: "Jump to workspace history"},
 		{Picker: "creator", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// name (manual branch-name picker)
+		// name (manual branch-name picker — reached via M-f)
 		{Picker: "name", Key: "Enter", Action: "Accept branch name (empty → default branch)"},
-		{Picker: "name", Key: "M-a", Action: "Switch to auto-mode prompt"},
-		{Picker: "name", Key: "M-s", Action: "Jump to session picker"},
-		{Picker: "name", Key: "M-r", Action: "Jump to recover workspace picker"},
+		{Picker: "name", Key: "M-f", Action: "Switch back to AI branch naming"},
+		{Picker: "name", Key: "M-a", Action: "Jump to active workspaces"},
+		{Picker: "name", Key: "M-r", Action: "Jump to workspace history"},
 		{Picker: "name", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// prompt (auto-mode Claude-named)
-		{Picker: "prompt", Key: "Enter", Action: "Submit prompt → Claude generates branch name"},
-		{Picker: "prompt", Key: "M-a", Action: "Switch to manual-name mode"},
-		{Picker: "prompt", Key: "M-s", Action: "Jump to session picker"},
-		{Picker: "prompt", Key: "M-r", Action: "Jump to recover workspace picker"},
+		// prompt (default: AI-named branch)
+		{Picker: "prompt", Key: "Enter", Action: "Submit prompt → agent generates branch name"},
+		{Picker: "prompt", Key: "M-f", Action: "Force a manual branch name"},
+		{Picker: "prompt", Key: "M-a", Action: "Jump to active workspaces"},
+		{Picker: "prompt", Key: "M-r", Action: "Jump to workspace history"},
 		{Picker: "prompt", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// sessions (Select Workspace)
+		// sessions (Active Workspaces — M-a)
 		{Picker: "sessions", Key: "Enter", Action: "Switch to workspace / confirm action"},
+		{Picker: "sessions", Key: "Tab", Action: "Cycle sort (attention/age/repo/tag/forge)"},
 		{Picker: "sessions", Key: "M-x", Action: "Delete workspace (with confirm)"},
 		{Picker: "sessions", Key: "M-t", Action: "Tag workspace (pick/create; empty clears)"},
 		{Picker: "sessions", Key: "M-n", Action: "Jump to new-workspace creator"},
-		{Picker: "sessions", Key: "M-r", Action: "Jump to recover workspace picker"},
+		{Picker: "sessions", Key: "M-r", Action: "Jump to workspace history"},
 		{Picker: "sessions", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// recover (Recover Workspace — worktrees on disk)
+		// recover (Workspace History — worktrees on disk)
 		{Picker: "recover", Key: "Enter", Action: "Open the worktree / confirm action"},
 		{Picker: "recover", Key: "M-x", Action: "Delete worktree (with confirm)"},
-		{Picker: "recover", Key: "M-s", Action: "Jump to session picker"},
+		{Picker: "recover", Key: "M-a", Action: "Jump to active workspaces"},
 		{Picker: "recover", Key: "M-n", Action: "Jump to new-workspace creator"},
 		{Picker: "recover", Key: "M-u", Action: "Jump to clone-from-URL picker"},
 		// clone (URL picker)
 		{Picker: "clone", Key: "Enter", Action: "Validate URL + clone"},
-		{Picker: "clone", Key: "M-s", Action: "Jump to session picker"},
+		{Picker: "clone", Key: "M-a", Action: "Jump to active workspaces"},
 		{Picker: "clone", Key: "M-n", Action: "Jump to new-workspace creator"},
-		{Picker: "clone", Key: "M-r", Action: "Jump to recover workspace picker"},
+		{Picker: "clone", Key: "M-r", Action: "Jump to workspace history"},
 	},
 }
 
@@ -83,6 +85,7 @@ func AddCommands(root *cobra.Command) {
 	root.AddCommand(DeletePromptCommand())
 	root.AddCommand(DeleteRowCommand())
 	root.AddCommand(SessionListCommand())
+	root.AddCommand(SortNextCommand())
 	root.AddCommand(TagCommand())
 	root.AddCommand(TagPreviewCommand())
 	root.AddCommand(RecoverRowsCommand())
