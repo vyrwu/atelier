@@ -95,10 +95,13 @@ func SessionsCommand() *cobra.Command {
 			// the PR badge is current on the NEXT open, and advertise M-o.
 			// When no forge adapter is configured the slot is simply absent.
 			workspace.SpawnForgeRefresh()
-			footer := "M-x · delete  |  M-t · tag  |  M-? · help"
-			if forgeActive() {
-				footer += "  |  M-o · open PR"
-			}
+
+			// Sticky scope (M-p): a pinned query pre-seeds the picker and
+			// lights the "Pinned" footer badge, so a focused context (one
+			// repo, one tag) survives across picker invocations for the
+			// rest of the tmux session. See workspace.GetScopePin.
+			pin := workspace.GetScopePin(h)
+			footer := sessionFooter(pin != "", forgeActive())
 
 			opts := []fzfstyle.Opt{
 				fzfstyle.WithCustomColor("prompt:red:bold,pointer:red,query:red,hl:red,hl+:red:bold,bg+:#44475a,fg+:#f8f8f2:bold,label:103,border:103,footer:103"),
@@ -130,6 +133,16 @@ func SessionsCommand() *cobra.Command {
 				// M-t: tag the current workspace via a nested tag picker,
 				// then reload so the colored pill renders in place.
 				fzfstyle.WithBind("alt-t", tagBind()),
+				// M-p: toggle the session scope pin. The sub-command reads
+				// the current pin state and echoes the fzf actions (pin +
+				// trailing space + badge, or unpin + clear-query) so the
+				// picker updates live without a full reload.
+				fzfstyle.WithBind("alt-p", "transform:"+dispatch.ToolCmd("workspaces", "_set-scope-pin", "{q}")),
+			}
+			if pin != "" {
+				// Trailing space: the pin reads as a prefix the user keeps
+				// typing after to narrow within the scope.
+				opts = append(opts, fzfstyle.WithQuery(pin+" "))
 			}
 			if forgeActive() {
 				opts = append(opts, fzfstyle.WithBind("alt-o",

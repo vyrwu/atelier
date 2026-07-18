@@ -85,6 +85,7 @@ func AddCommands(root *cobra.Command) {
 	root.AddCommand(SessionListCommand())
 	root.AddCommand(TagCommand())
 	root.AddCommand(TagPreviewCommand())
+	root.AddCommand(SetScopePinCommand())
 	root.AddCommand(RecoverRowsCommand())
 	root.AddCommand(RecoverDeletePromptCommand())
 	root.AddCommand(RecoverDeleteRowCommand())
