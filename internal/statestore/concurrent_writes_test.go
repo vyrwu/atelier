@@ -9,8 +9,8 @@ import (
 // process race fix: N goroutines each Load+mutate+Save the cache,
 // each touching DIFFERENT fields. Without flock, the second writer
 // clobbers the first's mutations (which is exactly how
-// stamp-last-seen's LastSeen write was getting lost when
-// RegisterCreatedWorkspace ran concurrently).
+// a CreatedAt write was getting lost when RegisterCreatedWorkspace
+// ran concurrently with stamp-last-active).
 //
 // We use goroutines (intra-process) as a proxy — they share the
 // same file just like separate processes do, but the test is
@@ -41,11 +41,11 @@ func TestConcurrentWrites_DoNotClobberEachOther(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(3)
 
-	// Writer 1: sets LastSeen (simulates stamp-last-seen hook).
+	// Writer 1: sets CreatedAt (simulates RegisterCreatedWorkspace seeding the timestamp).
 	go func() {
 		defer wg.Done()
 		if err := UpdateWorkspace("ws/test", func(ws *Workspace) {
-			ws.LastSeen = 1700000000
+			ws.CreatedAt = 1700000000
 		}); err != nil {
 			t.Errorf("writer 1: %v", err)
 		}
@@ -84,9 +84,9 @@ func TestConcurrentWrites_DoNotClobberEachOther(t *testing.T) {
 		t.Fatalf("len(Workspaces) = %d, want 1: %+v", len(state.Workspaces), state.Workspaces)
 	}
 	ws := state.Workspaces[0]
-	if ws.LastSeen != 1700000000 {
-		t.Errorf("LastSeen = %d, want %d (writer 1 clobbered)",
-			ws.LastSeen, 1700000000)
+	if ws.CreatedAt != 1700000000 {
+		t.Errorf("CreatedAt = %d, want %d (writer 1 clobbered)",
+			ws.CreatedAt, 1700000000)
 	}
 	if ws.RepoPath != "/tmp/fake-updated" {
 		t.Errorf("RepoPath = %q, want %q (writer 3 clobbered)",
@@ -164,7 +164,7 @@ func TestConcurrentWrites_RemoveRenameDoNotClobberMetadata(t *testing.T) {
 }
 
 // TestConcurrentWrites_HighContention exercises the lock under
-// real contention: many goroutines all updating LastSeen on the
+// real contention: many goroutines all updating CreatedAt on the
 // same workspace. The final value should equal the LAST writer's
 // value. Without flock, writes interleave and the final value is
 // unpredictable (often an old value because Load saw stale data).
@@ -192,7 +192,7 @@ func TestConcurrentWrites_HighContention(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_ = UpdateWorkspace("ws/test", func(ws *Workspace) {
-				ws.LastSeen = int64(1700000000 + i)
+				ws.CreatedAt = int64(1700000000 + i)
 			})
 		}()
 	}
@@ -202,12 +202,12 @@ func TestConcurrentWrites_HighContention(t *testing.T) {
 	if err != nil || state == nil || len(state.Workspaces) != 1 {
 		t.Fatalf("post-contention state corrupt: %v %v", state, err)
 	}
-	// Final LastSeen must be one of the values we wrote — i.e. the
+	// Final CreatedAt must be one of the values we wrote — i.e. the
 	// last writer's. Pre-flock, a stale Load could write back an
-	// earlier value, leaving LastSeen at something we never wrote.
-	got := state.Workspaces[0].LastSeen
+	// earlier value, leaving CreatedAt at something we never wrote.
+	got := state.Workspaces[0].CreatedAt
 	if got < 1700000000 || got > 1700000000+N-1 {
-		t.Errorf("LastSeen = %d, expected one of [1700000000..%d] — lock failed",
+		t.Errorf("CreatedAt = %d, expected one of [1700000000..%d] — lock failed",
 			got, 1700000000+N-1)
 	}
 }

@@ -284,7 +284,7 @@ func TestLifecycle_RecapShownWithoutLivePopup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// No live agent popup exists (isClaude is false) — the summary must show.
+	// No live agent popup exists — the summary must show.
 	rows, err := BuildSessionList(srv.Client)
 	if err != nil {
 		t.Fatalf("BuildSessionList: %v", err)

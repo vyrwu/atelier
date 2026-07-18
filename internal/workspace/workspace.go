@@ -49,6 +49,13 @@ const (
 	OptWorkspaceAhead       = "@workspace_ahead"
 	OptWorkspacePullError   = "@workspace_pull_error"
 
+	// OptWorkspaceCreatedTs is the unix epoch (seconds) when the workspace
+	// window was first created. Stamped by the lifecycle primitive at
+	// creation time, persisted in the statestore, and re-stamped by
+	// restore so the M-s picker's age column shows actual workspace age
+	// rather than recency-of-visit.
+	OptWorkspaceCreatedTs = "@workspace_created_ts"
+
 	// OptWorkspaceTag is a user-assigned label that groups workspaces
 	// across repos/branches (client, initiative, theme). At most one tag
 	// per window. The tmux window option is the source of truth (survives
@@ -399,17 +406,16 @@ func RegisterCreatedWorkspace(info NewWorkspaceInfo) {
 		if info.Kind != "" {
 			ws.Kind = info.Kind
 		}
-		// Seed LastSeen at creation time. Without this, a workspace
+		// Seed CreatedAt at creation time. Without this, a workspace
 		// the user creates and then M-q's WITHOUT switching away
-		// would have no last_seen in the cache (the stamp-last-seen
-		// hook only fires on session-CHANGE, not on kill-server).
+		// would have no created_at in the cache.
 		// On next launch the picker would show no age for it,
 		// confusing the user into thinking persistence is broken.
 		//
-		// Only seed when unset — don't overwrite a real last_seen
-		// from a later switch-away event.
-		if ws.LastSeen == 0 {
-			ws.LastSeen = now
+		// Only seed when unset — don't overwrite the original creation
+		// timestamp if RegisterCreatedWorkspace is called again later.
+		if ws.CreatedAt == 0 {
+			ws.CreatedAt = now
 		}
 	})
 	_ = statestore.UpdateWindow(info.Session, info.WindowName, func(w *statestore.Window) {

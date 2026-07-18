@@ -62,11 +62,12 @@ type shortcut struct{ key, desc string }
 // session), the ones a user must know to drive the tool.
 func essentialShortcuts() []shortcut {
 	return []shortcut{
-		{"M-n", "New workspace — describe a task; the agent names the branch"},
-		{"M-s", "Switch workspace — picker shows recap + git freshness"},
-		{"M-r", "Recover a recently closed workspace"},
-		{"M-;", "Tools — open any tool in the current workspace"},
-		{"M-q", "Detach — server keeps running; reattach with `atelier`"},
+		{"M-n", "New workspace"},
+		{"M-s", "Active workspaces"},
+		{"M-r", "Workspace history"},
+		{"M-u", "Clone repo from URL"},
+		{"M-;", "Tools"},
+		{"M-q", "Detach (server stays running)"},
 		{"M-?", "This cheatsheet"},
 	}
 }

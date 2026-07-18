@@ -246,20 +246,20 @@ func TestRestoreBlock_RunsPopupCleanupAtStartup(t *testing.T) {
 	}
 }
 
-// TestHooksBlock_LastSeenChainedToClientSessionChanged locks in the
-// chained-hook contract: the last-seen stamp uses `set-hook -ag` to
+// TestHooksBlock_LastActiveChainedToClientSessionChanged locks in the
+// chained-hook contract: the last-active stamp uses `set-hook -ag` to
 // APPEND to client-session-changed rather than replacing the existing
 // `clear-popup` handler. Without -a, attaching this hook would wipe
 // the attention-clear behavior on every popup landing.
-func TestHooksBlock_LastSeenChainedToClientSessionChanged(t *testing.T) {
+func TestHooksBlock_LastActiveChainedToClientSessionChanged(t *testing.T) {
 	b := HooksBlock()
 	if !strings.Contains(b, "set-hook -ag client-session-changed") {
-		t.Errorf("hooks block must use `set-hook -ag` (append) for last-seen; got:\n%s", b)
+		t.Errorf("hooks block must use `set-hook -ag` (append) for last-active; got:\n%s", b)
 	}
-	if !strings.Contains(b, "atelier internal stamp-last-seen") {
-		t.Errorf("hooks block missing stamp-last-seen invocation; got:\n%s", b)
+	if !strings.Contains(b, "atelier internal stamp-last-active") {
+		t.Errorf("hooks block missing stamp-last-active invocation; got:\n%s", b)
 	}
-	if !strings.Contains(b, `#{client_last_session}`) {
-		t.Errorf("hooks block must pass #{client_last_session} to stamp-last-seen; got:\n%s", b)
+	if !strings.Contains(b, `#{session_name}`) {
+		t.Errorf("hooks block must pass #{session_name} to stamp-last-active; got:\n%s", b)
 	}
 }

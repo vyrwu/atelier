@@ -22,7 +22,7 @@
 //     via flock(2) on a sibling lockfile. Without this, two atelier
 //     processes performing concurrent Load+mutate+Save would clobber
 //     each other's mutations (e.g. RegisterCreatedWorkspace racing
-//     with the stamp-last-seen hook process).
+//     with the stamp-last-active hook process).
 //
 // Honest limitations:
 //
@@ -59,7 +59,7 @@ func sessionNames(ws []Workspace) []string {
 // withWriteLock holds an exclusive flock(2) on a sibling lockfile of
 // the state file while fn runs. Serializes read-modify-write
 // operations across atelier processes — without this, the
-// stamp-last-seen hook subprocess and the main atelier binary
+// stamp-last-active hook subprocess and the main atelier binary
 // (running RegisterCreatedWorkspace, OpenDefaultBranch, etc.) race
 // on the cache file and the second writer clobbers the first's
 // mutations.
@@ -139,13 +139,12 @@ type Workspace struct {
 	Kind        string   `json:"kind,omitempty"`      // "worktree" | "multi-repo" | ""
 	Windows     []Window `json:"windows,omitempty"`
 
-	// LastSeen mirrors the @last_seen tmux session-level option (unix
-	// epoch of when the user last switched AWAY from this session,
-	// stamped by the client-session-changed hook). Persisted so the
-	// picker's "last used N ago" column survives across atelier
-	// restarts — without this the column shows empty for restored
-	// workspaces, making them look brand-new.
-	LastSeen int64 `json:"last_seen,omitempty"`
+	// CreatedAt mirrors the @workspace_created_ts tmux window option
+	// (unix epoch of when the workspace was first created). Persisted
+	// so the picker's age column survives across atelier restarts —
+	// without this the column shows empty for restored workspaces,
+	// making them look brand-new.
+	CreatedAt int64 `json:"created_at,omitempty"`
 }
 
 // Window is one tmux window in an atelier workspace — typically a git

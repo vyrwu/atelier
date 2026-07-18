@@ -7,9 +7,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -35,7 +33,6 @@ func InternalCommand() *cobra.Command {
 	c.AddCommand(internalAttachCmd())
 	c.AddCommand(internalRespawnCmd())
 	c.AddCommand(internalStampStatuslineCmd())
-	c.AddCommand(internalStampLastSeenCmd())
 	c.AddCommand(internalStampLastActiveCmd())
 	c.AddCommand(internalClipboardCopyCmd())
 	return c
@@ -149,52 +146,6 @@ func internalStampLastActiveCmd() *cobra.Command {
 			return statestore.SetLastActiveSession(session)
 		},
 	}
-	return c
-}
-
-// internalStampLastSeenCmd stamps `@last_seen = now` on the OUTGOING
-// session whenever the user switches workspaces. Wired into the
-// `client-session-changed` tmux hook with `#{client_last_session}` —
-// the session the client was on BEFORE the switch.
-//
-// Why we need our own field instead of `session_last_attached`:
-// last_attached is "time the session was last attached to", which
-// for a long-running workspace freezes at the initial attach time —
-// so "how long since I left" reads as "how long since I arrived,"
-// inflating the timer for stale-looking-but-recently-active rows.
-// Stamping at switch-away time gives the picker the actually useful
-// "minutes since I last had eyes on this" signal.
-func internalStampLastSeenCmd() *cobra.Command {
-	var socket string
-	c := &cobra.Command{
-		Use:   "stamp-last-seen <session-name>",
-		Short: "Set @last_seen=now on a session (client-session-changed hook entry)",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			// Hook fires with empty client_last_session on the very
-			// first attach of a session (no prior). Treat as no-op
-			// rather than a stamping error.
-			if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
-				return nil
-			}
-			session := args[0]
-			h := tmuxhost.New(socket)
-			now := time.Now().Unix()
-			ts := strconv.FormatInt(now, 10)
-			if _, err := h.Run("set-option", "-t", session, "@last_seen", ts); err != nil {
-				return err
-			}
-			// Write-through to the persistent cache so the picker's
-			// "last used" timer survives atelier restarts. Without
-			// this, restored workspaces show no age until the user
-			// next switches away from them.
-			_ = statestore.UpdateWorkspace(session, func(ws *statestore.Workspace) {
-				ws.LastSeen = now
-			})
-			return nil
-		},
-	}
-	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	return c
 }
 
