@@ -48,7 +48,7 @@ func visibleWidth(s string) int { return len([]rune(ansiRE.ReplaceAllString(s, "
 func TestFormatSessionDisplay_BadgeOrder(t *testing.T) {
 	badge := forgeBadgeColumn(renderForgeBadge(string(integration.ForgeOpen)))
 	glyph := ansiRE.ReplaceAllString(badge, "")[:1] // the PR glyph rune, ANSI-stripped
-	row := formatSessionDisplay("1d ", "O ", badge, "", "36", "myrepo", "mybranch")
+	row := formatSessionDisplay("1d ", "O ", badge, "", "36", "myrepo", "mybranch", "")
 	vis := ansiRE.ReplaceAllString(row, "")
 
 	iIcon := strings.Index(vis, "O")
@@ -62,6 +62,27 @@ func TestFormatSessionDisplay_BadgeOrder(t *testing.T) {
 	// field so search targets the name alone.
 	if strings.Contains(vis, "recap") || strings.Contains(vis, "\n") {
 		t.Errorf("name line must not contain the recap or a newline: %q", vis)
+	}
+	// No tag → no pill on the name line.
+	if strings.Contains(vis, "#") {
+		t.Errorf("untagged row must not render a pill: %q", vis)
+	}
+}
+
+// TestFormatSessionDisplay_TagPill: a tagged row renders the pill as plain
+// "#tag" text AFTER the window name (so fzf's name-field search matches it),
+// and the pill carries the tag's stable color.
+func TestFormatSessionDisplay_TagPill(t *testing.T) {
+	row := formatSessionDisplay("1d ", "O ", "  ", "", "36", "myrepo", "mybranch", "client-x")
+	vis := ansiRE.ReplaceAllString(row, "")
+
+	iName := strings.Index(vis, "mybranch")
+	iPill := strings.Index(vis, "#client-x")
+	if iName < 0 || iPill <= iName {
+		t.Errorf("pill must follow the window name: name@%d pill@%d in %q", iName, iPill, vis)
+	}
+	if !strings.Contains(row, "\033[3;38;5;"+tagColor("client-x")+"m") {
+		t.Errorf("pill must be italic + colored with the tag's stable color in %q", row)
 	}
 }
 

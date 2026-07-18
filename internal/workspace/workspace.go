@@ -49,10 +49,23 @@ const (
 	OptWorkspaceAhead       = "@workspace_ahead"
 	OptWorkspacePullError   = "@workspace_pull_error"
 
+	// OptWorkspaceTag is a user-assigned label that groups workspaces
+	// across repos/branches (client, initiative, theme). At most one tag
+	// per window. The tmux window option is the source of truth (survives
+	// session restarts); its value is mirrored to the statestore under
+	// TagMetadataKey so restore re-stamps it. The picker derives the tag's
+	// color from its name (stable hash → palette) — no color is persisted.
+	OptWorkspaceTag = "@workspace_tag"
+
 	// AtelierSessionPrefix marks sessions atelier manages as popups; these
 	// are filtered out of workspace listings.
 	AtelierSessionPrefix = "_atelier_"
 )
+
+// TagMetadataKey is the statestore Metadata key that mirrors
+// OptWorkspaceTag. Restore maps it back to the tmux option via
+// statestore.MetadataKeyToOptionName ("workspace.tag" → "@workspace_tag").
+const TagMetadataKey = "workspace.tag"
 
 // Workspace is a tmux window + cwd + derived/persisted metadata.
 type Workspace struct {
@@ -208,6 +221,27 @@ func SetRecap(h *tmuxhost.Client, windowID, recap string) error {
 		w.Recap = recap
 		w.RecapTs = ts
 	})
+	return nil
+}
+
+// SetTag assigns (or clears, when tag == "") the workspace tag on
+// windowID's window and mirrors it to the statestore so it survives a
+// tmux server restart. One tag per window: setting a new value replaces
+// the previous one. Mirrored via the generic metadata bag under
+// TagMetadataKey — restore re-stamps @workspace_tag from it.
+func SetTag(h *tmuxhost.Client, windowID, tag string) error {
+	if tag == "" {
+		if err := h.UnsetWindowOption(windowID, OptWorkspaceTag); err != nil {
+			return err
+		}
+	} else {
+		if err := h.SetWindowOption(windowID, OptWorkspaceTag, tag); err != nil {
+			return err
+		}
+	}
+	// Best-effort cache mirror (same discipline as SetRecap/stampForge):
+	// losing this write only costs the tag on the next tmux restart.
+	_ = PersistWindowMetadata(h, windowID, TagMetadataKey, tag)
 	return nil
 }
 

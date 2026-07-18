@@ -52,6 +52,7 @@ var Manifest = &manifest.Manifest{
 		// sessions (Select Workspace)
 		{Picker: "sessions", Key: "Enter", Action: "Switch to workspace / confirm action"},
 		{Picker: "sessions", Key: "M-x", Action: "Delete workspace (with confirm)"},
+		{Picker: "sessions", Key: "M-t", Action: "Tag workspace (pick/create; empty clears)"},
 		{Picker: "sessions", Key: "M-n", Action: "Jump to new-workspace creator"},
 		{Picker: "sessions", Key: "M-r", Action: "Jump to recover workspace picker"},
 		{Picker: "sessions", Key: "M-u", Action: "Jump to clone-from-URL picker"},
@@ -82,6 +83,7 @@ func AddCommands(root *cobra.Command) {
 	root.AddCommand(DeletePromptCommand())
 	root.AddCommand(DeleteRowCommand())
 	root.AddCommand(SessionListCommand())
+	root.AddCommand(TagCommand())
 	root.AddCommand(RecoverRowsCommand())
 	root.AddCommand(RecoverDeletePromptCommand())
 	root.AddCommand(RecoverDeleteRowCommand())
