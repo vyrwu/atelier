@@ -86,18 +86,27 @@ func renderForgeBadge(state string) string {
 //
 // Layout (the picker's searchable name line):
 //
-//	<time> <attention-icon> <forge-badge> <session>/<window> <#tag>
+//	<time> <attention-icon> <forge-badge> <#tag> <window> <session>
+//
+// The tag pill and the window (branch) LEAD — the fields that distinguish
+// parallel workspaces within a repo scan first; the session (repo) trails,
+// separated by a single space (no delimiter glyph). Colors travel with their
+// field, not their position: branch stays green, repo stays sessionColor, the
+// tag pill its own stable palette color.
 //
 // The AI recap is NOT part of this line — it's emitted as a separate picker
 // field so fzf search can target the name alone (see SessionRow). sessionColor
 // is the SGR color body for the session name ("36" cyan for git workspaces,
 // "38;5;166" orange for auto sessions); weight is "" or "1;". The tag pill
-// (renderTagPill) is appended last, as plain visible "#tag" text, so fzf's
-// name-field search (--nth=1) narrows on "#tag" / "tag" too; empty tag adds
-// nothing.
+// (renderTagPill) renders as plain visible "#tag" text, so fzf's name-field
+// search (--nth=1) narrows on "#tag" / "tag" too; empty tag adds nothing. Pure.
 func formatSessionDisplay(timeCol, icon, badgeCol, weight, sessionColor, session, window, tag string) string {
-	return fmt.Sprintf("%s%s%s\033[%s%sm%s\033[0m/\033[%s32m%s\033[0m%s",
-		timeCol, icon, badgeCol, weight, sessionColor, session, weight, window, renderTagPill(tag))
+	lead := ""
+	if pill := strings.TrimSpace(renderTagPill(tag)); pill != "" {
+		lead = pill + " "
+	}
+	return fmt.Sprintf("%s%s%s%s\033[%s32m%s\033[0m \033[%s%sm%s\033[0m",
+		timeCol, icon, badgeCol, lead, weight, window, weight, sessionColor, session)
 }
 
 // forgeWorkspaceCwd returns the CANONICAL directory for a workspace window —

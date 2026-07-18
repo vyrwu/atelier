@@ -53,10 +53,20 @@ func TestFormatSessionDisplay_BadgeOrder(t *testing.T) {
 
 	iIcon := strings.Index(vis, "O")
 	iBadge := strings.Index(vis, glyph)
-	iName := strings.Index(vis, "myrepo")
-	if iIcon < 0 || iBadge <= iIcon || iName <= iBadge {
-		t.Errorf("column order wrong: icon@%d badge@%d name@%d in %q (want icon<badge<name)",
-			iIcon, iBadge, iName, vis)
+	iBranch := strings.Index(vis, "mybranch")
+	iRepo := strings.Index(vis, "myrepo")
+	if iIcon < 0 || iBadge <= iIcon || iBranch <= iBadge {
+		t.Errorf("column order wrong: icon@%d badge@%d branch@%d in %q (want icon<badge<branch)",
+			iIcon, iBadge, iBranch, vis)
+	}
+	// Name reads "branch repo" — branch (window) leads, repo (session) trails,
+	// separated by a single space (no delimiter glyph).
+	if iRepo <= iBranch {
+		t.Errorf("name order wrong: branch@%d repo@%d in %q (want branch<repo)",
+			iBranch, iRepo, vis)
+	}
+	if sep := vis[iBranch+len("mybranch") : iRepo]; sep != " " {
+		t.Errorf("separator = %q, want single space in %q", sep, vis)
 	}
 	// The recap is no longer part of the name line — it's a separate picker
 	// field so search targets the name alone.
@@ -70,16 +80,16 @@ func TestFormatSessionDisplay_BadgeOrder(t *testing.T) {
 }
 
 // TestFormatSessionDisplay_TagPill: a tagged row renders the pill as plain
-// "#tag" text AFTER the window name (so fzf's name-field search matches it),
-// and the pill carries the tag's stable color.
+// "#tag" text LEADING the window name (so it scans first and fzf's name-field
+// search still matches it), carrying the tag's stable color.
 func TestFormatSessionDisplay_TagPill(t *testing.T) {
 	row := formatSessionDisplay("1d ", "O ", "  ", "", "36", "myrepo", "mybranch", "client-x")
 	vis := ansiRE.ReplaceAllString(row, "")
 
-	iName := strings.Index(vis, "mybranch")
 	iPill := strings.Index(vis, "#client-x")
-	if iName < 0 || iPill <= iName {
-		t.Errorf("pill must follow the window name: name@%d pill@%d in %q", iName, iPill, vis)
+	iName := strings.Index(vis, "mybranch")
+	if iPill < 0 || iName <= iPill {
+		t.Errorf("pill must lead the window name: pill@%d name@%d in %q", iPill, iName, vis)
 	}
 	if !strings.Contains(row, "\033[3;38;5;"+tagColor("client-x")+"m") {
 		t.Errorf("pill must be italic + colored with the tag's stable color in %q", row)

@@ -112,3 +112,41 @@ func TestTagPickerItems(t *testing.T) {
 		t.Errorf("tag row must carry the tag's italic pill color: %q", got[1])
 	}
 }
+
+// TestFormatTagPreview covers the M-t preview's focus states: a pending tag
+// (typed or hovered) renders its live pill leading "branch repo"; the clear-tag
+// row and the empty state both render "branch repo" with no pill (the tag
+// disappears, previewing removal).
+func TestFormatTagPreview(t *testing.T) {
+	// Typed new tag → its pill leads, colored with the tag's stable color;
+	// order is pill < branch < repo.
+	got := formatTagPreview("mybranch", "myrepo", "36", "client-x", "")
+	vis := ansiRE.ReplaceAllString(got, "")
+	iPill := strings.Index(vis, "#client-x")
+	iBranch := strings.Index(vis, "mybranch")
+	iRepo := strings.Index(vis, "myrepo")
+	if iPill < 0 || iBranch <= iPill || iRepo <= iBranch {
+		t.Errorf("want pill<branch<repo, got pill@%d branch@%d repo@%d in %q", iPill, iBranch, iRepo, vis)
+	}
+	if !strings.Contains(got, "\033[3;38;5;"+tagColor("client-x")+"m") {
+		t.Errorf("typed tag must render its live pill color: %q", got)
+	}
+
+	// Hovering an existing tag row (no query) resolves to that tag's pill.
+	if got := formatTagPreview("mybranch", "myrepo", "36", "", "#billing"); !strings.Contains(got, "#billing") ||
+		!strings.Contains(got, "\033[3;38;5;"+tagColor("billing")+"m") {
+		t.Errorf("hovered tag row must preview that tag's pill: %q", got)
+	}
+
+	// Clear-tag row focused → tag disappears: no pill, just "branch repo".
+	got = formatTagPreview("mybranch", "myrepo", "36", "", clearTagLabel)
+	if vis := ansiRE.ReplaceAllString(got, ""); strings.Contains(vis, "#") || vis != "Preview: mybranch myrepo" {
+		t.Errorf("clear preview must drop the pill, got %q", vis)
+	}
+
+	// Nothing resolvable → no pill, just the "Preview:" label + "branch repo".
+	got = formatTagPreview("mybranch", "myrepo", "36", "", "")
+	if vis := ansiRE.ReplaceAllString(got, ""); strings.Contains(vis, "#") || vis != "Preview: mybranch myrepo" {
+		t.Errorf("empty preview must be %q, got %q", "Preview: mybranch myrepo", vis)
+	}
+}
