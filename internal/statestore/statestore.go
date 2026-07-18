@@ -178,6 +178,16 @@ type Window struct {
 	Recap   string `json:"recap,omitempty"`
 	RecapTs int64  `json:"recap_ts,omitempty"`
 
+	// CreatedAt mirrors this window's @workspace_created_ts option (unix
+	// epoch of when the worktree window was created). Persisted PER WINDOW
+	// so the picker's age column survives restarts for every window — a
+	// session with multiple worktree windows otherwise shows a blank age
+	// on all but the first after restore (only the session-level
+	// Workspace.CreatedAt used to be re-stamped). Restore falls back to
+	// the enclosing Workspace.CreatedAt when this is unset (state written
+	// before per-window created_at existed).
+	CreatedAt int64 `json:"created_at,omitempty"`
+
 	// Metadata is a plugin-namespaced bag of per-window state. Keys
 	// follow the convention `<plugin>.<field>` (e.g. `ai.prompt`,
 	// `ai.workspace_kind`, `ai.active_session_id`). Each plugin owns

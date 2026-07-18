@@ -47,6 +47,39 @@ func TestRegisterCreatedWorkspace_SeedsCreatedAt(t *testing.T) {
 	}
 }
 
+// TestRegisterCreatedWorkspace_SeedsWindowCreatedAt locks in the
+// per-window half of the fix: creation stamps the WINDOW's CreatedAt too,
+// not just the session-level one. Without it, a session's second (and
+// later) worktree windows persist created_at=0 and Restore leaves their
+// picker age column blank — only the first window shows an age.
+func TestRegisterCreatedWorkspace_SeedsWindowCreatedAt(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	before := time.Now().Unix()
+	workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
+		Session:    "fake/repo",
+		RepoPath:   "/tmp/whatever",
+		Kind:       "worktree",
+		WindowName: "feat/second",
+		Cwd:        "/tmp/whatever/feat/second",
+		Branch:     "feat/second",
+	})
+	after := time.Now().Unix()
+
+	state, err := statestore.Load()
+	if err != nil || state == nil {
+		t.Fatalf("Load: %v %v", state, err)
+	}
+	w := state.FindWindow("fake/repo", "feat/second")
+	if w == nil {
+		t.Fatal("window feat/second not persisted")
+	}
+	if w.CreatedAt < before || w.CreatedAt > after {
+		t.Errorf("window CreatedAt = %d, expected in [%d, %d] (now-ish)",
+			w.CreatedAt, before, after)
+	}
+}
+
 // TestRegisterCreatedWorkspace_PreservesExistingCreatedAt: calling
 // RegisterCreatedWorkspace AGAIN on an existing workspace (e.g. user
 // re-opens the same default-branch via M-n empty-Enter) must NOT

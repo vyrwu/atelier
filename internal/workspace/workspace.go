@@ -453,6 +453,13 @@ func RegisterCreatedWorkspace(info NewWorkspaceInfo) {
 	_ = statestore.UpdateWindow(info.Session, info.WindowName, func(w *statestore.Window) {
 		w.Cwd = info.Cwd
 		w.Branch = info.Branch
+		// Mirror the per-window @workspace_created_ts (stamped in tmux by
+		// the creation flow) so the picker's age column survives restart
+		// for THIS window, not just the session's first. Only seed when
+		// unset — don't clobber the original creation time on re-register.
+		if w.CreatedAt == 0 {
+			w.CreatedAt = now
+		}
 		if len(info.Metadata) > 0 {
 			if w.Metadata == nil {
 				w.Metadata = map[string]string{}

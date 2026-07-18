@@ -20,8 +20,10 @@ import (
 //	ai    = "claude"   # workspace agent + naming + summary + attention (default: claude)
 //
 // AI defaults to "claude" (the flagship agent, and atelier's out-of-the-box
-// behavior); set `ai = ""` to disable it or `ai = "codex"` etc. to swap.
-// Forge defaults to off — it needs `gh` and is an optional enrichment.
+// behavior); set `ai = ""` to disable it or `ai = "mock"` to swap in the
+// deterministic offline adapter. Forge defaults to off; `forge = "github"`
+// needs `gh`, while `forge = "mock"` is the deterministic offline adapter
+// (reads a fixture map — used by the demo sandbox and tests).
 type integrationsConfig struct {
 	Forge string `toml:"forge"`
 	AI    string `toml:"ai"`
@@ -40,8 +42,10 @@ func composeIntegrations() integration.Set {
 		// disabled (default)
 	case "github":
 		set.Forge = github.New()
+	case "mock":
+		set.Forge = mock.New()
 	default:
-		fmt.Fprintf(os.Stderr, "atelier: unknown [integrations] forge = %q (known: github, \"\" to disable); forge disabled\n", cfg.Forge)
+		fmt.Fprintf(os.Stderr, "atelier: unknown [integrations] forge = %q (known: github, mock, \"\" to disable); forge disabled\n", cfg.Forge)
 	}
 	switch cfg.AI {
 	case "":

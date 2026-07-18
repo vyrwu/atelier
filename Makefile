@@ -1,4 +1,4 @@
-.PHONY: build test test-e2e fmt lint clean help tidy install uninstall init-snapshot list-binaries release-check release-snapshot test-tmux test-tmux-clean test-plugin test-plugin-config ci
+.PHONY: build test test-e2e fmt lint clean help tidy install uninstall init-snapshot list-binaries release-check release-snapshot test-tmux test-tmux-clean test-plugin test-plugin-config ci sandbox sandbox-tmux sandbox-keep
 
 BIN_DIR    := bin
 PREFIX     ?= $(HOME)/.local
@@ -272,3 +272,28 @@ test-plugin:
 	@command -v atelier >/dev/null 2>&1 || { echo "atelier not on PATH after install."; exit 1; }
 	@echo "→ launching tmux -L $(TEST_PLUGIN_SOCKET) (plugin mode)"
 	tmux -L $(TEST_PLUGIN_SOCKET) -f $(TEST_PLUGIN_CONF) new-session -A -s default
+
+
+# ============================================================================
+# Demo / scenario sandbox
+# ============================================================================
+#
+# A fully isolated, EPHEMERAL atelier: real git repos + worktrees + seeded
+# workspace state (attention, recap, freshness, forge PR badges) in a temp
+# dir, on its own tmux socket, with its own XDG config/cache, PATH, and git
+# identity. Configures ai = "mock" so M-n works offline. Coexists with your
+# real atelier server untouched and garbage-collects itself on exit. See
+# sandbox/README.md. The launcher lives at ./sandbox (outside cmd/, so it is
+# never shipped or installed).
+
+# Bundled launcher against the sandbox.
+sandbox: build
+	@go run ./sandbox --mode bundled --bin-dir "$(PWD)/$(BIN_DIR)"
+
+# Plugin / embed mode (plain tmux sourcing `atelier init --bare`).
+sandbox-tmux: build
+	@go run ./sandbox --mode plugin --bin-dir "$(PWD)/$(BIN_DIR)"
+
+# Like `sandbox` but keeps the temp dir + server on exit (for inspection).
+sandbox-keep: build
+	@go run ./sandbox --mode bundled --bin-dir "$(PWD)/$(BIN_DIR)" --keep

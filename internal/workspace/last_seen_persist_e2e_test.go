@@ -61,6 +61,77 @@ func TestRestore_RestoresCreatedAtTimestamp(t *testing.T) {
 	}
 }
 
+// TestRestore_RestoresPerWindowCreatedAt locks in the per-window fix: a
+// session with multiple worktree windows re-stamps @workspace_created_ts
+// on EVERY window from its own CreatedAt, falling back to the session-level
+// Workspace.CreatedAt for windows that predate per-window created_at.
+//
+// Regression target: the sandbox (all-restore) surfaced multi-worktree
+// sessions showing an age on only the first window — the additional
+// windows came back blank because only Workspace.CreatedAt was re-stamped.
+func TestRestore_RestoresPerWindowCreatedAt(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	fakeRepo := t.TempDir()
+	const sessionTs int64 = 1700000000
+	const winTs int64 = 1700009999
+	if err := statestore.Save(&statestore.State{
+		Workspaces: []statestore.Workspace{{
+			SessionName: "fake/repo",
+			RepoPath:    fakeRepo,
+			Kind:        "worktree",
+			CreatedAt:   sessionTs,
+			Windows: []statestore.Window{
+				// no per-window CreatedAt → must fall back to sessionTs
+				{Name: "main", Cwd: fakeRepo, Branch: "main"},
+				// own CreatedAt → must win over sessionTs
+				{Name: "feat/x", Cwd: fakeRepo, Branch: "feat/x", CreatedAt: winTs},
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("statestore.Save: %v", err)
+	}
+
+	srv := testtmux.New(t)
+	srv.NewSession("seed")
+	if err := workspace.Restore(srv.Client); err != nil {
+		t.Fatalf("workspace.Restore: %v", err)
+	}
+
+	// Resolve window @IDs (reading by slash-containing name is ambiguous).
+	lw, err := srv.Client.Run("list-windows", "-t", "=fake/repo", "-F", "#{window_name}|#{window_id}")
+	if err != nil {
+		t.Fatalf("list-windows: %v", err)
+	}
+	idByName := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(lw)), "\n") {
+		name, id, _ := strings.Cut(line, "|")
+		idByName[name] = id
+	}
+
+	for _, tc := range []struct {
+		win  string
+		want int64
+	}{
+		{"main", sessionTs}, // fell back to session-level
+		{"feat/x", winTs},   // used its own
+	} {
+		id := idByName[tc.win]
+		if id == "" {
+			t.Fatalf("window %q not restored", tc.win)
+		}
+		out, err := srv.Client.Run("show-options", "-w", "-t", id, "-v",
+			workspace.OptWorkspaceCreatedTs)
+		if err != nil {
+			t.Fatalf("show-options %s: %v", tc.win, err)
+		}
+		got := strings.TrimSpace(string(out))
+		if want := strconv.FormatInt(tc.want, 10); got != want {
+			t.Errorf("%s @workspace_created_ts = %q, want %q", tc.win, got, want)
+		}
+	}
+}
+
 // TestRestore_NoCreatedAt_NoStamp: when the cache entry has no
 // CreatedAt value (a workspace was created but the value is zero),
 // Restore should NOT stamp the option. A zero-valued epoch

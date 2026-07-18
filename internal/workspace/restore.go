@@ -208,20 +208,7 @@ func restoreOneWorkspace(h *tmuxhost.Client, ws statestore.Workspace) {
 		}
 	}
 
-	// Resolve the first window's @ID so we can stamp window-scoped options.
-	winIDBytes, _ := h.DisplayMessageAt(ws.SessionName+":"+first.Name, "#{window_id}")
-	winID := strings.TrimSpace(winIDBytes)
-
-	// Restore the @workspace_created_ts timestamp so the picker's age
-	// column shows actual workspace age across restarts, not empty.
-	if ws.CreatedAt > 0 && winID != "" {
-		if err := h.SetWindowOption(winID, OptWorkspaceCreatedTs,
-			strconv.FormatInt(ws.CreatedAt, 10)); err != nil {
-			debuglog.LogErr("workspace.Restore: @workspace_created_ts", err)
-		}
-	}
-
-	applyWindowOptionsByName(h, ws.SessionName, first)
+	applyWindowOptionsByName(h, ws.SessionName, first, ws.CreatedAt)
 	scheduleBgPullForWindow(h, ws, first)
 
 	for _, w := range open[1:] {
@@ -237,7 +224,7 @@ func restoreOneWorkspace(h *tmuxhost.Client, ws statestore.Workspace) {
 				ws.SessionName, w.Name), err)
 			continue
 		}
-		applyWindowOptionsByName(h, ws.SessionName, w)
+		applyWindowOptionsByName(h, ws.SessionName, w, ws.CreatedAt)
 		scheduleBgPullForWindow(h, ws, w)
 	}
 }
@@ -317,10 +304,23 @@ func computeDefaultBranch(repoPath string) (string, error) {
 // freshly-created window. Targets by session:window name rather than
 // @id because the new tmux server assigns fresh ids — names are the
 // only stable identity across restarts.
-func applyWindowOptionsByName(h *tmuxhost.Client, session string, w statestore.Window) {
+// applyWindowOptionsByName re-stamps a restored window's tmux options from
+// its cached statestore record. fallbackCreatedTs is the session-level
+// Workspace.CreatedAt, used for @workspace_created_ts when the window has no
+// per-window CreatedAt of its own (state written before per-window
+// created_at existed) so the picker's age column populates for EVERY window,
+// not just the session's first.
+func applyWindowOptionsByName(h *tmuxhost.Client, session string, w statestore.Window, fallbackCreatedTs int64) {
 	target := session + ":" + w.Name
 	if w.Attention {
 		_, _ = h.Run("set-option", "-w", "-t", target, "@needs_attention", "1")
+	}
+	if createdTs := w.CreatedAt; createdTs > 0 {
+		_, _ = h.Run("set-option", "-w", "-t", target, OptWorkspaceCreatedTs,
+			strconv.FormatInt(createdTs, 10))
+	} else if fallbackCreatedTs > 0 {
+		_, _ = h.Run("set-option", "-w", "-t", target, OptWorkspaceCreatedTs,
+			strconv.FormatInt(fallbackCreatedTs, 10))
 	}
 	if w.Recap != "" {
 		_, _ = h.Run("set-option", "-w", "-t", target, "@attention_recap", w.Recap)
