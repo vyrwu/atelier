@@ -19,8 +19,9 @@ import (
 // The picker runs --with-nth=3,4 (display the name plus the recap on its own
 // line beneath it) and --nth=1 (search the name only, NOT the recap). Fields
 // 1-2 stay plain for output parsing. Display holds the styled name; Recap holds
-// the indented second line (empty when there's no AI summary → single-line
-// row). No --wrap: a too-wide recap is truncated to the popup width by fzf.
+// the indented second line — always present so every row is a uniform two-line
+// height, blank when there's no AI summary (#43). No --wrap: a too-wide recap is
+// truncated to the popup width by fzf.
 type SessionRow struct {
 	Session string
 	Window  string
@@ -49,15 +50,27 @@ func recapIndentCells(showForge bool) int {
 	return n
 }
 
+// zeroWidthSpace terminates the reserved (empty-recap) second line. fzf
+// collapses a multi-line item whose trailing line is whitespace-only after
+// ANSI stripping — a blank line of plain spaces (or one ending in an ANSI
+// reset) is trimmed away, dropping the reserved row and re-introducing the
+// one-vs-two-line height oscillation (#43). A zero-width space is invisible yet
+// counts as non-whitespace to fzf's trimmer, so the line reserves height while
+// rendering blank. Verified against fzf 0.72 under --ansi; a non-breaking space
+// does NOT work (fzf trims it as whitespace). Go's unicode.IsSpace agrees —
+// it excludes U+200B but includes U+00A0 — so the TrimSpace guard in
+// recap_line_test.go mirrors fzf's behavior.
+const zeroWidthSpace = "\u200b"
+
 // formatRecapLine renders the AI recap as an italic dim-grey line beneath the
 // workspace name (fzf multi-line item): a leading newline, `indent` spaces to
 // sit under the name, then `· summary`. The picker runs WITHOUT --wrap, so a
 // recap wider than the popup is truncated to width by fzf with an ellipsis —
-// row height stays a predictable two lines. Empty recap → empty string
-// (single-line row). Pure.
+// row height stays a predictable two lines. Empty recap → a blank (but present)
+// second line so every row is a uniform two-line height (#43). Pure.
 func formatRecapLine(recap string, indent int) string {
 	if recap == "" {
-		return ""
+		return "\n" + strings.Repeat(" ", indent) + zeroWidthSpace
 	}
 	return fmt.Sprintf("\n%s\033[3;38;5;103m· %s\033[0m", strings.Repeat(" ", indent), recap)
 }
