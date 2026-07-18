@@ -54,8 +54,8 @@ func Restore(h *tmuxhost.Client) error {
 		debuglog.Logf("workspace.Restore: cache has %d workspaces, last_active=%q",
 			len(cached.Workspaces), cached.LastActiveSession)
 		for _, ws := range cached.Workspaces {
-			debuglog.Logf("workspace.Restore: cache entry session=%s kind=%s repo=%s last_seen=%d windows=%d",
-				ws.SessionName, ws.Kind, ws.RepoPath, ws.LastSeen, len(ws.Windows))
+			debuglog.Logf("workspace.Restore: cache entry session=%s kind=%s repo=%s created_at=%d windows=%d",
+				ws.SessionName, ws.Kind, ws.RepoPath, ws.CreatedAt, len(ws.Windows))
 			restoreOneWorkspace(h, ws)
 		}
 		for k, v := range cached.Globals {
@@ -207,13 +207,17 @@ func restoreOneWorkspace(h *tmuxhost.Client, ws statestore.Workspace) {
 			debuglog.LogErr("workspace.Restore: @repo_path", err)
 		}
 	}
-	// Restore the @last_seen timestamp so the picker's "last used"
-	// column shows the actual age across restarts, not empty (which
-	// reads as "brand new" and is wrong).
-	if ws.LastSeen > 0 {
-		if _, err := h.Run("set-option", "-t", ws.SessionName,
-			"@last_seen", strconv.FormatInt(ws.LastSeen, 10)); err != nil {
-			debuglog.LogErr("workspace.Restore: @last_seen", err)
+
+	// Resolve the first window's @ID so we can stamp window-scoped options.
+	winIDBytes, _ := h.DisplayMessageAt(ws.SessionName+":"+first.Name, "#{window_id}")
+	winID := strings.TrimSpace(winIDBytes)
+
+	// Restore the @workspace_created_ts timestamp so the picker's age
+	// column shows actual workspace age across restarts, not empty.
+	if ws.CreatedAt > 0 && winID != "" {
+		if err := h.SetWindowOption(winID, OptWorkspaceCreatedTs,
+			strconv.FormatInt(ws.CreatedAt, 10)); err != nil {
+			debuglog.LogErr("workspace.Restore: @workspace_created_ts", err)
 		}
 	}
 

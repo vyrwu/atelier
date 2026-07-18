@@ -21,7 +21,7 @@ type RenderOptions struct {
 	// Socket: tmux socket name this config is for. When non-empty,
 	// Render emits `set-environment -g ATELIER_TMUX_SOCKET <socket>`
 	// at the top so every run-shell child (restore, stamp-statusline,
-	// stamp-last-seen, status emitters) reads it via tmuxhost.New("")
+	// stamp-last-active, status emitters) reads it via tmuxhost.New("")
 	// and routes commands back via -L <socket>.
 	//
 	// Bundled launcher passes the socket here. Plugin mode leaves it

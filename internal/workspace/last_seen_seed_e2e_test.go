@@ -10,16 +10,16 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// TestRegisterCreatedWorkspace_SeedsLastSeen locks in: a freshly
-// created workspace gets `LastSeen=now` even if the user never
+// TestRegisterCreatedWorkspace_SeedsCreatedAt locks in: a freshly
+// created workspace gets `CreatedAt=now` even if the user never
 // switches away from it. Without this, M-q'ing immediately after
-// creation leaves the workspace with last_seen=0, and the picker
+// creation leaves the workspace with created_at=0, and the picker
 // reads it as "no age info" on next launch — confusing.
 //
 // The user-visible bug: open a workspace, M-q immediately, relaunch
 // atelier, the M-s picker shows the workspace with NO timestamp.
 // Looks like persistence is broken even though it isn't.
-func TestRegisterCreatedWorkspace_SeedsLastSeen(t *testing.T) {
+func TestRegisterCreatedWorkspace_SeedsCreatedAt(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	before := time.Now().Unix()
@@ -40,30 +40,29 @@ func TestRegisterCreatedWorkspace_SeedsLastSeen(t *testing.T) {
 	if len(state.Workspaces) != 1 {
 		t.Fatalf("workspaces = %d, want 1", len(state.Workspaces))
 	}
-	got := state.Workspaces[0].LastSeen
+	got := state.Workspaces[0].CreatedAt
 	if got < before || got > after {
-		t.Errorf("LastSeen at creation = %d, expected in [%d, %d] (now-ish)",
+		t.Errorf("CreatedAt at creation = %d, expected in [%d, %d] (now-ish)",
 			got, before, after)
 	}
 }
 
-// TestRegisterCreatedWorkspace_PreservesExistingLastSeen: calling
+// TestRegisterCreatedWorkspace_PreservesExistingCreatedAt: calling
 // RegisterCreatedWorkspace AGAIN on an existing workspace (e.g. user
 // re-opens the same default-branch via M-n empty-Enter) must NOT
-// overwrite an existing LastSeen with `now`. The stamp-last-seen
-// hook owns the actively-maintained value; creation only seeds.
-func TestRegisterCreatedWorkspace_PreservesExistingLastSeen(t *testing.T) {
+// overwrite an existing CreatedAt with `now`. Creation only seeds
+// the timestamp once.
+func TestRegisterCreatedWorkspace_PreservesExistingCreatedAt(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	// Seed with a workspace that has a known LastSeen from a prior
-	// session-switch.
-	const knownLastSeen int64 = 1700000000
+	// Seed with a workspace that has a known CreatedAt from initial creation.
+	const knownCreatedAt int64 = 1700000000
 	if err := statestore.Save(&statestore.State{
 		Workspaces: []statestore.Workspace{{
 			SessionName: "fake/repo",
 			RepoPath:    "/tmp/whatever",
 			Kind:        "default-branch",
-			LastSeen:    knownLastSeen,
+			CreatedAt:   knownCreatedAt,
 		}},
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -82,8 +81,8 @@ func TestRegisterCreatedWorkspace_PreservesExistingLastSeen(t *testing.T) {
 	if state == nil || len(state.Workspaces) == 0 {
 		t.Fatal("no workspaces post-register")
 	}
-	if state.Workspaces[0].LastSeen != knownLastSeen {
-		t.Errorf("LastSeen overwritten: got %d, want %d (creation should not clobber)",
-			state.Workspaces[0].LastSeen, knownLastSeen)
+	if state.Workspaces[0].CreatedAt != knownCreatedAt {
+		t.Errorf("CreatedAt overwritten: got %d, want %d (creation should not clobber)",
+			state.Workspaces[0].CreatedAt, knownCreatedAt)
 	}
 }

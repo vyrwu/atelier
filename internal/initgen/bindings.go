@@ -73,24 +73,21 @@ bind -T popup "M-q" run-shell -b 'atelier server quit'
 `
 }
 
-// HooksBlock returns the tmux hooks block (cleanup + attention +
-// last-seen stamping).
+// HooksBlock returns the tmux hooks block (cleanup + attention stamping).
 //
 // The two client-session-changed entries are chained via `set-hook -a`
 // (append). tmux fires both in order on every session switch:
 //  1. clear @needs_attention on the parent window of the popup we
 //     just landed in (so attention sigil stops blinking).
-//  2. stamp @last_seen=now on the session we just left, so the
-//     picker's "last used" timer counts from departure rather than
-//     from the initial attach (which would freeze for stale-looking
-//     long-running workspaces).
+//  2. persist the current session as "last active" so the bundled
+//     launcher can resume it on next launch instead of landing on
+//     bare "default".
 func HooksBlock() string {
 	return `# --- hooks ---
 set-hook -g window-unlinked       'run-shell "atelier popup cleanup"'
 set-hook -g session-closed        'run-shell "atelier popup cleanup"'
 set-hook -g after-select-window   'set-window-option -u @needs_attention'
 set-hook -g client-session-changed 'run-shell "atelier status attention clear-popup"'
-set-hook -ag client-session-changed 'run-shell -b "atelier internal stamp-last-seen \"#{client_last_session}\""'
 # Persist the current session as "last active" so the bundled
 # launcher can resume it on next launch instead of landing on
 # bare "default".

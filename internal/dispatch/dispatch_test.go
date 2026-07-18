@@ -45,8 +45,6 @@ func TestCoreCmd(t *testing.T) {
 			"atelier state restore"},
 		{"two-level subcmd", []string{"internal", "stamp-statusline"},
 			"atelier internal stamp-statusline"},
-		{"with positional", []string{"internal", "stamp-last-seen", "default"},
-			"atelier internal stamp-last-seen default"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

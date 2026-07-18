@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/integration"
@@ -176,6 +178,8 @@ func OpenDefaultBranch(
 		debuglog.LogErr("workspace.OpenDefaultBranch: LandOuter (continuing)", err)
 	}
 	if defaultWid, _ := h.DisplayMessageAt(session+":"+defaultBranch, "#{window_id}"); defaultWid != "" {
+		_ = h.SetWindowOption(defaultWid, OptWorkspaceCreatedTs,
+			strconv.FormatInt(time.Now().Unix(), 10))
 		SpawnBgPull(repoPath, defaultBranch, defaultWid)
 		SpawnForgeRefresh()
 	}
@@ -300,6 +304,11 @@ func CreateWorktreeWindow(h *tmuxhost.Client, spec WorktreeWindowSpec) (windowID
 	if spec.KillDefaultBranch != "" {
 		_, _ = h.Run("kill-window", "-t", "="+spec.Session+":"+spec.KillDefaultBranch)
 	}
+
+	// Stamp creation timestamp before registering so the cache and
+	// the tmux option are consistent from the start.
+	_ = h.SetWindowOption(windowID, OptWorkspaceCreatedTs,
+		strconv.FormatInt(time.Now().Unix(), 10))
 
 	// Mirror the new workspace + window into the on-disk cache so
 	// restore can reconstruct it after a tmux server restart.
