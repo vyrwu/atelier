@@ -1,7 +1,9 @@
 package workspaces
 
 import (
+	"fmt"
 	"hash/fnv"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -168,6 +170,68 @@ func normalizeTag(raw string) string {
 	return strings.Join(strings.Fields(t), "-")
 }
 
+// sgrRe strips SGR color sequences from an fzf item so the preview can read
+// the plain tag text off the hovered row ({} passes the raw, still-colored
+// line; fzf only strips color from the RETURNED selection, not from preview
+// placeholders).
+var sgrRe = regexp.MustCompile("\033\\[[0-9;]*m")
+
+// formatTagPreview renders the M-t preview line: the target workspace's name
+// row as it WILL look once the pending tag choice is applied, so the user sees
+// the result before committing. It mirrors formatSessionDisplay's styling
+// (branch green, repo sessionColor, tag pill leading) minus the time/icon/badge
+// chrome. Cases, by what fzf currently has focused:
+//
+//   - an existing tag row focused, or a new tag typed → that tag's live pill;
+//   - the clear-tag row focused, or nothing resolvable (empty query, no tag) →
+//     just "branch repo", no pill: the tag simply disappears, previewing removal.
+//
+// hovered is the raw (colored) focused item; query is the live typed text.
+// resolveTagChoice already maps the clear row to "", so it needs no special
+// case here. Pure.
+func formatTagPreview(branch, repo, sessionColor, query, hovered string) string {
+	branchCol := "\033[32m" + branch + "\033[0m"
+	repoCol := "\033[" + sessionColor + "m" + repo + "\033[0m"
+
+	tag := resolveTagChoice(sgrRe.ReplaceAllString(hovered, ""), query)
+	pill := ""
+	if tag != "" {
+		pill = strings.TrimSpace(renderTagPill(tag)) + " "
+	}
+	// Dim "Preview:" label so the rendered row reads as the subject, not the
+	// prefix.
+	return "\033[2mPreview:\033[0m " + pill + branchCol + " " + repoCol
+}
+
+// TagPreviewCommand is the hidden `_tag-preview`: the M-t picker's live
+// header-preview command. Flags carry the fixed target (branch/repo/color); the
+// two trailing positionals are fzf's live {q} (query) and {} (hovered row).
+// Pure render, no tmux/git — it runs on every keystroke.
+func TagPreviewCommand() *cobra.Command {
+	var branch, repo, color string
+	c := &cobra.Command{
+		Use:    "_tag-preview [query] [hovered]",
+		Short:  "internal: render the M-t tag preview line",
+		Hidden: true,
+		Args:   cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			query, hovered := "", ""
+			if len(args) > 0 {
+				query = args[0]
+			}
+			if len(args) > 1 {
+				hovered = args[1]
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), formatTagPreview(branch, repo, color, query, hovered))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&branch, "branch", "", "workspace branch (window name)")
+	c.Flags().StringVar(&repo, "repo", "", "workspace repo (session name)")
+	c.Flags().StringVar(&color, "color", "36", "SGR color body for the repo")
+	return c
+}
+
 // TagCommand is the hidden `_tag <row>`: bound to M-t in the session
 // picker. It opens a nested fzf listing existing tags for the selected
 // workspace's window, lets the user pick one or type a new one (empty
@@ -195,12 +259,21 @@ func TagCommand() *cobra.Command {
 			}
 			current, _ := h.GetWindowOption(windowID, workspace.OptWorkspaceTag)
 
-			header := "pick or type a tag → Enter to set"
+			// Live preview rendered as the header (below the input, where a
+			// static hint used to sit): the target row as it will look once the
+			// pending choice is applied. transform-header re-runs on start, on
+			// every keystroke (change), and on selection move (focus); fzf
+			// substitutes {q} (query) and {} (hovered row).
+			previewCmd := dispatch.ToolCmd("workspaces", "_tag-preview",
+				"--branch="+window, "--repo="+session, "--", "{q}", "{}")
+			preview := "transform-header(" + previewCmd + ")"
 			opts := []fzfstyle.Opt{
 				fzfstyle.WithCustomColor("prompt:111:bold,pointer:111,query:111,hl:111,hl+:111:bold,label:103,border:103,header:111,footer:103"),
 				fzfstyle.WithPrintQuery(),
 				fzfstyle.WithExpect("enter"),
-				fzfstyle.WithHeader(header),
+				fzfstyle.WithBind("start", preview),
+				fzfstyle.WithBind("change", preview),
+				fzfstyle.WithBind("focus", preview),
 				fzfstyle.WithFooter("M-t · cancel"),
 				// M-t is a toggle: the same key that opened the tag menu from
 				// the M-s picker also dismisses it (back to the picker, tag

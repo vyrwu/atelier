@@ -95,7 +95,7 @@ func SessionsCommand() *cobra.Command {
 			// the PR badge is current on the NEXT open, and advertise M-o.
 			// When no forge adapter is configured the slot is simply absent.
 			workspace.SpawnForgeRefresh()
-			footer := "M-x · delete  |  M-t · tag  |  M-n · creator  |  M-r · history  |  M-u · clone url"
+			footer := "M-x · delete  |  M-t · tag  |  M-n · creator  |  M-r · history  |  M-; · tools  |  M-u · clone url"
 			if forgeActive() {
 				footer += "  |  M-o · open PR"
 			}
@@ -125,6 +125,7 @@ func SessionsCommand() *cobra.Command {
 				fzfstyle.WithBind("alt-s", "abort"),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
+				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 				// M-t: tag the current workspace via a nested tag picker,
 				// then reload so the colored pill renders in place.
@@ -290,8 +291,8 @@ func PickCommand() *cobra.Command {
 				}
 			}
 
-			footerRepo := "M-a · auto mode  |  M-s · selector  |  M-r · history  |  M-u · clone url"
-			footerAuto := "M-a · repo mode  |  M-s · selector  |  M-r · history  |  M-u · clone url"
+			footerRepo := "M-a · auto mode  |  M-s · selector  |  M-r · history  |  M-; · tools  |  M-u · clone url"
+			footerAuto := "M-a · repo mode  |  M-s · selector  |  M-r · history  |  M-; · tools  |  M-u · clone url"
 
 			args := fzfstyle.Args("製 ", "New Workspace", "green",
 				fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,footer:103"),
@@ -300,6 +301,7 @@ func PickCommand() *cobra.Command {
 				fzfstyle.WithBind("alt-n", "abort"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
+				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 				fzfstyle.WithBind("alt-a", fmt.Sprintf(
 					`transform:if [[ "$FZF_PROMPT" == '製 ' ]]; then echo 'change-prompt(製? )+disable-search+change-footer(%s)'; else echo 'change-prompt(製 )+enable-search+change-footer(%s)'; fi`,
@@ -360,8 +362,9 @@ func CloneCommand() *cobra.Command {
 					fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 					fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 					fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
+					fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 					fzfstyle.WithHeader(header),
-					fzfstyle.WithFooter("M-s · selector  |  M-n · creator  |  M-r · history"),
+					fzfstyle.WithFooter("M-s · selector  |  M-n · creator  |  M-r · history  |  M-; · tools"),
 					fzfstyle.WithQuery(query),
 				)
 				res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -835,8 +838,9 @@ func RecoverCommand() *cobra.Command {
 				fzfstyle.WithBind("alt-r", "abort"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
+				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithFooter("M-x · delete  |  M-s · sessions  |  M-n · creator  |  M-u · clone url"),
+				fzfstyle.WithFooter("M-x · delete  |  M-s · sessions  |  M-n · creator  |  M-; · tools  |  M-u · clone url"),
 			)
 			if emptyHeader != "" {
 				args = append(args, "--header="+emptyHeader)
@@ -1206,11 +1210,12 @@ func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
 				fzfstyle.WithBind("alt-n", "abort"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
+				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 				fzfstyle.WithBind("alt-a", fmt.Sprintf("become(%s %q %q %q {q})", dispatch.ToolCmd("workspaces", "_prompt"),
 					repo, repoPath, defaultBranch)),
 				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-a · auto mode  |  M-s · selector  |  M-r · history  |  M-u · clone url"),
+				fzfstyle.WithFooter("M-a · auto mode  |  M-s · selector  |  M-r · history  |  M-; · tools  |  M-u · clone url"),
 				fzfstyle.WithQuery(query),
 			)
 			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -1348,9 +1353,10 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 				repo, repoPath, defaultBranch)),
 			fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 			fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
+			fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 			fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
 			fzfstyle.WithHeader(header),
-			fzfstyle.WithFooter("M-a · manual name  |  M-s · selector  |  M-r · history  |  M-u · clone url"),
+			fzfstyle.WithFooter("M-a · manual name  |  M-s · selector  |  M-r · history  |  M-; · tools  |  M-u · clone url"),
 			fzfstyle.WithQuery(initialPrompt),
 		)
 		res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
@@ -1776,8 +1782,9 @@ func runAutoSession(initialPrompt string) error {
 				fzfstyle.WithBind("alt-a", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
+				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
 				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-a · pick repo  |  M-s · selector  |  M-r · history"),
+				fzfstyle.WithFooter("M-a · pick repo  |  M-s · selector  |  M-r · history  |  M-; · tools"),
 				fzfstyle.WithQuery(query),
 			)
 			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
