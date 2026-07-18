@@ -10,6 +10,7 @@ import (
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/perf"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/workspace"
 )
 
 // SessionRow is one row in the workspace selector. Lines are emitted as
@@ -105,8 +106,8 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	// Absent adapter → no column, no extra field.
 	showForge := forgeActive()
 
-	const baseFields = 10
-	format := "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{session_last_attached}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{@last_seen}"
+	const baseFields = 11
+	format := "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{session_last_attached}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{@last_seen}|#{" + workspace.OptWorkspaceTag + "}"
 	if showForge {
 		format += "|#{" + OptForgeState + "}"
 	}
@@ -166,6 +167,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		}
 		sid, wid, session, window, lastAtt := fields[0], fields[1], fields[2], fields[3], fields[4]
 		repoPath, attention, kind, recap, lastSeen := fields[5], fields[6], fields[7], fields[8], fields[9]
+		tag := strings.TrimSpace(fields[10])
 		// Kernel forge badge: the cached @forge_state field (if present)
 		// follows the fixed fields. The picker renders the glyph itself and
 		// computes the sort rank — the adapter only classified the state.
@@ -291,7 +293,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 				}
 			}
 			// session=cyan(36), window=green(32).
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", session, window)
+			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", session, window, tag)
 		} else {
 			// Non-git (auto) session.
 			priority = 8
@@ -299,7 +301,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 				priority = 0
 			}
 			// session=orange(256:166), window=green(32).
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", session, window)
+			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", session, window, tag)
 		}
 
 		entries = append(entries, entry{

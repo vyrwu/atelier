@@ -86,15 +86,18 @@ func renderForgeBadge(state string) string {
 //
 // Layout (the picker's searchable name line):
 //
-//	<time> <attention-icon> <forge-badge> <session>/<window>
+//	<time> <attention-icon> <forge-badge> <session>/<window> <#tag>
 //
 // The AI recap is NOT part of this line — it's emitted as a separate picker
 // field so fzf search can target the name alone (see SessionRow). sessionColor
 // is the SGR color body for the session name ("36" cyan for git workspaces,
-// "38;5;166" orange for auto sessions); weight is "" or "1;".
-func formatSessionDisplay(timeCol, icon, badgeCol, weight, sessionColor, session, window string) string {
-	return fmt.Sprintf("%s%s%s\033[%s%sm%s\033[0m/\033[%s32m%s\033[0m",
-		timeCol, icon, badgeCol, weight, sessionColor, session, weight, window)
+// "38;5;166" orange for auto sessions); weight is "" or "1;". The tag pill
+// (renderTagPill) is appended last, as plain visible "#tag" text, so fzf's
+// name-field search (--nth=1) narrows on "#tag" / "tag" too; empty tag adds
+// nothing.
+func formatSessionDisplay(timeCol, icon, badgeCol, weight, sessionColor, session, window, tag string) string {
+	return fmt.Sprintf("%s%s%s\033[%s%sm%s\033[0m/\033[%s32m%s\033[0m%s",
+		timeCol, icon, badgeCol, weight, sessionColor, session, weight, window, renderTagPill(tag))
 }
 
 // forgeWorkspaceCwd returns the CANONICAL directory for a workspace window —

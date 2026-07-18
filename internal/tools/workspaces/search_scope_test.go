@@ -20,13 +20,13 @@ func TestPickerSearchScope_NameNotRecap(t *testing.T) {
 
 	// Two records in the picker's on-the-wire format:
 	// session \t window \t <name-line> \t <recap-line>, NUL-terminated.
-	rec := func(session, window, recap string) string {
-		name := formatSessionDisplay("5m ", "○ ", "  ", "", "36", session, window)
+	rec := func(session, window, recap, tag string) string {
+		name := formatSessionDisplay("5m ", "○ ", "  ", "", "36", session, window, tag)
 		return fmt.Sprintf("%s\t%s\t%s\t%s\x00", session, window, name,
 			formatRecapLine(recap, recapIndentCells(false)))
 	}
-	stdin := rec("vyrwu/atelier", "fzf-multiline", "authenticate the user") +
-		rec("api", "widgets", "fix the login page")
+	stdin := rec("vyrwu/atelier", "fzf-multiline", "authenticate the user", "billing") +
+		rec("api", "widgets", "fix the login page", "")
 
 	filter := func(query string) []string {
 		cmd := exec.Command("fzf", "--read0", "--print0", "--ansi",
@@ -52,6 +52,8 @@ func TestPickerSearchScope_NameNotRecap(t *testing.T) {
 		{"multiline", true, "window name"},
 		{"atelier", true, "session name"},
 		{"widgets", true, "window name"},
+		{"billing", true, "tag pill — searchable"},
+		{"#billing", true, "tag pill with # — searchable"},
 		{"authenticate", false, "recap only — must NOT match"},
 		{"login", false, "recap only — must NOT match"},
 	}

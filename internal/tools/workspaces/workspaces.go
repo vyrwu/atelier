@@ -95,7 +95,7 @@ func SessionsCommand() *cobra.Command {
 			// the PR badge is current on the NEXT open, and advertise M-o.
 			// When no forge adapter is configured the slot is simply absent.
 			workspace.SpawnForgeRefresh()
-			footer := "M-x · delete  |  M-n · creator  |  M-r · history  |  M-u · clone url"
+			footer := "M-x · delete  |  M-t · tag  |  M-n · creator  |  M-r · history  |  M-u · clone url"
 			if forgeActive() {
 				footer += "  |  M-o · open PR"
 			}
@@ -126,6 +126,9 @@ func SessionsCommand() *cobra.Command {
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
 				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
+				// M-t: tag the current workspace via a nested tag picker,
+				// then reload so the colored pill renders in place.
+				fzfstyle.WithBind("alt-t", tagBind()),
 			}
 			if forgeActive() {
 				opts = append(opts, fzfstyle.WithBind("alt-o",
