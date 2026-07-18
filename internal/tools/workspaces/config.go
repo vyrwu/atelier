@@ -15,6 +15,11 @@ type Config struct {
 	MultiRepoRoot string `toml:"multi_repo_root"`
 	// NameGenModel is the Claude model used by --claude-name flows.
 	NameGenModel string `toml:"name_gen_model"`
+	// AutoTag controls whether workspace creation asks the AI to also
+	// suggest a grouping tag alongside the branch/session name (issue
+	// #56). Default true; M-t always overrides post-creation, so this is
+	// just the opt-out for users who don't want auto-suggested tags.
+	AutoTag bool `toml:"auto_tag"`
 }
 
 func DefaultConfig() Config {
@@ -24,6 +29,7 @@ func DefaultConfig() Config {
 		WorktreeRoot:  filepath.Join(home, "code", ".worktrees", "github"),
 		MultiRepoRoot: filepath.Join(home, "code"),
 		NameGenModel:  "haiku",
+		AutoTag:       true,
 	}
 }
 

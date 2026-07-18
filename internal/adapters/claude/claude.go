@@ -148,8 +148,10 @@ func clearLaunchPrompt(h *tmuxhost.Client, windowID, prompt, kind string) {
 }
 
 // GenerateName runs Claude with a kernel-supplied naming instruction and
-// returns the first output line. The kernel owns the instruction + validates
-// the result; this just runs the model. (Was workspaces' inline claudegen.)
+// returns the model's raw output (trailing newlines trimmed). The kernel
+// owns the instruction, the line contract, and validation — a single-line
+// contract yields one line; the tag-aware contract yields two (name, then
+// tag). This just runs the model. (Was workspaces' inline claudegen.)
 func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (string, error) {
 	gen := claudegen.New()
 	gen.Model = "sonnet"
@@ -157,7 +159,7 @@ func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (str
 	if err != nil {
 		return "", err
 	}
-	return strings.SplitN(strings.TrimRight(raw, "\r\n"), "\n", 2)[0], nil
+	return strings.TrimRight(raw, "\r\n"), nil
 }
 
 // OnStop handles Claude's Stop hook: resolve the target outer window, flag

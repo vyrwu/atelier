@@ -42,13 +42,36 @@ var nameSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // GenerateName produces a deterministic conventional name from the intent.
 // It honors the kernel's requested format: session prompts (which specify
-// the `auto/` format) get an `auto/` prefix, everything else `feat/`.
+// the `auto/` format) get an `auto/` prefix, everything else `feat/`. When
+// the kernel asks for the tag-aware two-line contract (issue #56), it also
+// emits a second line: an existing tag echoed back if the intent mentions
+// one, else empty.
 func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (string, error) {
 	prefix := "feat"
 	if strings.Contains(systemPrompt, "auto/") {
 		prefix = "auto"
 	}
-	slug := strings.Trim(nameSlugRe.ReplaceAllString(strings.ToLower(intent), "-"), "-")
+	// The tag-aware contract wraps the text as "EXISTING TAGS: ...\nINTENT:
+	// <text>"; name off the real intent, not the wrapper.
+	name := prefix + "/" + nameSlug(intentBody(intent))
+	if !strings.Contains(systemPrompt, "grouping tag") {
+		return name, nil
+	}
+	return name + "\n" + mockTag(intent), nil
+}
+
+// intentBody returns the actual task text from a possibly tag-wrapped
+// intent, stripping the "EXISTING TAGS: ...\nINTENT: " preamble.
+func intentBody(intent string) string {
+	if _, body, ok := strings.Cut(intent, "\nINTENT: "); ok {
+		return body
+	}
+	return intent
+}
+
+// nameSlug is the 2-5-word kebab slug the mock derives from task text.
+func nameSlug(text string) string {
+	slug := strings.Trim(nameSlugRe.ReplaceAllString(strings.ToLower(text), "-"), "-")
 	words := strings.Split(slug, "-")
 	if len(words) > 4 {
 		words = words[:4]
@@ -57,7 +80,26 @@ func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (str
 	if slug == "" {
 		slug = "mock"
 	}
-	return prefix + "/" + slug, nil
+	return slug
+}
+
+// mockTag echoes back the first EXISTING TAG the intent body mentions (so
+// the mock deterministically exercises the "reuse vocabulary" behavior),
+// else empty (no tag).
+func mockTag(intent string) string {
+	list, _, ok := strings.Cut(intent, "\nINTENT: ")
+	if !ok {
+		return ""
+	}
+	list = strings.TrimPrefix(list, "EXISTING TAGS: ")
+	body := strings.ToLower(intentBody(intent))
+	for _, tag := range strings.Split(list, ", ") {
+		tag = strings.TrimSpace(tag)
+		if tag != "" && tag != "(none)" && strings.Contains(body, tag) {
+			return tag
+		}
+	}
+	return ""
 }
 
 // OnStop flags attention on the target window (no transcript to summarize).
