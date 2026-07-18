@@ -34,7 +34,7 @@ func TestBuildClaudeNamedWorkspace_FirstStageIsAskingClaude(t *testing.T) {
 	}
 	rep := &capturingReporter{}
 	// Empty prompt → claudegen errors → flow aborts after stage 1.
-	_, _, _ = buildClaudeNamedWorkspace(rep, "", "fake-repo", "/tmp/nonexistent", "main")
+	_, _, _, _ = buildClaudeNamedWorkspace(rep, "", "fake-repo", "/tmp/nonexistent", "main", nil, false)
 	if len(rep.stages) == 0 {
 		t.Fatal("no stages emitted")
 	}
@@ -55,7 +55,7 @@ func TestBuildClaudeNamedWorkspace_NilReporterTolerated(t *testing.T) {
 			t.Fatalf("nil reporter panicked: %v", r)
 		}
 	}()
-	_, _, _ = buildClaudeNamedWorkspace(nil, "", "fake-repo", "/tmp/nonexistent", "main")
+	_, _, _, _ = buildClaudeNamedWorkspace(nil, "", "fake-repo", "/tmp/nonexistent", "main", nil, false)
 }
 
 // TestBuildStages_AppearInWorkspaces_go uses simple source-search to

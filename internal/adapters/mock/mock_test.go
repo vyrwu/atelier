@@ -3,10 +3,16 @@ package mock
 import (
 	"context"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/vyrwu/atelier/internal/integration"
 )
+
+// tagAwareSysPrompt is the sentinel the mock keys on for the two-line
+// contract: any prompt mentioning "grouping tag" (matching the kernel's
+// branchNamingWithTagSysPrompt / sessionNamingWithTagSysPrompt).
+const tagAwareSysPrompt = "Format: <type>/<desc> then a grouping tag"
 
 func TestAdapter_SatisfiesPort(t *testing.T) {
 	var _ integration.AIIntegration = New()
@@ -57,5 +63,39 @@ func TestGenerateName_EmptyIntentFallsBack(t *testing.T) {
 	got, _ := New().GenerateName(context.Background(), "x", "!!! ??? ")
 	if !branchRe.MatchString(got) {
 		t.Errorf("empty-ish intent should still yield a valid name, got %q", got)
+	}
+}
+
+// The tag-aware two-line contract: line 1 is the name derived from the
+// unwrapped INTENT body (not the EXISTING TAGS preamble), line 2 echoes a
+// mentioned existing tag or is empty.
+func TestGenerateName_TagAware_NameFromIntentBody(t *testing.T) {
+	got, _ := New().GenerateName(context.Background(), tagAwareSysPrompt,
+		"EXISTING TAGS: billing, infra\nINTENT: add dark mode toggle")
+	name, tag, ok := strings.Cut(got, "\n")
+	if !ok {
+		t.Fatalf("want two lines, got %q", got)
+	}
+	if name != "feat/add-dark-mode-toggle" {
+		t.Errorf("name = %q, want feat/add-dark-mode-toggle (must ignore the EXISTING TAGS wrapper)", name)
+	}
+	if tag != "" {
+		t.Errorf("tag = %q, want empty (intent mentions no existing tag)", tag)
+	}
+}
+
+func TestGenerateName_TagAware_ReusesMentionedTag(t *testing.T) {
+	got, _ := New().GenerateName(context.Background(), tagAwareSysPrompt,
+		"EXISTING TAGS: billing, infra\nINTENT: billing webhook 500s on retry")
+	_, tag, _ := strings.Cut(got, "\n")
+	if tag != "billing" {
+		t.Errorf("tag = %q, want billing (intent mentions it)", tag)
+	}
+}
+
+func TestGenerateName_SingleLineWhenNotTagAware(t *testing.T) {
+	got, _ := New().GenerateName(context.Background(), "Format: <type>/<desc>", "add dark mode")
+	if strings.Contains(got, "\n") {
+		t.Errorf("non-tag-aware prompt must yield one line, got %q", got)
 	}
 }

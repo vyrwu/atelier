@@ -43,8 +43,9 @@ type AIIntegration interface {
 	SetPrompt(h *tmuxhost.Client, windowID, prompt, kind string) error
 
 	// GenerateName runs the agent's model with a kernel-supplied naming
-	// instruction and returns exactly one line. Used by workspace creator
-	// auto-mode; the KERNEL owns the instruction and validates the result.
+	// instruction and returns its raw output (trailing newlines trimmed).
+	// Used by workspace creator auto-mode; the KERNEL owns the instruction,
+	// parses the lines (name, and optionally a grouping tag), and validates.
 	GenerateName(ctx context.Context, systemPrompt, intent string) (string, error)
 
 	// OnStop handles the agent's stop event (the hook payload). The adapter

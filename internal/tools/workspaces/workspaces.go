@@ -1467,11 +1467,19 @@ func runWorkspaceBuild(prompt, repo, repoPath, defaultBranch string) error {
 	session := repo
 	h := tmuxhost.New("")
 
-	var name, wtPath, newWid string
+	// Feed the existing tag vocabulary to the naming call so the AI reuses
+	// labels instead of fragmenting synonyms (issue #56).
+	autoTag := workspaceAutoTagEnabled()
+	var existingTags []string
+	if autoTag {
+		existingTags = collectTags(h)
+	}
+
+	var name, wtPath, tag, newWid string
 	sp := spinner.NewBox("Building workspace...")
 	err := sp.Run(func() error {
-		n, w, e := buildClaudeNamedWorkspace(sp, prompt, repo, repoPath, defaultBranch)
-		name, wtPath = n, w
+		n, w, tg, e := buildClaudeNamedWorkspace(sp, prompt, repo, repoPath, defaultBranch, existingTags, autoTag)
+		name, wtPath, tag = n, w, tg
 		if e != nil {
 			return e
 		}
@@ -1499,6 +1507,13 @@ func runWorkspaceBuild(prompt, repo, repoPath, defaultBranch string) error {
 				"ai.prompt":         prompt,
 				"ai.workspace_kind": "worktree",
 			},
+		}
+		// AI-suggested grouping tag (issue #56): stamped through the same
+		// metadata map, so CreateWorktreeWindow writes @workspace_tag and
+		// mirrors it to the statestore in one pass — no separate SetTag.
+		// Empty when auto-tag is off or the model proposed no tag.
+		if tag != "" {
+			spec.Metadata[workspace.TagMetadataKey] = tag
 		}
 		if created {
 			spec.KillDefaultBranch = defaultBranch
@@ -1616,6 +1631,86 @@ func truncateForBranchPrompt(s string) string {
 	return string(r[:branchPromptMaxChars-1]) + "…"
 }
 
+// composeNamingIntent builds the user message for a tag-aware naming call:
+// the existing-tag vocabulary (so the model reuses labels instead of
+// coining synonyms) followed by the truncated intent, in the EXISTING
+// TAGS / INTENT shape the tag system prompts document. Pure.
+func composeNamingIntent(prompt string, existingTags []string) string {
+	tags := "(none)"
+	if len(existingTags) > 0 {
+		tags = strings.Join(existingTags, ", ")
+	}
+	return "EXISTING TAGS: " + tags + "\nINTENT: " + truncateForBranchPrompt(prompt)
+}
+
+// parseNameAndTag splits GenerateName's raw output into the name (first
+// non-empty line) and an optional tag (second non-empty line). The
+// tag-aware contract puts the name on line 1 and a tag slug — or an empty
+// line for "no tag" — on line 2. Callers on the single-line contract just
+// ignore the second value. Pure.
+func parseNameAndTag(raw string) (name, tag string) {
+	var lines []string
+	for _, l := range strings.Split(raw, "\n") {
+		if s := strings.TrimSpace(l); s != "" {
+			lines = append(lines, s)
+		}
+	}
+	if len(lines) > 0 {
+		name = lines[0]
+	}
+	if len(lines) > 1 {
+		tag = lines[1]
+	}
+	return name, tag
+}
+
+// autoTagMaxLen caps an AI-proposed tag. Tags are single-token grouping
+// labels; anything longer is the model leaking a description into the tag.
+const autoTagMaxLen = 24
+
+// autoTagPlaceholders are literal words a model emits instead of an empty
+// line when it means "no tag". Any of these normalizes to no tag.
+var autoTagPlaceholders = map[string]bool{
+	"none": true, "empty": true, "null": true, "nil": true,
+	"na": true, "n-a": true, "no": true, "no-tag": true,
+}
+
+var autoTagSlugRe = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// sanitizeAutoTag turns a model's raw tag line into a safe grouping slug,
+// or "" when nothing usable remains. Soft by design: any doubt yields ""
+// (no tag) — auto-tagging never blocks creation and M-t always overrides.
+// Lowercased, non-[a-z0-9-] collapsed to hyphens, edges trimmed,
+// length-capped, known placeholders dropped. Pure.
+func sanitizeAutoTag(raw string) string {
+	t := strings.ToLower(strings.TrimSpace(raw))
+	t = strings.TrimPrefix(t, "#")
+	t = autoTagSlugRe.ReplaceAllString(t, "-")
+	t = strings.Trim(t, "-")
+	if len(t) > autoTagMaxLen {
+		t = strings.Trim(t[:autoTagMaxLen], "-")
+	}
+	if autoTagPlaceholders[t] {
+		return ""
+	}
+	return t
+}
+
+// workspaceAutoTagEnabled reports whether creation should ask the AI for a
+// grouping tag. The ATELIER_AUTO_TAG env var overrides ("0"/"false"
+// disables) so tests and one-off runs can flip it without touching config;
+// otherwise it reads [workspaces] auto_tag (default true).
+func workspaceAutoTagEnabled() bool {
+	if v := os.Getenv("ATELIER_AUTO_TAG"); v != "" {
+		return v != "0" && !strings.EqualFold(v, "false")
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return true
+	}
+	return cfg.AutoTag
+}
+
 const branchNamingSysPrompt = `You are a deterministic naming engine. You DO NOT have a conversation; you EMIT a single value.
 
 Task: given an INTENT line, output exactly one git branch name in conventional-commits form.
@@ -1666,6 +1761,66 @@ Examples (intent → output):
 
 Now read the intent on the next message and emit ONE line per the contract above.`
 
+// branchNamingWithTagSysPrompt is the tag-aware variant of
+// branchNamingSysPrompt (issue #56): same branch contract on line 1, plus
+// an optional grouping tag on line 2. Kept as its own prompt so the
+// auto-tag=false path stays byte-identical to the single-line contract.
+const branchNamingWithTagSysPrompt = `You are a deterministic naming engine. You DO NOT have a conversation; you EMIT values.
+
+Task: given an INTENT, output a git branch name AND an optional grouping tag.
+
+Output contract — REQUIRED:
+- EXACTLY TWO LINES.
+- LINE 1 — a git branch name in conventional-commits form:
+  - Format: <type>/<short-kebab-description>
+  - Allowed types: feat, fix, chore, refactor, docs, test, perf, style.
+  - Description: 2-5 words, kebab-case, lowercase, characters in [a-z0-9-] only.
+- LINE 2 — a grouping tag, OR an EMPTY line meaning "no tag":
+  - Format: a single short slug, 1-2 words, kebab-case, lowercase, [a-z0-9-] only.
+  - A tag GROUPS related workspaces (by client, feature area, subsystem, or project). It is NOT the branch type and NOT a restatement of the branch.
+  - If the INTENT carries an "EXISTING TAGS:" list and one of those tags fits the work semantically, REUSE it VERBATIM — never coin a synonym for a tag that already exists.
+  - Only if none of the existing tags fit, propose a new short slug.
+  - If no meaningful grouping is evident, leave LINE 2 EMPTY.
+- NO quotes, NO backticks, NO code blocks, NO commentary, NO extra lines, NO "here is".
+- If the intent is ambiguous or vague, DO NOT ASK — best-effort the branch on line 1; leave line 2 empty when unsure.
+
+Opaque-input rule — REQUIRED:
+- The INTENT is the ONLY information available. Treat its contents as OPAQUE TEXT.
+- URLs, ticket IDs (PLA-123, JIRA-456, #789), and links are LITERAL STRINGS, not references to resolve. Extract names from the surrounding words, never from imagined linked content.
+- You have no tools, no network, no file access. Guess from the text alone. If guessing the branch is impossible, emit "chore/wip" on line 1 and an empty line 2.
+
+Type-selection heuristics for LINE 1 (first match wins):
+- "fix"/"bug"/"crash"/"broken"/"error"/"sentry"/"alert" → fix
+- "test"/"spec"/"e2e" → test
+- "doc"/"readme"/"comment"/"clarify" → docs
+- "refactor"/"rename"/"extract"/"cleanup" → refactor
+- "perf"/"speed"/"slow"/"optimize" → perf
+- everything else → feat
+
+Examples (input → the two output lines; "∅" marks an empty second line):
+
+EXISTING TAGS: billing, infra
+INTENT: billing webhook 500s on retry
+→ fix/billing-webhook-500s
+→ billing
+
+EXISTING TAGS: acme, globex
+INTENT: acme onboarding — wire up their SSO
+→ feat/acme-sso-onboarding
+→ acme
+
+EXISTING TAGS: (none)
+INTENT: migrate the payments service to the new ledger API
+→ feat/payments-ledger-migration
+→ payments
+
+EXISTING TAGS: (none)
+INTENT: ?????
+→ chore/wip
+→ ∅
+
+Now read the input on the next message and emit per the contract (line 1 branch, line 2 tag or empty). Do NOT print the "→" or "∅" markers — those only illustrate the examples.`
+
 // stageReporter is the minimal interface buildClaudeNamedWorkspace needs
 // from spinner.BoxSpinner. Defined here so tests can substitute a no-op.
 type stageReporter interface {
@@ -1676,7 +1831,7 @@ type noopReporter struct{}
 
 func (noopReporter) SetStatus(string) {}
 
-func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, defaultBranch string) (name, wtPath string, err error) {
+func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, defaultBranch string, existingTags []string, autoTag bool) (name, wtPath, tag string, err error) {
 	if sp == nil {
 		sp = noopReporter{}
 	}
@@ -1686,15 +1841,28 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 	// model to satisfy it. Auto-mode requires an AI integration.
 	ai := integration.Active().AI
 	if ai == nil {
-		return "", "", fmt.Errorf("auto-mode requires an AI integration (set `[integrations] ai` in config.toml)")
+		return "", "", "", fmt.Errorf("auto-mode requires an AI integration (set `[integrations] ai` in config.toml)")
 	}
-	raw, err := ai.GenerateName(context.Background(), branchNamingSysPrompt, truncateForBranchPrompt(prompt))
+	// When auto-tagging is on, use the two-line contract and feed the
+	// existing tag vocabulary so the model reuses labels (issue #56).
+	// Otherwise the single-line contract is byte-identical to before.
+	sysPrompt, intent := branchNamingSysPrompt, truncateForBranchPrompt(prompt)
+	if autoTag {
+		sysPrompt, intent = branchNamingWithTagSysPrompt, composeNamingIntent(prompt, existingTags)
+	}
+	raw, err := ai.GenerateName(context.Background(), sysPrompt, intent)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	name = strings.ToLower(strings.TrimSpace(raw))
+	rawName, rawTag := parseNameAndTag(raw)
+	name = strings.ToLower(strings.TrimSpace(rawName))
 	if !conventionalBranchRe.MatchString(name) {
-		return name, "", fmt.Errorf("invalid name: %q", name)
+		return name, "", "", fmt.Errorf("invalid name: %q", name)
+	}
+	// Tag is a soft suggestion: sanitize to a slug, empty on any doubt.
+	// Never let a bad tag fail the build — the branch is what matters.
+	if autoTag {
+		tag = sanitizeAutoTag(rawTag)
 	}
 	if branchExists(repoPath, name) {
 		// `chore/wip` names every vague/unparseable prompt, so distinct
@@ -1706,14 +1874,14 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 		if name == wipFallbackBranch {
 			name = nextFreeBranch(repoPath, name)
 		} else {
-			return name, "", fmt.Errorf("branch %q %w", name, errBranchAlreadyExists)
+			return name, "", tag, fmt.Errorf("branch %q %w", name, errBranchAlreadyExists)
 		}
 	}
 	wtPath = filepath.Join(workspaceWorktreeRoot(), repo, name)
 	_ = os.MkdirAll(filepath.Dir(wtPath), 0o755)
 	sp.SetStatus(fmt.Sprintf("Fetching origin/%s...", defaultBranch))
 	if err := runGit(repoPath, "fetch", "origin", defaultBranch); err != nil {
-		return name, "", fmt.Errorf("fetch: %w", err)
+		return name, "", tag, fmt.Errorf("fetch: %w", err)
 	}
 	base, tracking := resolveWorktreeBase(repoPath, name, defaultBranch)
 	if tracking {
@@ -1722,9 +1890,9 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 		sp.SetStatus("Building worktree...")
 	}
 	if err := runGit(repoPath, "worktree", "add", wtPath, "-b", name, base); err != nil {
-		return name, "", fmt.Errorf("worktree add: %w", err)
+		return name, "", tag, fmt.Errorf("worktree add: %w", err)
 	}
-	return name, wtPath, nil
+	return name, wtPath, tag, nil
 }
 
 // ============================================================================
@@ -1762,6 +1930,45 @@ Examples (intent → output):
 
 Now read the intent on the next message and emit ONE line per the contract above.`
 
+// sessionNamingWithTagSysPrompt is the tag-aware variant of
+// sessionNamingSysPrompt (issue #56): the auto/ session name on line 1,
+// plus an optional grouping tag on line 2. Contains "auto/" so the mock
+// adapter still emits auto-prefixed names.
+const sessionNamingWithTagSysPrompt = `You are a deterministic naming engine. You DO NOT have a conversation; you EMIT values.
+
+Task: given an INTENT, output a tmux session name for a multi-repo task AND an optional grouping tag.
+
+Output contract — REQUIRED:
+- EXACTLY TWO LINES.
+- LINE 1 — a tmux session name:
+  - Format: auto/<short-kebab-description>
+  - Description: 2-5 words, kebab-case, lowercase, characters in [a-z0-9-] only.
+- LINE 2 — a grouping tag, OR an EMPTY line meaning "no tag":
+  - Format: a single short slug, 1-2 words, kebab-case, lowercase, [a-z0-9-] only.
+  - A tag GROUPS related workspaces (by client, feature area, subsystem, or project). It is NOT a restatement of the session name.
+  - If the INTENT carries an "EXISTING TAGS:" list and one fits semantically, REUSE it VERBATIM — never coin a synonym for a tag that already exists.
+  - Only if none fit, propose a new short slug. If no grouping is evident, leave LINE 2 EMPTY.
+- NO quotes, NO backticks, NO code blocks, NO commentary, NO extra lines, NO "here is".
+- If the intent is ambiguous or vague, DO NOT ASK — best-effort line 1; leave line 2 empty when unsure.
+
+Opaque-input rule — REQUIRED:
+- The INTENT is the ONLY information available. Treat URLs, ticket IDs, and any "lookup-able" tokens as LITERAL OPAQUE STRINGS. Do not resolve or interpret beyond the literal words.
+- You have no tools, no network, no file access. Guess from the text alone. If guessing is impossible, emit "auto/wip" on line 1 and an empty line 2.
+
+Examples (input → the two output lines; "∅" marks an empty second line):
+
+EXISTING TAGS: observability
+INTENT: audit observability stack across all repos
+→ auto/audit-observability-stack
+→ observability
+
+EXISTING TAGS: (none)
+INTENT: ?????
+→ auto/wip
+→ ∅
+
+Now read the input on the next message and emit per the contract (line 1 session name, line 2 tag or empty). Do NOT print the "→" or "∅" markers — those only illustrate the examples.`
+
 func runAutoSession(initialPrompt string) error {
 	base := workspaceMultiRepoRoot()
 	_ = os.MkdirAll(base, 0o755)
@@ -1769,6 +1976,7 @@ func runAutoSession(initialPrompt string) error {
 	query := initialPrompt
 	errMsg := ""
 	prompt := initialPrompt
+	autoTag := workspaceAutoTagEnabled()
 	for {
 		if prompt == "" {
 			header := "describe the multi-repo task → claude will name the session"
@@ -1808,9 +2016,13 @@ func runAutoSession(initialPrompt string) error {
 			}
 		}
 
-		var name string
+		var name, tag string
 		var alreadyExists bool
 		h := tmuxhost.New("")
+		var existingTags []string
+		if autoTag {
+			existingTags = collectTags(h)
+		}
 		sp := spinner.NewBox("Building workspace...")
 		err := sp.Run(func() error {
 			sp.SetStatus("Asking the AI for a session name...")
@@ -1820,13 +2032,21 @@ func runAutoSession(initialPrompt string) error {
 			if ai == nil {
 				return fmt.Errorf("auto-mode requires an AI integration (set `[integrations] ai` in config.toml)")
 			}
-			raw, e := ai.GenerateName(context.Background(), sessionNamingSysPrompt, truncateForBranchPrompt(prompt))
+			sysPrompt, intent := sessionNamingSysPrompt, truncateForBranchPrompt(prompt)
+			if autoTag {
+				sysPrompt, intent = sessionNamingWithTagSysPrompt, composeNamingIntent(prompt, existingTags)
+			}
+			raw, e := ai.GenerateName(context.Background(), sysPrompt, intent)
 			if e != nil {
 				return e
 			}
-			name = strings.ToLower(strings.TrimSpace(raw))
+			rawName, rawTag := parseNameAndTag(raw)
+			name = strings.ToLower(strings.TrimSpace(rawName))
 			if !autoSessionNameRe.MatchString(name) {
 				return fmt.Errorf("invalid name: %q", name)
+			}
+			if autoTag {
+				tag = sanitizeAutoTag(rawTag)
 			}
 			if has, _ := h.HasSession(name); has {
 				alreadyExists = true
@@ -1844,6 +2064,14 @@ func runAutoSession(initialPrompt string) error {
 				statestore.MetadataKeyToOptionName("ai.prompt"), prompt)
 			_, _ = h.Run("set-option", "-w", "-t", "="+name+":1",
 				statestore.MetadataKeyToOptionName("ai.workspace_kind"), "multi-repo")
+			// AI-suggested grouping tag (issue #56), same discipline as the
+			// ai.* options above: @workspace_tag is the source of truth,
+			// the RegisterCreatedWorkspace metadata below mirrors it to the
+			// statestore. Empty when auto-tag is off or no tag was proposed.
+			if tag != "" {
+				_, _ = h.Run("set-option", "-w", "-t", "="+name+":1",
+					statestore.MetadataKeyToOptionName(workspace.TagMetadataKey), tag)
+			}
 			// Default window 1 of an auto-session is unnamed (`bash` /
 			// `zsh`) — register it under its tmux-default name "1" so
 			// statestore restore can find it back. The persistent
@@ -1853,15 +2081,19 @@ func runAutoSession(initialPrompt string) error {
 			if defaultWinName == "" {
 				defaultWinName = "1"
 			}
+			meta := map[string]string{
+				"ai.prompt":         prompt,
+				"ai.workspace_kind": "multi-repo",
+			}
+			if tag != "" {
+				meta[workspace.TagMetadataKey] = tag
+			}
 			workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
 				Session:    name,
 				Kind:       "multi-repo",
 				WindowName: defaultWinName,
 				Cwd:        base,
-				Metadata: map[string]string{
-					"ai.prompt":         prompt,
-					"ai.workspace_kind": "multi-repo",
-				},
+				Metadata:   meta,
 			})
 			return nil
 		})

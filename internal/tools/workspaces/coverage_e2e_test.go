@@ -527,6 +527,82 @@ func TestCreator_PromptFlow_SlashName_SelectsCorrectWindow(t *testing.T) {
 	}
 }
 
+// TestCreator_PromptFlow_AutoTag_StampsTag drives `_prompt` (auto-mode)
+// with auto-tagging ON and a stubbed claude that emits the two-line
+// contract ("feat/tagged-stub\nacme"). It proves the tag round-trips:
+// the kernel parses line 2, stamps @workspace_tag on the new window
+// (source of truth), and mirrors workspace.tag to the durable state
+// cache — the issue #56 creation path. ATELIER_AUTO_TAG=1 forces the
+// flag on regardless of any real config.toml on the box.
+func TestCreator_PromptFlow_AutoTag_StampsTag(t *testing.T) {
+	srv := testtmux.New(t)
+	srv.NewSession("main")
+	srv.SourceInit(t)
+	_ = srv.Attach(t, "main")
+	time.Sleep(200 * time.Millisecond)
+
+	tmp := t.TempDir()
+	t.Cleanup(srv.Kill)
+	repoDir := testtmux.TestRepo(t, tmp, "vyrwu", "demo", "main")
+	srv.SetEnv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
+	srv.SetEnv("HOME", tmp)
+	t.Setenv("HOME", tmp)
+	t.Setenv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
+
+	// Two-line stub: branch on line 1, grouping tag on line 2.
+	fakeBin := filepath.Join(tmp, "fakebin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf 'feat/tagged-stub\\nacme\\n'\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	srv.SetEnv("ATELIER_SYNC_BUILD", "1")
+	t.Setenv("ATELIER_SYNC_BUILD", "1")
+	srv.SetEnv("ATELIER_AUTO_TAG", "1")
+	t.Setenv("ATELIER_AUTO_TAG", "1")
+
+	if _, err := srv.RunAtelier("tools", "workspaces", "_prompt",
+		"vyrwu/demo", repoDir, "main", "acme onboarding work"); err != nil {
+		t.Fatalf("_prompt: %v", err)
+	}
+
+	srv.MustHaveSession("vyrwu/demo")
+	if !contains(srv.WindowsIn("vyrwu/demo"), "feat/tagged-stub") {
+		t.Fatalf("expected window 'feat/tagged-stub', got %v", srv.WindowsIn("vyrwu/demo"))
+	}
+
+	// Live @workspace_tag (source of truth) on the new window. Read via
+	// list-windows to sidestep slash-bearing target resolution.
+	out, _ := srv.Client.Run("list-windows", "-t", "vyrwu/demo", "-F", "#{window_name}\t#{@workspace_tag}")
+	var liveTag string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if name, tag, ok := strings.Cut(line, "\t"); ok && name == "feat/tagged-stub" {
+			liveTag = tag
+		}
+	}
+	if liveTag != "acme" {
+		t.Errorf("@workspace_tag=%q, want acme (list-windows: %q)", liveTag, out)
+	}
+
+	// Durable mirror: workspace.tag persisted to the state cache.
+	time.Sleep(500 * time.Millisecond)
+	st, err := statestore.Load()
+	if err != nil || st == nil {
+		t.Fatalf("statestore.Load: st=%v err=%v", st, err)
+	}
+	w := st.FindWindow("vyrwu/demo", "feat/tagged-stub")
+	if w == nil {
+		t.Fatalf("feat/tagged-stub not persisted; workspaces=%+v", st.Workspaces)
+	}
+	if got := w.Metadata["workspace.tag"]; got != "acme" {
+		t.Errorf("persisted workspace.tag=%q want acme (metadata=%+v)", got, w.Metadata)
+	}
+}
+
 // TestCreator_SlashInBranchName_SelectsCorrectWindow proves that
 // when the branch name contains `/` (e.g. "feat/add-foo" — the format
 // Claude generates), select-window still lands on the right window
