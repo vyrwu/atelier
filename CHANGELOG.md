@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/vyrwu/atelier/compare/v0.3.2...v0.4.0) (2026-07-19)
+
+
+### Features
+
+* **sandbox:** ephemeral seeded demo/scenario environment ([#7](https://github.com/vyrwu/atelier/issues/7)) ([e1ddbff](https://github.com/vyrwu/atelier/commit/e1ddbffacaf967d66208a6f9c1002fe681e8cc5c))
+* **workspaces:** AI-suggested tags on workspace creation ([#57](https://github.com/vyrwu/atelier/issues/57)) ([1248ec0](https://github.com/vyrwu/atelier/commit/1248ec086df734ff5f31f081f23489eda391bd78))
+* **workspaces:** branch-first picker + live M-t tag preview ([#46](https://github.com/vyrwu/atelier/issues/46)) ([5925138](https://github.com/vyrwu/atelier/commit/59251389955aa45bd2ecf312d55bd6cfdc4794ff)), closes [#44](https://github.com/vyrwu/atelier/issues/44)
+* **workspaces:** M-t workspace tagging ([#50](https://github.com/vyrwu/atelier/issues/50)) ([90db19e](https://github.com/vyrwu/atelier/commit/90db19e15c94f5644c5d1c8d86b4be3856b69ec9)), closes [#45](https://github.com/vyrwu/atelier/issues/45)
+* **workspaces:** sticky M-s scope pin (M-p) ([#59](https://github.com/vyrwu/atelier/issues/59)) ([5202854](https://github.com/vyrwu/atelier/commit/520285444d79bb4096869ef9ad303fa411e1d434)), closes [#47](https://github.com/vyrwu/atelier/issues/47)
+
+
+### Bug fixes
+
+* **statusline:** render only the focused workspace in the bar ([#62](https://github.com/vyrwu/atelier/issues/62)) ([f66b38e](https://github.com/vyrwu/atelier/commit/f66b38e8fc0cb4c983382c4c6c79e95e87702275))
+* **workspaces:** uniform two-line rows in M-s picker ([#48](https://github.com/vyrwu/atelier/issues/48)) ([4c84134](https://github.com/vyrwu/atelier/commit/4c84134ed9c7a2f068f11b2efd91802d487955c9)), closes [#43](https://github.com/vyrwu/atelier/issues/43)
+
+
+### Refactors
+
+* **workspaces:** workspace age, attention→tag→forge sort, clean footers ([#55](https://github.com/vyrwu/atelier/issues/55)) ([e9b92e4](https://github.com/vyrwu/atelier/commit/e9b92e4880c604047d6d4b47d850a4977c9e7bfd))
+
+
+### Docs
+
+* add feature-request template + conventions ([#40](https://github.com/vyrwu/atelier/issues/40)) ([37390b2](https://github.com/vyrwu/atelier/commit/37390b291899858b7b0f3c224551cf99ab0c0be5))
+* refresh demo image after bug fix ([#63](https://github.com/vyrwu/atelier/issues/63)) ([8644251](https://github.com/vyrwu/atelier/commit/86442516203b9fd9fae847c6241932e6b93f730f))
+* refresh demo image after picker fix ([#60](https://github.com/vyrwu/atelier/issues/60)) ([31add7f](https://github.com/vyrwu/atelier/commit/31add7f5ed37aa15249f23f34120a5234c3eb1e0))
+* update demo image to latest M-s picker ([#58](https://github.com/vyrwu/atelier/issues/58)) ([06cb754](https://github.com/vyrwu/atelier/commit/06cb7545f0e836762cf5fb14a06de9369e16d994))
+
 ## [0.3.2](https://github.com/vyrwu/atelier/compare/v0.3.1...v0.3.2) (2026-07-13)
 
 
