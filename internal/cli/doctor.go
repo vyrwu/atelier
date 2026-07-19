@@ -218,12 +218,13 @@ func checkEscapeTime(h *tmuxhost.Client) CheckResult {
 }
 
 // checkStatuslineFormat verifies atelier's freshness + attention
-// segments survive in `window-status-format`. The bundled launcher
-// stamps these on every startup, but a host-config statusline (in
-// plugin mode) can overwrite them. This catches the silent breakage
+// segments survive in `window-status-current-format` — the ONLY format
+// they're injected into (inactive windows render nothing). The bundled
+// launcher stamps these on every startup, but a host-config statusline
+// (in plugin mode) can overwrite them. This catches the silent breakage
 // where the icons just stop rendering.
 func checkStatuslineFormat(h *tmuxhost.Client) CheckResult {
-	v, err := h.Run("show-options", "-gv", "window-status-format")
+	v, err := h.Run("show-options", "-gv", "window-status-current-format")
 	if err != nil {
 		return CheckResult{Name: "statusline segments", Status: StatusSkip,
 			Detail: "no tmux server running on this socket"}
@@ -232,13 +233,13 @@ func checkStatuslineFormat(h *tmuxhost.Client) CheckResult {
 	hasFresh := strings.Contains(out, "atelier status freshness")
 	hasAttn := strings.Contains(out, "atelier status attention")
 	hasW := strings.Contains(out, "#W")
-	// FR-2.4: window-status-format containing atelier's freshness but no
-	// #W produces a bare floating icon per inactive window (the "phantom
+	// FR-2.4: the current format containing atelier's freshness but no
+	// #W produces a bare floating icon with no window name (the "phantom
 	// second checkmark" bug). Catch this regardless of other segments.
 	if hasFresh && !hasW {
 		return CheckResult{Name: "statusline segments", Status: StatusFail,
-			Detail:      "window-status-format has freshness segment but no #W (bare icon, no window name)",
-			Remediation: "set window-status-format to include `#W` (e.g. \" #W \") and re-source so stamp-statusline can inject at the anchor"}
+			Detail:      "window-status-current-format has freshness segment but no #W (bare icon, no window name)",
+			Remediation: "set window-status-current-format to include `#W` (e.g. \" #W \") and re-source so stamp-statusline can inject at the anchor"}
 	}
 	switch {
 	case hasFresh && hasAttn:

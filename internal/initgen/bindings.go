@@ -151,7 +151,8 @@ run-shell -b 'atelier popup cleanup --startup'
 
 // StatuslineBlock returns the statusline wiring block.
 //
-// Per-window segments are appended to the window-status format:
+// Segments are injected into window-status-current-format ONLY — the bar
+// reflects the focused workspace, never background windows:
 //
 //  1. Freshness icon (FR-7) — shows ✓ / ↓N / ↑N / ↓N↑M / ⚠ for git
 //     workspaces. Empty for foreign (non-git) sessions.
@@ -165,9 +166,10 @@ run-shell -b 'atelier popup cleanup --startup'
 //
 // Order matters: the layout reads `<window-name> <freshness> ⏺<n> <PR>`
 // — local sync state next to the window, then global attention, then
-// the current workspace's forge status. Freshness is appended to BOTH
-// window-status-format and window-status-current-format so it shows on
-// every window; attention + forge only decorate the current window.
+// the current workspace's forge status. All three decorate only the
+// current window; window-status-format is empty so inactive windows
+// render nothing (the ⏺<n> rollup is global and covers background
+// attention).
 func StatuslineBlock() string {
 	return `# --- statusline ---
 set -g status-interval 3
@@ -317,14 +319,16 @@ set -g status-left-length 100
 set -g status-right-length 50
 set -g status-left " #S "
 set -g status-right " %H:%M "
-# Background windows are hidden UNLESS they need attention. A repo session
-# holds one window per worktree, so rendering every branch name floods the bar
-# — but a background workspace waiting on the user MUST still surface. Show a
-# non-current window only when @needs_attention is set; otherwise empty. The
-# CURRENT workspace always renders via window-status-current-format below.
-# stamp-statusline injects the freshness segment after the #W anchor inside
-# the conditional.
-set -g window-status-format "#{?@needs_attention, #W ,}"
+# Inactive windows render NOTHING. The status bar reflects only the
+# workspace you're focused on: repo (status-left #S), workspace name,
+# freshness, the GLOBAL attention count, and forge badge. A repo session
+# holds one window per worktree, so rendering background branch names
+# floods the bar — and the ⏺N attention rollup (injected into the current
+# format below) already surfaces how many workspaces are waiting, with M-s
+# listing them. The CURRENT workspace renders via window-status-current-
+# format; stamp-statusline injects freshness + attention + forge after its
+# #W anchor.
+set -g window-status-format ""
 set -g window-status-separator ""
 set -g window-status-current-format "#[bold] #W #[nobold]"
 

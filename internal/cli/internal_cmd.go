@@ -223,14 +223,14 @@ func forgeSegment() string {
 }
 
 func stampStatusline(h *tmuxhost.Client) error {
+	// Only the current format gets segments — inactive windows render
+	// nothing (window-status-format is empty), so the bar reflects only
+	// the focused workspace. The ⏺N attention rollup is global and
+	// covers background windows that need the user.
 	for _, opt := range []struct {
 		name     string
 		segments []string
 	}{
-		{
-			name:     "window-status-format",
-			segments: []string{freshnessSegment()},
-		},
 		{
 			name:     "window-status-current-format",
 			segments: []string{freshnessSegment(), attentionSegment(), forgeSegment()},
