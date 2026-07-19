@@ -130,8 +130,10 @@ The stamp regex matches and strips any prior `#(atelier status
 (freshness|attention|forge)...)` injection, then re-injects the
 canonical segments AFTER `#W` and any trailing color/glyph blocks (so
 the icons land in the right segment of a powerline-style format).
-(`window-status-format`, for inactive windows, gets only the freshness
-segment; attention and forge decorate the current window.)
+Segments are injected into `window-status-current-format` ONLY, so the
+bar reflects the focused workspace; inactive windows render nothing
+(keep `window-status-format ""`). The global `attention count` rollup
+still surfaces how many background workspaces are waiting.
 
 ### Powerline-style
 

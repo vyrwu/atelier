@@ -175,19 +175,19 @@ func TestThemeBlock_DistroGradeDefaults(t *testing.T) {
 }
 
 // TestThemeBlock_HidesInactiveWindows locks the "only the current workspace
-// in the bar" contract. A repo session holds one window per worktree, so a
-// non-empty window-status-format renders EVERY branch name in the status bar
-// (the bug the user hit — a flood of workspace names). It must be empty so
-// only window-status-current-format renders. Regressing to " #W " floods the
-// bar again.
+// in the bar" contract. A repo session holds one window per worktree, so any
+// non-empty window-status-format renders background branch names in the bar
+// (the bug the user hit). It must be empty so ONLY the focused workspace
+// renders via window-status-current-format; the global ⏺N attention rollup
+// covers background workspaces that need the user. Regressing to the
+// attention-conditional form or " #W " prints non-focused windows again.
 func TestThemeBlock_HidesInactiveWindows(t *testing.T) {
 	b := ThemeBlock()
-	// Background windows render only when they need attention; the current
-	// workspace renders via window-status-current-format. So the bar shows
-	// "current + anything waiting", never a flood of every branch name (the
-	// bug) and never hiding a background workspace that needs the user.
-	if !strings.Contains(b, `set -g window-status-format "#{?@needs_attention, #W ,}"`) {
-		t.Errorf("window-status-format must be attention-conditional; block:\n%s", b)
+	if !strings.Contains(b, `set -g window-status-format ""`) {
+		t.Errorf("window-status-format must be empty so inactive windows render nothing; block:\n%s", b)
+	}
+	if strings.Contains(b, `@needs_attention, #W`) {
+		t.Error("window-status-format must not surface background attention windows (prints non-focused windows regression)")
 	}
 	if strings.Contains(b, `set -g window-status-format " #W "`) {
 		t.Error("window-status-format ' #W ' renders EVERY window name in the bar (flood regression)")

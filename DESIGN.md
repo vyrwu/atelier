@@ -177,9 +177,11 @@ set -g status-right "#( atelier status attention count ) | %H:%M"
 ```
 
 The per-window freshness segment (git ahead/behind) is injected into
-`window-status-format` automatically by `atelier internal stamp-statusline`
-(wired by `atelier init`), since it needs per-window args. The
-`attention count` rollup is a standalone emitter you can place anywhere.
+`window-status-current-format` automatically by `atelier internal stamp-statusline`
+(wired by `atelier init`), since it needs per-window args. Only the current
+format is decorated, so the bar shows just the focused workspace; inactive
+windows render nothing. The `attention count` rollup is a standalone emitter
+you can place anywhere.
 Coexists with any status-line framework. Go binary startup ≤30ms — fine
 for 3s refresh.
 
