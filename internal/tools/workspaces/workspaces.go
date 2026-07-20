@@ -409,7 +409,9 @@ func CloneCommand() *cobra.Command {
 				owner := m[2]
 				repo := strings.TrimSuffix(strings.TrimSuffix(m[3], "/"), ".git")
 				target := filepath.Join(base, owner, repo)
-				session := owner + "/" + repo
+				// Path keeps the raw name; the tmux session identity must be
+				// normalized ('.'/':' → '_') to match what tmux actually stores.
+				session := workspace.SessionName(owner + "/" + repo)
 
 				if _, err := os.Stat(target); err != nil {
 					_ = os.MkdirAll(filepath.Dir(target), 0o755)
@@ -1019,13 +1021,15 @@ func RecoverDeleteRowCommand() *cobra.Command {
 			repo, branch := fields[0], fields[1]
 			repoPath := filepath.Join(workspaceCodeRoot(), repo)
 			wtPath := filepath.Join(workspaceWorktreeRoot(), repo, branch)
+			// Paths keep the raw repo name; tmux/statestore identity is normalized.
+			session := workspace.SessionName(repo)
 
 			h := tmuxhost.New("")
 			// Best-effort kill of any live tmux window for this worktree
 			// BEFORE removing the directory — otherwise the window's
 			// shell sits with a missing cwd.
-			if has, _ := h.HasSession(repo); has {
-				out, _ := h.Run("list-windows", "-t", "="+repo, "-F", "#{window_id}\t#W")
+			if has, _ := h.HasSession(session); has {
+				out, _ := h.Run("list-windows", "-t", "="+session, "-F", "#{window_id}\t#W")
 				for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 					parts := strings.SplitN(ln, "\t", 2)
 					if len(parts) == 2 && parts[1] == branch {
@@ -1037,7 +1041,7 @@ func RecoverDeleteRowCommand() *cobra.Command {
 			if err := removeWorktree(repoPath, wtPath); err != nil {
 				debuglog.LogErr(fmt.Sprintf("workspaces.recover: remove %s", wtPath), err)
 			}
-			_ = statestore.RemoveWindow(repo, branch)
+			_ = statestore.RemoveWindow(session, branch)
 			return hostpopup.CleanupOrphanedPopups(h)
 		},
 	}
@@ -1050,12 +1054,14 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 	repoPath := filepath.Join(workspaceCodeRoot(), repo)
 	wtPath := filepath.Join(workspaceWorktreeRoot(), repo, branch)
 	defaultBranch := DefaultBranch(repoPath)
+	// Paths keep the raw repo name; tmux/statestore identity is normalized.
+	session := workspace.SessionName(repo)
 
 	// Recovering this worktree → drop the "soft-closed" marker so it
 	// stops ranking at the top of M-r on subsequent opens.
 	clearSoftClosedMarker(wtPath)
 
-	created, err := workspace.EnsureSession(h, repo, repoPath, defaultBranch)
+	created, err := workspace.EnsureSession(h, session, repoPath, defaultBranch)
 	if err != nil {
 		return err
 	}
@@ -1064,13 +1070,13 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 	// — recover semantics promise the shell lands IN the worktree, so
 	// also fire `cd <wtPath>\n` into the active pane when its
 	// pane_current_path doesn't already match.
-	out, _ := h.Run("list-windows", "-t", "="+repo, "-F", "#{window_id}\t#W")
+	out, _ := h.Run("list-windows", "-t", "="+session, "-F", "#{window_id}\t#W")
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		parts := strings.SplitN(line, "\t", 2)
 		if len(parts) == 2 && parts[1] == branch {
 			wid := parts[0]
-			spawnClaudeResume(h, repo, wid)
-			if err := workspace.LandOuter(h, "="+repo, wid); err != nil {
+			spawnClaudeResume(h, session, wid)
+			if err := workspace.LandOuter(h, "="+session, wid); err != nil {
 				return err
 			}
 			ensurePaneCwd(h, wid, wtPath)
@@ -1080,11 +1086,11 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 	// Create the worktree window. KillDefaultBranch only when we JUST
 	// auto-created the session (matches the runWorkspaceName pattern).
 	spec := workspace.WorktreeWindowSpec{
-		Session:    repo,
+		Session:    session,
 		WtPath:     wtPath,
 		WindowName: branch,
 		Kind:       "worktree",
-		Metadata:   recoverWindowMetadata(repo, branch),
+		Metadata:   recoverWindowMetadata(session, branch),
 	}
 	if created {
 		spec.KillDefaultBranch = defaultBranch
@@ -1093,8 +1099,8 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 	if err != nil {
 		return err
 	}
-	spawnClaudeResume(h, repo, newWid)
-	return workspace.LandOuter(h, "="+repo, newWid)
+	spawnClaudeResume(h, session, newWid)
+	return workspace.LandOuter(h, "="+session, newWid)
 }
 
 // recoverWindowMetadata loads the persisted plugin metadata for a
@@ -1106,12 +1112,12 @@ func openWorktreeWorkspace(h *tmuxhost.Client, repo, branch string) error {
 //
 // Mirrors what workspace.Restore does on server startup, which reads the
 // same cache. Returns nil when nothing is cached (brand-new window).
-func recoverWindowMetadata(repo, branch string) map[string]string {
+func recoverWindowMetadata(session, branch string) map[string]string {
 	st, err := statestore.Load()
 	if err != nil || st == nil {
 		return nil
 	}
-	w := st.FindWindow(repo, branch)
+	w := st.FindWindow(session, branch)
 	if w == nil || len(w.Metadata) == 0 {
 		return nil
 	}
@@ -1128,11 +1134,11 @@ func recoverWindowMetadata(repo, branch string) map[string]string {
 // Best-effort: errors don't abort the workspace open. Queued via
 // `run-shell -b` with a 0.2s sleep so the popup fires AFTER LandOuter
 // and the user is visually on the new workspace.
-func spawnClaudeResume(h *tmuxhost.Client, repo, windowID string) {
+func spawnClaudeResume(h *tmuxhost.Client, session, windowID string) {
 	if agentAutoOpenSkipped() {
 		return
 	}
-	sid, err := h.DisplayMessageAt(repo, "#{session_id}")
+	sid, err := h.DisplayMessageAt(session, "#{session_id}")
 	if err != nil {
 		return
 	}
@@ -1201,7 +1207,7 @@ func ensurePaneCwd(h *tmuxhost.Client, windowID, wtPath string) {
 // runWorkspaceName is the bash tmux_workspace_name port. Loops until the
 // user picks/confirms a name or cancels. Pre-fills query on error retries.
 func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
-	session := repo
+	session := workspace.SessionName(repo)
 
 	ensureSession := func() (created bool, err error) {
 		return workspace.EnsureSession(tmuxhost.New(""), session, repoPath, defaultBranch)
@@ -1351,7 +1357,7 @@ func PromptCommand() *cobra.Command {
 }
 
 func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) error {
-	session := repo
+	session := workspace.SessionName(repo)
 	prompt := strings.TrimSpace(initialPrompt)
 	// Skip fzf when a caller (Ctrl-A from _name, tests supplying the
 	// prompt arg) already provided the prompt — the picker only exists
@@ -1477,7 +1483,7 @@ func BuildCommand() *cobra.Command {
 }
 
 func runWorkspaceBuild(prompt, repo, repoPath, defaultBranch string) error {
-	session := repo
+	session := workspace.SessionName(repo)
 	h := tmuxhost.New("")
 
 	// Feed the existing tag vocabulary to the naming call so the AI reuses

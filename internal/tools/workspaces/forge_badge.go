@@ -119,8 +119,34 @@ func forgeWorkspaceCwd(session, window, repoPath string) (string, bool) {
 	if repoPath != "" && window == DefaultBranch(repoPath) {
 		return repoPath, forgeDirExists(repoPath)
 	}
-	wt := filepath.Join(workspaceWorktreeRoot(), session, window)
+	// The worktree dir is <root>/<owner>/<repo>/<branch> with the repo's real
+	// name — which may contain '.' (e.g. cloudnativedenmark.dk). The tmux
+	// session name has that '.' mangled to '_', so build the path from
+	// @repo_path (dot intact) and fall back to the session only when no repo
+	// path is stamped (multi-repo/auto sessions, whose names are dot-free).
+	slug := repoSlugFromPath(repoPath)
+	if slug == "" {
+		slug = session
+	}
+	wt := filepath.Join(workspaceWorktreeRoot(), slug, window)
 	return wt, forgeDirExists(wt)
+}
+
+// repoSlugFromPath recovers the user-facing "owner/repo" from a workspace's
+// @repo_path (its last two path segments), preserving characters like '.'
+// that tmux strips from session names. Returns "" when the path is too
+// shallow to yield both segments.
+func repoSlugFromPath(repoPath string) string {
+	if repoPath == "" {
+		return ""
+	}
+	repo := filepath.Base(repoPath)
+	owner := filepath.Base(filepath.Dir(repoPath))
+	if repo == "" || repo == "." || repo == string(filepath.Separator) ||
+		owner == "" || owner == "." || owner == string(filepath.Separator) {
+		return ""
+	}
+	return owner + "/" + repo
 }
 
 func forgeDirExists(p string) bool {

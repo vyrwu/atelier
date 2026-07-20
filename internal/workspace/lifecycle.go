@@ -194,6 +194,28 @@ func OpenDefaultBranch(
 	return nil
 }
 
+// SessionName normalizes an atelier session identifier (typically
+// "<owner>/<repo>") to match how tmux actually stores it. tmux silently
+// rewrites '.' and ':' to '_' in session names (they're target-syntax
+// delimiters: `session:window.pane`). So a repo like "cloudnativedenmark.dk"
+// is created as session "…/cloudnativedenmark_dk", but any later `-t`
+// target built from the raw name resolves the '.dk' as a window/pane and
+// fails ("can't find pane: dk" / "duplicate session: …_dk").
+//
+// Callers that DERIVE a session name from a filesystem repo path MUST run
+// it through SessionName before using it as a tmux target OR as a
+// statestore key, so atelier's name matches tmux's stored name and the
+// statestore key matches what restore later reads back from tmux. Names
+// that ORIGINATE from tmux (picker rows, list-windows) are already
+// normalized; re-normalizing is a harmless no-op (SessionName is
+// idempotent — '_' maps to '_').
+//
+// Filesystem paths and display strings must keep the raw name — only the
+// tmux/statestore identity is normalized.
+func SessionName(name string) string {
+	return strings.NewReplacer(".", "_", ":", "_").Replace(name)
+}
+
 // EnsureSession creates the workspace's tmux session if absent. The
 // auto-created window-1 is pre-named to defaultBranch (e.g. "main") so
 // the "open default branch" flow has a place to switch to. Stamps
@@ -282,9 +304,18 @@ type WorktreeWindowSpec struct {
 func CreateWorktreeWindow(h *tmuxhost.Client, spec WorktreeWindowSpec) (windowID string, err error) {
 	last := lastWindowIndex(h, spec.Session)
 	next := last + 1
-	newWidBytes, _ := h.Run("new-window", "-P", "-F", "#{window_id}",
+	newWidBytes, err := h.Run("new-window", "-P", "-F", "#{window_id}",
 		"-t", fmt.Sprintf("%s:%d", spec.Session, next),
 		"-c", spec.WtPath, "-n", spec.WindowName)
+	// On failure Run returns tmux's stderr AS the output ("can't find
+	// session: …"). Without this error check the guard below sees a
+	// non-empty string and treats that error text as a window @ID —
+	// poisoning every downstream `-t <windowID>` target (SpawnBgPull,
+	// set-option, LandOuter). Fail loudly instead.
+	if err != nil {
+		return "", fmt.Errorf("workspace.CreateWorktreeWindow: new-window (session=%s name=%s wtPath=%s): %w",
+			spec.Session, spec.WindowName, spec.WtPath, err)
+	}
 	windowID = strings.TrimSpace(string(newWidBytes))
 	if windowID == "" {
 		return "", fmt.Errorf("workspace.CreateWorktreeWindow: new-window returned no window_id (name=%s wtPath=%s)",
