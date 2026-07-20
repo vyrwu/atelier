@@ -220,11 +220,20 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			attn = 0
 		}
 
+		// Display the user-facing owner/repo (dot intact) recovered from
+		// @repo_path; tmux mangles '.'/':'→'_' in the session_name so the raw
+		// name would show "cloudnativedenmark_dk". SessionRow.Session keeps the
+		// real (mangled) name — it's the tmux switch target, not cosmetic.
+		displayName := session
+		if slug := repoSlugFromPath(repoPath); slug != "" {
+			displayName = slug
+		}
+
 		var display string
 		if repoPath != "" {
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", session, window, tag)
+			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", displayName, window, tag)
 		} else {
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", session, window, tag)
+			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", displayName, window, tag)
 		}
 
 		entries = append(entries, entry{

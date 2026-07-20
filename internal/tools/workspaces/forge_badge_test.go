@@ -33,6 +33,42 @@ func TestForgeWorkspaceCwd_CanonicalNotPaneCwd(t *testing.T) {
 	}
 }
 
+// TestForgeWorkspaceCwd_DottedRepoName guards the "cloudnativedenmark.dk"
+// display/path bug: the worktree dir keeps the repo's real name (with the
+// dot), but tmux mangles '.'→'_' in the session name. forgeWorkspaceCwd must
+// build the canonical path from @repo_path (dot intact), NOT the mangled
+// session — otherwise a dotted repo silently loses its forge badge.
+func TestForgeWorkspaceCwd_DottedRepoName(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ATELIER_WORKTREE_ROOT", root)
+
+	repoPath := "/home/me/code/github/cloudnativedenmark/cloudnativedenmark.dk"
+	mangledSession := "cloudnativedenmark/cloudnativedenmark_dk" // as tmux stores it
+	wt := filepath.Join(root, "cloudnativedenmark/cloudnativedenmark.dk", "feat-x")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := forgeWorkspaceCwd(mangledSession, "feat-x", repoPath)
+	if !ok || got != wt {
+		t.Errorf("forgeWorkspaceCwd = (%q,%v), want (%q,true) — must use @repo_path not the mangled session", got, ok, wt)
+	}
+}
+
+func TestRepoSlugFromPath(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/home/me/code/github/cloudnativedenmark/cloudnativedenmark.dk", "cloudnativedenmark/cloudnativedenmark.dk"},
+		{"/x/github/vyrwu/atelier", "vyrwu/atelier"},
+		{"", ""},
+		{"/", ""},
+		{"toplevel", ""}, // no owner segment
+	}
+	for _, c := range cases {
+		if got := repoSlugFromPath(c.in); got != c.want {
+			t.Errorf("repoSlugFromPath(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 var ansiRE = regexp.MustCompile(`\033\[[0-9;]*m`)
 
 // visibleWidth counts display cells, ignoring ANSI SGR sequences. The Nerd
