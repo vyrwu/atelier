@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/vyrwu/atelier/compare/v0.4.0...v0.5.0) (2026-07-20)
+
+
+### Features
+
+* **workspaces:** allow dismissing default workspace from M-s ([#66](https://github.com/vyrwu/atelier/issues/66)) ([d6e0cad](https://github.com/vyrwu/atelier/commit/d6e0cadcda49d3267f2fb33809684aadcecd31a7))
+
+
+### Bug fixes
+
+* **workspace:** support dots in repo names ([#64](https://github.com/vyrwu/atelier/issues/64)) ([38cd4e7](https://github.com/vyrwu/atelier/commit/38cd4e71a44588c5ce3a3414b7b5401438631912))
+
 ## [0.4.0](https://github.com/vyrwu/atelier/compare/v0.3.2...v0.4.0) (2026-07-19)
 
 
