@@ -486,39 +486,18 @@ func DeletePromptCommand() *cobra.Command {
 			prompt := args[0]
 			line := args[1]
 			out := cmd.OutOrStdout()
-			switch {
-			case strings.HasPrefix(prompt, "Confirm"):
-				return nil
-			case strings.HasPrefix(prompt, "Cannot"):
-				fmt.Fprintln(out, "change-prompt(栽 )")
+			// Second M-x press while the confirm prompt is up: leave it as-is.
+			if strings.HasPrefix(prompt, "Confirm") {
 				return nil
 			}
 			fields := strings.SplitN(line, "\t", 3)
 			if len(fields) < 2 {
 				return nil
 			}
-			session, window := fields[0], fields[1]
-			h := tmuxhost.New("")
-			repoPath, _ := getSessionRepoPath(h, session)
-			defaultBranch := ""
-			if repoPath != "" {
-				defaultBranch = DefaultBranch(repoPath)
-			}
-			if repoPath != "" && window == defaultBranch {
-				countOut, _ := h.Run("list-windows", "-t", "="+session, "-F", "#W")
-				count := 0
-				for _, l := range strings.Split(strings.TrimSpace(string(countOut)), "\n") {
-					if l != "" {
-						count++
-					}
-				}
-				if count > 1 {
-					fmt.Fprintln(out, "change-prompt(Cannot delete — close attached workspaces first. )")
-					return nil
-				}
-				fmt.Fprintln(out, "change-prompt(Confirm? y/n: )")
-				return nil
-			}
+			// Every row confirms the same way now — the default-branch
+			// window is dismissable too (DeleteRowCommand removes just the
+			// window when siblings remain, kills the session when it's the
+			// last one).
 			fmt.Fprintln(out, "change-prompt(Confirm? y/n: )")
 			return nil
 		},
@@ -583,10 +562,28 @@ func DeleteRowCommand() *cobra.Command {
 				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
 				return hostpopup.CleanupOrphanedPopups(h)
 			}
-			// Default branch (or non-git row): kill whole session. If the
-			// outer client is parked on this session, land it on another
-			// workspace first — otherwise kill-session detaches the outer
-			// (and tears down the M-s popup) instead of switching.
+			// Default-branch window with siblings still open: DISMISS the
+			// window only, keeping the session (and its attached
+			// workspaces) alive. The default-branch window is ephemeral by
+			// design — the create flow kills it
+			// (CreateWorktreeWindow.KillDefaultBranch) and OpenDefaultBranch
+			// recreates it on demand — so removing it here is reversible,
+			// not destructive. No soft-close marker: the default branch
+			// lives at the repo root, not an atelier worktree under
+			// workspaceWorktreeRoot(), and reopening it is a single keypress
+			// (open the repo again). Hop the outer off it first so the
+			// picker's popup-client survives the kill.
+			if repoPath != "" && window == defaultBranch && !soleWindowInSession(h, session, window) {
+				moveOuterAway(h, session, window, defaultBranch)
+				_ = statestore.RemoveWindow(session, window)
+				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
+				return hostpopup.CleanupOrphanedPopups(h)
+			}
+			// Sole window (default branch or non-git row): kill whole
+			// session. If the outer client is parked on this session, land
+			// it on another workspace first — otherwise kill-session
+			// detaches the outer (and tears down the M-s popup) instead of
+			// switching.
 			moveOuterToSiblingSession(h, session)
 			_, _ = h.Run("kill-session", "-t", "="+session)
 			_ = statestore.RemoveSession(session)
