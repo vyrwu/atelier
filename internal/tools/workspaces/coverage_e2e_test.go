@@ -71,12 +71,13 @@ func TestSessionPicker_DeleteWorkspace_KillsWindow_KeepsWorktree(t *testing.T) {
 	}
 }
 
-// TestSessionPicker_DeleteDefault_CannotWhenOtherWorktrees verifies the
-// "Cannot delete — close attached workspaces first." prompt state.
-// Bash tmux_workspace_delete_prompt: when the picked row is the
-// default-branch window AND other worktree windows exist in the
-// session, emit the Cannot-delete prompt instead of Confirm? y/n.
-func TestSessionPicker_DeleteDefault_CannotWhenOtherWorktrees(t *testing.T) {
+// TestSessionPicker_DeleteDefault_ConfirmsWhenOtherWorktrees verifies
+// that the default-branch window is dismissable even when other worktree
+// windows exist in the session: the prompt is Confirm? y/n (not the old
+// "Cannot delete — close attached workspaces first." block). The actual
+// dismiss removes just the window, keeping the session alive — see
+// TestDeleteRow_DefaultBranch_WithSiblings_DismissesWindowOnly.
+func TestSessionPicker_DeleteDefault_ConfirmsWhenOtherWorktrees(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("main")
 	srv.SourceInit(t)
@@ -95,11 +96,10 @@ func TestSessionPicker_DeleteDefault_CannotWhenOtherWorktrees(t *testing.T) {
 		t.Fatalf("create wt: %v", err)
 	}
 	// The worktree-creation flow no longer auto-creates the default-
-	// branch window — the user only asked for `feat-attached`. To
-	// reach the "Cannot delete default when other worktrees exist"
-	// scenario we have to materialize the default-branch window
-	// explicitly, mimicking what the empty-Enter→pull-default flow
-	// would do.
+	// branch window — the user only asked for `feat-attached`. To reach
+	// the "default-branch window alongside other worktrees" scenario we
+	// materialize the default-branch window explicitly, mimicking what
+	// the empty-Enter→pull-default flow would do.
 	if _, err := srv.Client.Run("new-window", "-d", "-t", "vyrwu/demo",
 		"-c", repoDir, "-n", "main"); err != nil {
 		t.Fatalf("seed default-branch window: %v", err)
@@ -111,8 +111,8 @@ func TestSessionPicker_DeleteDefault_CannotWhenOtherWorktrees(t *testing.T) {
 		t.Fatalf("_delete-prompt: %v\n%s", err, out)
 	}
 	got := strings.TrimSpace(string(out))
-	if !strings.Contains(got, "Cannot delete") {
-		t.Fatalf("expected Cannot-delete prompt, got %q", got)
+	if !strings.Contains(got, "Confirm? y/n") {
+		t.Fatalf("expected Confirm? y/n prompt, got %q", got)
 	}
 }
 
