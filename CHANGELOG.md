@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1](https://github.com/vyrwu/atelier/compare/v0.5.0...v0.5.1) (2026-07-22)
+
+
+### Bug fixes
+
+* **initgen:** popup C-] copy-mode in engine layer ([#71](https://github.com/vyrwu/atelier/issues/71)) ([0b36b04](https://github.com/vyrwu/atelier/commit/0b36b04da51c54e9a38c70474b31499f2b46879b))
+* **workspaces:** pass {1} {2} to picker delete binds, not {} ([#70](https://github.com/vyrwu/atelier/issues/70)) ([0b41a26](https://github.com/vyrwu/atelier/commit/0b41a26e6bc1e986fefe81a06b6d920dd63fad2c))
+
 ## [0.5.0](https://github.com/vyrwu/atelier/compare/v0.4.0...v0.5.0) (2026-07-20)
 
 
