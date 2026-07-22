@@ -47,12 +47,20 @@ func BindingBlock(toolName string, m *manifest.Manifest) string {
 //	M-q  detach the outer client (server stays alive, background
 //	     agents survive). `atelier server kill` is the explicit force-
 //	     quit when the user actually wants the server gone.
+//	C-]  (popup table only) enter copy-mode inside a popup.
 //
 // Popup-table M-? uses inline display-popup (same nesting pattern as
 // M-; / M-n / M-s) so the cheatsheet overlays cleanly without
 // dismissing the origin popup. Popup-table M-q delegates to
 // `atelier server quit` so it detaches the OUTER client (from inside a
 // popup, bare `detach-client` would only close the popup pty).
+//
+// C-] lives here, NOT in ThemeBlock, because the popup key-table is an
+// ENGINE construct: popup.ApplyStyle sets `prefix None` on every popup
+// session, which kills prefix-based copy-mode entry inside popups. The
+// escape hatch that compensates must ship with the engine — otherwise
+// `atelier init --bare` (IncludeTheme false) strips the prefix but
+// emits no way back into copy-mode, and popup scrollback is dead.
 func CoreBindingsBlock() string {
 	return `# --- atelier core ---
 # M-? — show the atelier keybinding cheatsheet, aggregated across every
@@ -70,6 +78,13 @@ unbind -T root  "M-q"
 unbind -T popup "M-q"
 bind -T root  "M-q" detach-client
 bind -T popup "M-q" run-shell -b 'atelier server quit'
+
+# C-] — enter copy-mode inside a popup. The popup key-table runs with
+# prefix unset (popup.ApplyStyle sets prefix None), so the normal
+# prefix-based copy-mode entry can't fire there. Bind C-] directly so
+# users can still scroll a popup's pane (e.g., Claude output).
+unbind -T popup C-]
+bind -T popup C-] copy-mode
 `
 }
 
@@ -296,10 +311,6 @@ set -g set-clipboard on
 # tried in order; the first one available on PATH wins.
 unbind [
 bind ] copy-mode
-# Inside atelier popups the 'popup' key-table strips prefix-based
-# bindings (prefix is unset). Bind C-] directly so users can still
-# enter copy-mode on a popup's pane (e.g., to scroll Claude output).
-bind -T popup C-] copy-mode
 bind -T copy-mode-vi v send -X begin-selection
 bind -T copy-mode-vi y send -X copy-pipe-and-cancel "atelier internal clipboard-copy"
 bind -T copy-mode-vi Enter send -X copy-pipe-and-cancel "atelier internal clipboard-copy"

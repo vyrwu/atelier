@@ -133,6 +133,35 @@ func TestQuoteKey(t *testing.T) {
 	}
 }
 
+// TestCoreBindingsBlock_PopupCopyMode locks the copy-mode escape hatch
+// into the ENGINE layer. popup.ApplyStyle sets `prefix None` on every
+// popup session, which kills prefix-based copy-mode entry inside popups.
+// The C-] replacement therefore MUST live in CoreBindingsBlock (always
+// emitted) — not ThemeBlock (skipped by `atelier init --bare`). If it
+// drifts back into the theme, bare/plugin-mode users lose popup
+// scrollback entirely (the bug this guards).
+func TestCoreBindingsBlock_PopupCopyMode(t *testing.T) {
+	b := CoreBindingsBlock()
+	for _, want := range []string{
+		"unbind -T popup C-]",
+		"bind -T popup C-] copy-mode",
+	} {
+		if !strings.Contains(b, want) {
+			t.Errorf("CoreBindingsBlock missing %q; block:\n%s", want, b)
+		}
+	}
+}
+
+// TestThemeBlock_NoPopupCopyMode is the ownership guard's other half:
+// the popup copy-mode entry must NOT be re-added to ThemeBlock. Keeping
+// it engine-only prevents the split-ownership regression where bare
+// mode silently drops it.
+func TestThemeBlock_NoPopupCopyMode(t *testing.T) {
+	if strings.Contains(ThemeBlock(), "-T popup C-]") {
+		t.Error("popup C-] copy-mode must live in CoreBindingsBlock (engine), not ThemeBlock — bare mode skips the theme")
+	}
+}
+
 func TestHooksBlock_ContainsExpectedHooks(t *testing.T) {
 	b := HooksBlock()
 	for _, h := range []string{"window-unlinked", "session-closed", "after-select-window", "client-session-changed"} {
@@ -163,7 +192,6 @@ func TestThemeBlock_DistroGradeDefaults(t *testing.T) {
 		"repeat-time 0":                               "kill chord-swallowing repeat window",
 		"atelier internal clipboard-copy":             "copy-mode yank pipes to system clipboard",
 		"copy-mode-vi y send -X copy-pipe-and-cancel": "y binding wired to clipboard pipe",
-		"bind -T popup C-] copy-mode":                 "popup key-table needs an explicit copy-mode entry (prefix is unset there)",
 		"automatic-rename off":                        "window names persist across shell process changes",
 		"allow-rename off":                            "same",
 	}
