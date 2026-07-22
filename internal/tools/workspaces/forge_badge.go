@@ -206,7 +206,10 @@ func OpenForgeCommand() *cobra.Command {
 			if forge == nil {
 				return nil
 			}
-			return openForge(tmuxhost.New(socket), forge, strings.Join(args, " "))
+			// Binds pass the plain identity fields as {1} {2}; rejoin with a
+			// tab so parseForgeRow (tab-delimited) sees session/window. A
+			// single legacy {} arg already contains the tab and is unchanged.
+			return openForge(tmuxhost.New(socket), forge, strings.Join(args, "\t"))
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
