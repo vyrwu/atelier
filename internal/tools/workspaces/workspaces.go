@@ -120,11 +120,11 @@ func SessionsCommand() *cobra.Command {
 				fzfstyle.WithHighlightLine(),
 				fzfstyle.WithReadZero(),
 				fzfstyle.WithPrintZero(),
-				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_delete-prompt", "\"$FZF_PROMPT\"", "{}")),
-				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(y)\"; fi"),
+				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_delete-prompt", "\"$FZF_PROMPT\"", "{1}", "{2}")),
+				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{1}", "{2}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(y)\"; fi"),
 				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(n)\"; fi"),
 				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"abort\"; fi"),
-				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"accept\"; fi"),
+				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{1}", "{2}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"accept\"; fi"),
 				fzfstyle.WithBind("alt-s", "abort"),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
 				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
@@ -146,7 +146,7 @@ func SessionsCommand() *cobra.Command {
 			}
 			if forgeActive() {
 				opts = append(opts, fzfstyle.WithBind("alt-o",
-					"execute-silent("+dispatch.ToolCmd("workspaces", "_open-forge", "{}")+")"))
+					"execute-silent("+dispatch.ToolCmd("workspaces", "_open-forge", "{1}", "{2}")+")"))
 			}
 			opts = append(opts, fzfstyle.WithFooter(footer))
 			args := fzfstyle.Args("栽 ", "Select Workspace", "red", opts...)
@@ -473,6 +473,36 @@ func DeleteCommand() *cobra.Command {
 	return c
 }
 
+// parsePickedIdentity resolves the (session, window) — or (repo, branch)
+// — identity a picker fzf bind hands to a hidden delete/open subcommand.
+//
+// Binds MUST pass the two plain fields as `{1} {2}`, NEVER the whole
+// `{}` record. The full row carries the styled display column: ANSI SGR
+// escapes, an embedded recap newline, and free-form AI recap text laced
+// with `+`, `(`, `)`, `;`. When such a row is substituted into a
+// transform-emitted `execute-silent(... {})` action, fzf re-parses the
+// echoed string as an action list and those escapes/punctuation corrupt
+// the parse — the delete silently never fires, and the stuck "Confirm?"
+// prompt then also blocks plain Enter navigation (the exact "can't
+// delete / can't even enter" wedge). Fields 1-2 are plain text by
+// construction (session/window or repo/branch), so `{1} {2}` round-trips
+// safely. See picked_identity_test.go.
+//
+// A single tab-joined arg (a legacy `{}` invocation) is still split as a
+// fallback so a stray old bind can't wedge the picker.
+func parsePickedIdentity(args []string) (first, second string, ok bool) {
+	if len(args) >= 2 {
+		return args[0], args[1], args[0] != "" && args[1] != ""
+	}
+	if len(args) == 1 {
+		f := strings.SplitN(args[0], "\t", 3)
+		if len(f) >= 2 {
+			return f[0], f[1], f[0] != "" && f[1] != ""
+		}
+	}
+	return "", "", false
+}
+
 // _delete-prompt and _delete-row are internal subcommands used by the
 // session-picker fzf binds. They mirror tmux_workspace_delete_prompt and
 // tmux_delete_workspace.
@@ -484,14 +514,13 @@ func DeletePromptCommand() *cobra.Command {
 		Args:   cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prompt := args[0]
-			line := args[1]
 			out := cmd.OutOrStdout()
 			// Second M-x press while the confirm prompt is up: leave it as-is.
 			if strings.HasPrefix(prompt, "Confirm") {
 				return nil
 			}
-			fields := strings.SplitN(line, "\t", 3)
-			if len(fields) < 2 {
+			// args[1:] carry the row identity fields ({1} {2}).
+			if _, _, ok := parsePickedIdentity(args[1:]); !ok {
 				return nil
 			}
 			// Every row confirms the same way now — the default-branch
@@ -511,12 +540,10 @@ func DeleteRowCommand() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			line := args[0]
-			fields := strings.SplitN(line, "\t", 3)
-			if len(fields) < 2 {
+			session, window, ok := parsePickedIdentity(args)
+			if !ok {
 				return nil
 			}
-			session, window := fields[0], fields[1]
 			h := tmuxhost.New("")
 			repoPath, _ := getSessionRepoPath(h, session)
 			defaultBranch := ""
@@ -844,11 +871,11 @@ func RecoverCommand() *cobra.Command {
 				fzfstyle.WithCustomColor("prompt:141:bold,pointer:141,query:141,hl:141,hl+:141:bold,label:103,border:103,footer:103"),
 				fzfstyle.WithDelimiter("\t"),
 				fzfstyle.WithNth("3"),
-				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_recover-delete-prompt", "\"$FZF_PROMPT\"", "{}")),
-				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"put(y)\"; fi"),
+				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_recover-delete-prompt", "\"$FZF_PROMPT\"", "{1}", "{2}")),
+				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{1}", "{2}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"put(y)\"; fi"),
 				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(復 )\"; else echo \"put(n)\"; fi"),
 				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(復 )\"; else echo \"abort\"; fi"),
-				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"accept\"; fi"),
+				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{1}", "{2}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"accept\"; fi"),
 				fzfstyle.WithBind("alt-r", "abort"),
 				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
 				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
@@ -984,13 +1011,12 @@ func RecoverDeletePromptCommand() *cobra.Command {
 		Args:   cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prompt := args[0]
-			line := args[1]
 			out := cmd.OutOrStdout()
 			if strings.HasPrefix(prompt, "Confirm") {
 				return nil
 			}
-			fields := strings.SplitN(line, "\t", 3)
-			if len(fields) < 2 {
+			// args[1:] carry the row identity fields ({1} {2}).
+			if _, _, ok := parsePickedIdentity(args[1:]); !ok {
 				return nil
 			}
 			fmt.Fprintln(out, "change-prompt(Confirm? y/n: )")
@@ -1010,12 +1036,10 @@ func RecoverDeleteRowCommand() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			line := args[0]
-			fields := strings.SplitN(line, "\t", 3)
-			if len(fields) < 2 {
+			repo, branch, ok := parsePickedIdentity(args)
+			if !ok {
 				return nil
 			}
-			repo, branch := fields[0], fields[1]
 			repoPath := filepath.Join(workspaceCodeRoot(), repo)
 			wtPath := filepath.Join(workspaceWorktreeRoot(), repo, branch)
 			// Paths keep the raw repo name; tmux/statestore identity is normalized.
