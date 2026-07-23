@@ -84,20 +84,20 @@ func TestClearLaunchPrompt_SpentPromptDoesNotSurviveRespawn(t *testing.T) {
 	}
 
 	// Act: OpenAgent consumes the one-shot prompt.
-	clearLaunchPrompt(srv.Client, wid, prompt, kind)
+	clearLaunchPrompt(srv.Client, wid, prompt)
 
-	// Live window: prompt + kind gone, session id preserved.
+	// Live window: prompt gone; kind (durable identity) + session id survive.
 	if got, _ := srv.Client.GetWindowOption(wid, OptPrompt); got != "" {
 		t.Errorf("live @ai_prompt not cleared: %q", got)
 	}
-	if got, _ := srv.Client.GetWindowOption(wid, OptWorkspaceKind); got != "" {
-		t.Errorf("live @ai_workspace_kind not cleared: %q", got)
+	if got, _ := srv.Client.GetWindowOption(wid, OptWorkspaceKind); got != kind {
+		t.Errorf("live @ai_workspace_kind must survive (picker identity): got %q want %q", got, kind)
 	}
 	if got, _ := srv.Client.GetWindowOption(wid, OptActiveSessionID); got != sessID {
 		t.Errorf("live @ai_active_session_id must survive: got %q want %q", got, sessID)
 	}
 
-	// Cache mirror: prompt + kind cleared, session id preserved.
+	// Cache mirror: prompt cleared; kind + session id preserved.
 	cached, err := statestore.Load()
 	if err != nil || cached == nil {
 		t.Fatalf("reload cache: %v (nil=%v)", err, cached == nil)
@@ -106,8 +106,8 @@ func TestClearLaunchPrompt_SpentPromptDoesNotSurviveRespawn(t *testing.T) {
 	if md[MetaPrompt] != "" {
 		t.Errorf("cached ai.prompt not cleared: %q", md[MetaPrompt])
 	}
-	if md[MetaWorkspaceKind] != "" {
-		t.Errorf("cached ai.workspace_kind not cleared: %q", md[MetaWorkspaceKind])
+	if md[MetaWorkspaceKind] != kind {
+		t.Errorf("cached ai.workspace_kind must survive: got %q want %q", md[MetaWorkspaceKind], kind)
 	}
 	if md[MetaActiveSessionID] != sessID {
 		t.Errorf("cached ai.active_session_id must survive: got %q want %q", md[MetaActiveSessionID], sessID)
@@ -140,7 +140,38 @@ func TestClearLaunchPrompt_SpentPromptDoesNotSurviveRespawn(t *testing.T) {
 	if got, _ := srv2.Client.GetWindowOption(wid2, OptPrompt); got != "" {
 		t.Errorf("restored window must NOT carry the spent prompt: %q", got)
 	}
-	if got, _ := srv2.Client.GetWindowOption(wid2, OptWorkspaceKind); got != "" {
-		t.Errorf("restored window must NOT carry the spent kind: %q", got)
+	if got, _ := srv2.Client.GetWindowOption(wid2, OptWorkspaceKind); got != kind {
+		t.Errorf("restored window must carry durable kind: got %q want %q", got, kind)
+	}
+}
+
+// TestClearLaunchPrompt_PreservesMultiRepoKind is the regression guard for the
+// "cross-repo (auto) workspace vanishes from M-s after Claude launches" bug.
+// A multi-repo workspace has no @repo_path, so @ai_workspace_kind is the M-s
+// picker's ONLY signal that the session is a workspace. clearLaunchPrompt used
+// to consume it on launch, dropping the workspace out of the switcher.
+func TestClearLaunchPrompt_PreservesMultiRepoKind(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	const session = "auto/audit-observability"
+	srv := testtmux.New(t)
+	srv.NewSession(session)
+	// Auto workspaces carry NO @repo_path — kind is the sole picker signal.
+	if _, err := srv.Client.Run("set-option", "-w", "-t", session+":1",
+		OptWorkspaceKind, WorkspaceKindMultiRepo); err != nil {
+		t.Fatalf("stamp kind: %v", err)
+	}
+	widOut, err := srv.Client.Run("display-message", "-p", "-t", session+":1", "#{window_id}")
+	if err != nil {
+		t.Fatalf("resolve window id: %v", err)
+	}
+	wid := strings.TrimSpace(string(widOut))
+
+	// Launch consumes the (empty) prompt; kind must survive.
+	clearLaunchPrompt(srv.Client, wid, "")
+
+	if got, _ := srv.Client.GetWindowOption(wid, OptWorkspaceKind); got != WorkspaceKindMultiRepo {
+		t.Errorf("@ai_workspace_kind cleared — auto workspace would vanish from M-s: got %q want %q",
+			got, WorkspaceKindMultiRepo)
 	}
 }

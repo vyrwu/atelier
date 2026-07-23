@@ -93,9 +93,10 @@ func (Adapter) OpenAgent(h *tmuxhost.Client) error {
 			}
 		}
 
-		// One-shot: consume the prompt + kind so they can't be replayed.
+		// One-shot: consume the prompt so it can't be replayed.
 		// @ai_active_session_id stays — the persistent conversation pointer.
-		clearLaunchPrompt(h, ctx.WindowID, prompt, kind)
+		// @ai_workspace_kind ALSO stays — see clearLaunchPrompt.
+		clearLaunchPrompt(h, ctx.WindowID, prompt)
 
 		cfg, _ := LoadConfig()
 		settingsPath, settingsErr := claudesettings.Ensure()
@@ -127,23 +128,27 @@ func (Adapter) SetPrompt(h *tmuxhost.Client, windowID, prompt, kind string) erro
 	return nil
 }
 
-// clearLaunchPrompt consumes the one-shot @ai_prompt / @ai_workspace_kind
-// after OpenAgent has folded them into the launch command — from BOTH the
-// live window AND the restore cache. Clearing only the window option (the old
-// behavior) let a spent prompt survive in the statestore cache and get
-// re-stamped on the next tmux server restart; a restored window then carried
-// both a dead prompt and a live @ai_active_session_id, and buildClaudeStartCmd
-// forked a fresh session off the prompt instead of resuming. Best-effort: the
-// cache mirror is only cleared when there was actually something to clear so a
-// plain resume doesn't leave empty keys behind.
-func clearLaunchPrompt(h *tmuxhost.Client, windowID, prompt, kind string) {
+// clearLaunchPrompt consumes the one-shot @ai_prompt after OpenAgent has
+// folded it into the launch command — from BOTH the live window AND the
+// restore cache. Clearing only the window option (the old behavior) let a
+// spent prompt survive in the statestore cache and get re-stamped on the next
+// tmux server restart; a restored window then carried both a dead prompt and a
+// live @ai_active_session_id, and buildClaudeStartCmd forked a fresh session
+// off the prompt instead of resuming. Best-effort: the cache mirror is only
+// cleared when there was actually something to clear so a plain resume doesn't
+// leave empty keys behind.
+//
+// @ai_workspace_kind is deliberately NOT cleared. It's durable workspace
+// identity (worktree vs multi-repo), not a one-shot launch instruction:
+// buildClaudeStartCmd only consults `kind` when `prompt` is set, and prompt is
+// the one-shot we clear here, so kind can never be replayed. Crucially, for a
+// multi-repo (auto) workspace it's the M-s picker's ONLY signal that a
+// no-@repo_path session is a workspace — clearing it here made cross-repo
+// workspaces vanish from the switcher the moment Claude launched in them.
+func clearLaunchPrompt(h *tmuxhost.Client, windowID, prompt string) {
 	_ = h.UnsetWindowOption(windowID, OptPrompt)
-	_ = h.UnsetWindowOption(windowID, OptWorkspaceKind)
 	if prompt != "" {
 		_ = workspace.PersistWindowMetadata(h, windowID, MetaPrompt, "")
-	}
-	if kind != "" {
-		_ = workspace.PersistWindowMetadata(h, windowID, MetaWorkspaceKind, "")
 	}
 }
 
