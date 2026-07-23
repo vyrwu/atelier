@@ -364,6 +364,7 @@ func listClients(h *tmuxhost.Client) (outer string, inner []string, err error) {
 	if err != nil {
 		return "", nil, err
 	}
+	var outers []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -375,11 +376,37 @@ func listClients(h *tmuxhost.Client) (outer string, inner []string, err error) {
 		session, name := parts[0], parts[1]
 		if strings.HasPrefix(session, "_") {
 			inner = append(inner, name)
-		} else if outer == "" {
-			outer = name
+		} else {
+			outers = append(outers, name)
 		}
 	}
-	return outer, inner, nil
+	pref, _ := h.ShowGlobalOption("@atelier_outer_client")
+	return pickOuter(outers, strings.TrimSpace(pref)), inner, nil
+}
+
+// pickOuter chooses which attached non-popup client is the user's outer
+// (workspace) client. It PREFERS @atelier_outer_client — the client the
+// M-; / M-n / M-s root binding recorded as the one the user drove.
+//
+// Without this, listClients returned the FIRST client tmux happened to
+// list. With more than one client attached to the same session (e.g. two
+// terminal windows on the same workspace), that's frequently the wrong
+// terminal, so every OpenOnOuter popup opens on a client the user isn't
+// looking at — tools appear to "not launch" at all. Falls back to the
+// first client when the preferred one isn't currently attached (it
+// detached, or was never set). Pure. See pick_outer_test.go.
+func pickOuter(outers []string, preferred string) string {
+	if preferred != "" {
+		for _, c := range outers {
+			if c == preferred {
+				return preferred
+			}
+		}
+	}
+	if len(outers) > 0 {
+		return outers[0]
+	}
+	return ""
 }
 
 func isAtelierPopup(name string) bool {
