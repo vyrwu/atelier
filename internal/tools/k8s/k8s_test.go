@@ -90,7 +90,7 @@ func TestLoadContexts(t *testing.T) {
 	body := `contexts:
   - name: prod
     context: arn:aws:eks:prod
-    authCmd: aws-vault exec prod --
+    authCmd: assume prod --exec
     initCmd: aws eks update-kubeconfig --name prod
   - name: staging
 `
@@ -106,6 +106,9 @@ func TestLoadContexts(t *testing.T) {
 	}
 	if ctxs[0].Name != "prod" || ctxs[0].KubeContext != "arn:aws:eks:prod" {
 		t.Errorf("prod mismatch: %+v", ctxs[0])
+	}
+	if ctxs[0].AuthCmd != "assume prod --exec" {
+		t.Errorf("prod authCmd = %q, want granted assume", ctxs[0].AuthCmd)
 	}
 	if ctxs[1].KubeContext != "" {
 		t.Errorf("staging KubeContext should be empty, got %q", ctxs[1].KubeContext)

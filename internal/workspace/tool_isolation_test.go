@@ -47,7 +47,7 @@ func TestTools_DoNotReimplementWindowManagement(t *testing.T) {
 		"internal/tools/k8s/k8s.go:new-session":  "TODO: same — k8s creates its own popup session with env vars",
 		"internal/tools/pg/pg.go:respawn-pane":   "TODO: same as k8s",
 		"internal/tools/pg/pg.go:new-session":    "TODO: same as k8s",
-		"internal/tools/aws/aws.go:respawn-pane": "TODO: aws respawns the CALLER pane under aws-vault; tool-specific, candidate for popup.RespawnCallerPane(target, cmd)",
+		"internal/tools/aws/aws.go:respawn-pane": "TODO: aws respawns the CALLER pane under granted assume; tool-specific, candidate for popup.RespawnCallerPane(target, cmd)",
 
 		// Workspaces-tool remaining sites — Layer B partial migration.
 		"internal/tools/workspaces/workspaces.go:new-session":  "TODO: CloneCommand + runAutoSession should use workspace.EnsureSession / workspace.NewMultiRepoSession",

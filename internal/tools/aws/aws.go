@@ -1,24 +1,32 @@
-// Package aws is atelier's aws-vault profile picker — the bash-exact port
-// of tmux_aws_picker.
+// Package aws is atelier's granted profile picker — it assumes an AWS profile
+// in the caller pane using granted's `assume`.
 //
 // Behavior:
-//   - fzf prompt `サ ` yellow, label ` AWS Profile `
+//   - fzf prompt `サ ` yellow, label ` AWS Assume `
+//   - Profiles come from `~/.aws/config` (or $AWS_CONFIG_FILE) — the same
+//     source granted reads.
 //   - On selection: tmux respawn-pane -k <CALLER_PANE>
-//     "aws-vault exec '<profile>' -- $SHELL; exec $SHELL"
+//     `$SHELL -i -c 'assume '<profile>'; exec $SHELL'`
+//     `assume` is a sourced shell function, so it must run in an interactive
+//     shell; the credentials it exports persist in the pane's shell (unlike
+//     aws-vault's subshell), and `exec $SHELL` keeps the pane alive.
 //   - CALLER_PANE comes from atelier global state (set when the popup is
 //     opened) OR from _CALLER_PANE global env var as a fallback.
 package aws
 
 import (
-	"bytes"
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/vyrwu/atelier/internal/awsassume"
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
 	"github.com/vyrwu/atelier/internal/state"
@@ -29,16 +37,19 @@ func PickCommand() *cobra.Command {
 	var socket string
 	c := &cobra.Command{
 		Use:   "pick",
-		Short: "Pick an aws-vault profile and respawn the caller pane under aws-vault exec (bash-exact)",
+		Short: "Pick an AWS profile and assume it in the caller pane with granted",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if _, err := exec.LookPath("granted"); err != nil {
+				return fmt.Errorf("granted not on PATH (install granted and enable its shell integration): %w", err)
+			}
 			profiles, err := ListProfiles()
 			if err != nil {
 				return err
 			}
 			if len(profiles) == 0 {
-				return fmt.Errorf("no aws-vault profiles configured")
+				return fmt.Errorf("no AWS profiles configured in ~/.aws/config")
 			}
-			args := fzfstyle.Args("サ ", "AWS Profile", "yellow",
+			args := fzfstyle.Args("サ ", "AWS Assume", "yellow",
 				fzfstyle.WithCustomColor("prompt:yellow:bold,pointer:yellow,query:yellow,hl:yellow,hl+:yellow:bold,label:103,border:103,footer:103"),
 			)
 			picked, err := fzf.Pick(profiles, args...)
@@ -55,14 +66,7 @@ func PickCommand() *cobra.Command {
 				return fmt.Errorf("aws picker: caller pane not set")
 			}
 
-			shell := os.Getenv("SHELL")
-			if shell == "" {
-				shell = "/bin/zsh"
-			}
-			// `exec $SHELL` after aws-vault keeps the pane alive when the
-			// user exits the sub-shell (matches bash).
-			shellCmd := fmt.Sprintf(`aws-vault exec '%s' -- %s; exec %s`,
-				strings.ReplaceAll(picked, `'`, `'\''`), shell, shell)
+			shellCmd := awsassume.PickerCmd(picked, awsassume.DefaultShell())
 			_, err = h.Run("respawn-pane", "-k", "-t", target, shellCmd)
 			return err
 		},
@@ -93,7 +97,7 @@ func resolveCallerPane(h *tmuxhost.Client) string {
 func ListCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List aws-vault profiles",
+		Short: "List AWS profiles from ~/.aws/config",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			profiles, err := ListProfiles()
 			if err != nil {
@@ -107,24 +111,45 @@ func ListCommand() *cobra.Command {
 	}
 }
 
+// ListProfiles returns the AWS profile names granted can assume, read from
+// $AWS_CONFIG_FILE or ~/.aws/config.
 func ListProfiles() ([]string, error) {
-	if _, err := exec.LookPath("aws-vault"); err != nil {
-		return nil, fmt.Errorf("aws-vault not on PATH: %w", err)
+	path := os.Getenv("AWS_CONFIG_FILE")
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(home, ".aws", "config")
 	}
-	cmd := exec.Command("aws-vault", "list", "--profiles")
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("aws-vault list: %w (%s)", err, strings.TrimSpace(errBuf.String()))
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("read AWS config %s: %w", path, err)
 	}
+	defer func() { _ = f.Close() }()
+	return parseAWSProfiles(f), nil
+}
+
+// parseAWSProfiles extracts profile names from an ~/.aws/config stream.
+// `[default]` yields "default"; `[profile NAME]` yields NAME. Other sections
+// (`[sso-session ...]`, `[services ...]`) are ignored. File order is kept.
+func parseAWSProfiles(r io.Reader) []string {
 	var profiles []string
-	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "[") || !strings.HasSuffix(line, "]") {
 			continue
 		}
-		profiles = append(profiles, line)
+		section := strings.TrimSpace(line[1 : len(line)-1])
+		switch {
+		case section == "default":
+			profiles = append(profiles, "default")
+		case strings.HasPrefix(section, "profile "):
+			if name := strings.TrimSpace(strings.TrimPrefix(section, "profile ")); name != "" {
+				profiles = append(profiles, name)
+			}
+		}
 	}
-	return profiles, nil
+	return profiles
 }

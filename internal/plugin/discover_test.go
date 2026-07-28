@@ -92,10 +92,10 @@ func TestDiscover_LoadsLauncherFromConfig(t *testing.T) {
 	resetRegistry(t)
 	isolateConfig(t, `
 [tools.k9s-aws]
-launch = "aws-vault-k9s"
+launch = "granted-k9s"
 popup = "global"
 key = "K"
-requires = ["aws-vault-k9s"]
+requires = ["granted-k9s"]
 title = "K9s (AWS)"
 description = "k9s with AWS auth"
 `)
@@ -116,7 +116,7 @@ description = "k9s with AWS auth"
 	if p.Manifest.Binding == nil || p.Manifest.Binding.Key != "K" {
 		t.Fatalf("binding key not synthesized: %+v", p.Manifest.Binding)
 	}
-	if len(p.Manifest.Requires) != 1 || p.Manifest.Requires[0] != "aws-vault-k9s" {
+	if len(p.Manifest.Requires) != 1 || p.Manifest.Requires[0] != "granted-k9s" {
 		t.Fatalf("requires not carried through: %+v", p.Manifest.Requires)
 	}
 }

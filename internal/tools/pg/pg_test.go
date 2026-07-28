@@ -30,10 +30,11 @@ func TestBuildLaunchCommand_NoAuth(t *testing.T) {
 }
 
 func TestBuildLaunchCommand_AuthWrapped(t *testing.T) {
+	t.Setenv("SHELL", "/bin/zsh")
 	ctx := Context{
 		Name:     "prod",
 		Database: "main",
-		AuthCmd:  "aws-vault exec prod --",
+		AuthCmd:  "assume prod --exec",
 		Endpoints: map[string]Endpoint{
 			"write": {Host: "h", User: "u"},
 		},
@@ -42,8 +43,13 @@ func TestBuildLaunchCommand_AuthWrapped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildLaunchCommand: %v", err)
 	}
-	if !strings.HasPrefix(got, "aws-vault exec prod -- sh -c ") {
-		t.Fatalf("expected auth-wrapped command, got %q", got)
+	// granted's `assume` is a sourced function → wrapped in an interactive
+	// shell, with the pgcli command passed as a single --exec argument.
+	if !strings.HasPrefix(got, `/bin/zsh -i -c 'assume prod --exec `) {
+		t.Fatalf("expected granted auth-wrapped command, got %q", got)
+	}
+	if !strings.Contains(got, "pgcli") {
+		t.Fatalf("missing pgcli in wrapped command, got %q", got)
 	}
 }
 
