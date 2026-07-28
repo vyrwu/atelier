@@ -65,7 +65,7 @@ brew install vyrwu/tap/atelier
 ```
 
 The cask pulls in the two hard dependencies, `tmux` and `fzf`. Everything else
-(k9s, pgcli, lazygit, gh, aws-vault, node, …) is optional — install only what
+(k9s, pgcli, lazygit, gh, granted, node, …) is optional — install only what
 the tools you use require. `atelier doctor` reports the gaps.
 
 <details>
@@ -209,11 +209,11 @@ SSO first:
 
 ```toml
 [tools.k9s-aws]
-launch       = "aws-vault-k9s"   # REQUIRED — any executable on PATH (a script you wrote)
+launch       = "granted-k9s"     # REQUIRED — any executable on PATH (a script you wrote)
 popup        = "global"          # workspace | global | none  (default: none)
 key          = "K"               # optional tmux binding
 key_table    = ""                # optional tmux key-table for the binding (default: root)
-requires     = ["aws-vault-k9s"] # atelier doctor checks these
+requires     = ["granted-k9s"]   # atelier doctor checks these
 invoke       = "open"            # manifest invoke verb (default: open)
 start_cwd    = true              # start in the workspace cwd (default: true iff popup="workspace")
 icon         = "胡"

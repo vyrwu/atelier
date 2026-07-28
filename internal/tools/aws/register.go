@@ -10,7 +10,7 @@ import (
 var Manifest = &manifest.Manifest{
 	Tool:          true,
 	Name:          "aws",
-	Description:   "aws-vault profile picker (respawns outer pane under aws-vault exec)",
+	Description:   "AWS Assume — granted profile picker (assumes a profile in the outer pane's shell)",
 	Popup:         manifest.KindNone,
 	PrimaryInvoke: "pick",
 	Binding: &manifest.Binding{
@@ -20,11 +20,11 @@ var Manifest = &manifest.Manifest{
 	UI: &manifest.UI{
 		Icon:        "サ",
 		AccentColor: "180",
-		PopupTitle:  "AWS Profile",
+		PopupTitle:  "AWS Assume",
 	},
-	Requires: []string{"aws-vault", "fzf"},
+	Requires: []string{"granted", "fzf"},
 	PickerBindings: []manifest.PickerBinding{
-		{Key: "Enter", Action: "Respawn the outer pane as `aws-vault exec <profile>`"},
+		{Key: "Enter", Action: "Assume `<profile>` in the outer pane's shell (granted `assume`)"},
 		{Key: "Esc", Action: "Dismiss"},
 	},
 }

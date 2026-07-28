@@ -15,7 +15,7 @@ Terminal-centric agentic dev framework. Per-workspace tool clusters in tmux, dri
 | Concept | Definition |
 |---|---|
 | **Workspace** | First-class canvas. A git worktree + tmux window + state attached to that pair. |
-| **Tool** | A TUI program scoped per workspace (Claude, k9s, pgcli, lazygit, aws-vault, popup shell). |
+| **Tool** | A TUI program scoped per workspace (Claude, k9s, pgcli, lazygit, granted, popup shell). |
 | **Atelier** | The binary that manages workspaces and orchestrates tools. |
 
 Workspaces are the substrate. Tools operate on or within workspaces. The workspace-picker is a tool; the workspace itself is not.
@@ -87,14 +87,14 @@ forge = "github"   # ForgeIntegration adapter (default: off)
 no capability slot. Register *any* command as a launcher with a
 `[tools.<name>]` block; atelier binds a key, opens it in a popup, and
 owns the window state. This is how a user adds a tool without Go — e.g.
-wrap k9s with AWS SSO in a `aws-vault-k9s` script:
+wrap k9s with AWS SSO in a `granted-k9s` script:
 
 ```toml
 [tools.k9s-aws]
-launch       = "aws-vault-k9s"   # any executable on PATH
+launch       = "granted-k9s"     # any executable on PATH
 popup        = "global"          # workspace | global | none
 key          = "K"               # optional tmux binding
-requires     = ["aws-vault-k9s"] # doctor checks these
+requires     = ["granted-k9s"]   # doctor checks these
 icon         = "胡"
 accent_color = "110"
 title        = "K9s (AWS)"

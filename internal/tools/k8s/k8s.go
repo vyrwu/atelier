@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/vyrwu/atelier/internal/awsassume"
 	"github.com/vyrwu/atelier/internal/dispatch"
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
@@ -49,8 +50,13 @@ var Spec = &popup.SessionGlobal{
 type Context struct {
 	Name        string `yaml:"name"`
 	KubeContext string `yaml:"context,omitempty"`
-	AuthCmd     string `yaml:"authCmd,omitempty"`
-	InitCmd     string `yaml:"initCmd,omitempty"`
+	// AuthCmd is an optional granted auth prefix, e.g.
+	// "assume <profile> --exec". Because `assume` is a sourced shell
+	// function, it runs inside an interactive shell with the tool launch
+	// passed as its single --exec command (see internal/awsassume).
+	// Empty = launch with no AWS auth.
+	AuthCmd string `yaml:"authCmd,omitempty"`
+	InitCmd string `yaml:"initCmd,omitempty"`
 }
 
 type contextsFile struct {
@@ -394,11 +400,10 @@ func setup(h *tmuxhost.Client, ctx Context) error {
 		atelierBin = "atelier"
 	}
 
-	authCmd := ctx.AuthCmd
-	if strings.TrimSpace(authCmd) != "" && !strings.HasSuffix(strings.TrimSpace(authCmd), ";") {
-		authCmd = strings.TrimSpace(authCmd) + " "
-	}
-	runCmd := fmt.Sprintf("%s%s tools k8s _launch", authCmd, atelierBin)
+	// authCmd (e.g. `assume prod --exec`) wraps the launch via granted; since
+	// `assume` is a sourced shell function it runs inside an interactive shell.
+	launch := fmt.Sprintf("%s tools k8s _launch", atelierBin)
+	runCmd := awsassume.WrapAuth(ctx.AuthCmd, launch, awsassume.DefaultShell())
 
 	session := Spec.SessionName()
 	has, err := h.HasSession(session)

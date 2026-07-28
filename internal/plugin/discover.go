@@ -12,7 +12,7 @@
 //     names ANY command to run in a popup. atelier launches it and owns
 //     the window/state; the command needn't be an atelier binary. This is
 //     how a user extends atelier without writing Go — e.g. wrap k9s with
-//     AWS auth in a `aws-vault-k9s` script and register it as a launcher.
+//     AWS auth in a `granted-k9s` script and register it as a launcher.
 //
 // Discover() merges both into one list. Every consumer — the `atelier
 // tools` dispatcher, `atelier init` binding generation, the tool

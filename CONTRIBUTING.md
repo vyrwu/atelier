@@ -33,7 +33,7 @@ Popup shapes:
 - `workspace` — a per-parent-window backing session (survives while the
   window lives). Set `start_cwd = true` to open at the pane's cwd.
 - `global` — one singleton backing session shared server-wide (k9s /
-  pgcli style). Your `aws-vault-k9s` wrapper goes here.
+  pgcli style). Your `granted-k9s` wrapper goes here.
 - `none` — exec the command directly in the popup pty; no backing
   session.
 

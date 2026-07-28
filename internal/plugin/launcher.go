@@ -18,10 +18,10 @@ import (
 // state. The command doesn't have to be an atelier binary.
 //
 //	[tools.k9s-aws]
-//	launch      = "aws-vault-k9s"   # any executable on PATH
+//	launch      = "granted-k9s"     # any executable on PATH
 //	popup       = "global"          # workspace | global | none
 //	key         = "K"               # optional tmux binding
-//	requires    = ["aws-vault-k9s"] # doctor checks these are present
+//	requires    = ["granted-k9s"]   # doctor checks these are present
 //	icon        = "胡"
 //	accent_color = "110"
 //	title       = "K9s (AWS)"

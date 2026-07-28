@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/vyrwu/atelier/internal/awsassume"
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
 	"github.com/vyrwu/atelier/internal/popup"
@@ -45,11 +46,16 @@ var PgcliSpec = &popup.SessionGlobal{
 }
 
 type Context struct {
-	Name      string              `yaml:"name"`
-	Database  string              `yaml:"database"`
-	Port      int                 `yaml:"port"`
-	Region    string              `yaml:"region,omitempty"`
-	SsmRegion string              `yaml:"ssmRegion,omitempty"`
+	Name      string `yaml:"name"`
+	Database  string `yaml:"database"`
+	Port      int    `yaml:"port"`
+	Region    string `yaml:"region,omitempty"`
+	SsmRegion string `yaml:"ssmRegion,omitempty"`
+	// AuthCmd is an optional granted auth prefix, e.g.
+	// "assume <profile> --exec". Because `assume` is a sourced shell
+	// function, it runs inside an interactive shell with the tool launch
+	// passed as its single --exec command (see internal/awsassume).
+	// Empty = launch with no AWS auth.
 	AuthCmd   string              `yaml:"authCmd,omitempty"`
 	Endpoints map[string]Endpoint `yaml:"endpoints"`
 }
@@ -367,11 +373,10 @@ func setup(h *tmuxhost.Client, tool string, ctx Context, role string) error {
 		atelierBin = "atelier"
 	}
 
-	authCmd := strings.TrimSpace(ctx.AuthCmd)
-	if authCmd != "" {
-		authCmd += " "
-	}
-	runCmd := fmt.Sprintf("%s%s tools pg _launch", authCmd, atelierBin)
+	// authCmd (e.g. `assume prod --exec`) wraps the launch via granted; since
+	// `assume` is a sourced shell function it runs inside an interactive shell.
+	launch := fmt.Sprintf("%s tools pg _launch", atelierBin)
+	runCmd := awsassume.WrapAuth(ctx.AuthCmd, launch, awsassume.DefaultShell())
 
 	session := spec.SessionName()
 	has, err := h.HasSession(session)
@@ -488,10 +493,7 @@ func buildLaunchCommand(ctx Context, role, tool string) (string, error) {
 		Path:   "/" + ctx.Database,
 	}
 	core := fmt.Sprintf(`%s %q`, tool, u.String())
-	if ctx.AuthCmd != "" {
-		return fmt.Sprintf(`%s sh -c %q`, ctx.AuthCmd, core), nil
-	}
-	return core, nil
+	return awsassume.WrapAuth(ctx.AuthCmd, core, awsassume.DefaultShell()), nil
 }
 
 func fetchSSMPassword(ssmPath, region string) (string, error) {
