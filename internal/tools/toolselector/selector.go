@@ -26,6 +26,7 @@ import (
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/plugin"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/workspace"
 )
 
 // shellEntryKind is the dispatch kind for the special "Shell" navigation
@@ -302,7 +303,8 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 // dispatch handles the picked entry. Special cases:
 //
 //   - shellEntryKind: navigation, no popup — detach any popup the user was
-//     in, then `select-window -t ':1'` on the outer client.
+//     in, then land the outer client back on @atelier_outer_window via
+//     workspace.ReturnToOuterShell.
 //   - all others: open the chosen tool as a NESTED popup on top of the
 //     selector's own popup. The selector process blocks (synchronous
 //     display-popup) until the nested popup closes, then exits — at which
@@ -316,7 +318,7 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 // global, so they still land correctly.
 func dispatch(h *tmuxhost.Client, e entry) error {
 	if e.Kind == shellEntryKind {
-		return dispatchShellReturn(h)
+		return workspace.ReturnToOuterShell(h)
 	}
 
 	// Resolve plugin + invoke for split kinds like "pg:pgcli".
@@ -404,37 +406,6 @@ func dispatchMode(targetStyle manifest.Style) DispatchMode {
 // new tool simply takes over the same PID.
 func execReplace(path string, argv []string) error {
 	return syscall.Exec(path, argv, os.Environ())
-}
-
-// dispatchShellReturn returns the user to their workspace window :1,
-// closing any popup chain. Matches bash's "Shell" tool action.
-func dispatchShellReturn(h *tmuxhost.Client) error {
-	out, _ := h.Run("list-clients", "-F", "#{client_session}|#{client_name}")
-	var innerClients []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		if strings.HasPrefix(parts[0], "_") {
-			innerClients = append(innerClients, parts[1])
-		}
-	}
-
-	if len(innerClients) == 0 {
-		_, err := h.Run("select-window", "-t", ":1")
-		return err
-	}
-
-	// Set hook to select window :1 after the last popup client detaches.
-	hookAction := `select-window -t ':1' ; set-hook -ug client-detached`
-	if _, err := h.Run("set-hook", "-g", "client-detached", hookAction); err != nil {
-		return err
-	}
-	for _, c := range innerClients {
-		_, _ = h.Run("detach-client", "-t", c)
-	}
-	return nil
 }
 
 func entryPopupTitle(e entry) string {

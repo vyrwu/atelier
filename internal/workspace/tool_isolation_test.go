@@ -54,9 +54,6 @@ func TestTools_DoNotReimplementWindowManagement(t *testing.T) {
 		"internal/tools/workspaces/workspaces.go:new-window":   "TODO: ensureDefaultBranchWindow should call workspace.NewDefaultBranchWindow (extracts the remaining new-window site)",
 		"internal/tools/workspaces/workspaces.go:kill-window":  "TODO: DeleteRowCommand should call workspace.DeleteWindow(h, session, window)",
 		"internal/tools/workspaces/workspaces.go:kill-session": "TODO: DeleteRowCommand should call workspace.DeleteSession(h, session)",
-
-		// toolselector's "Shell" dispatch navigates to window :1.
-		"internal/tools/toolselector/selector.go:select-window": "TODO: lift to workspace.LandOnWindow(\":1\") or similar; the special case is invocable as navigation",
 	}
 
 	root := findRepoRoot(t)

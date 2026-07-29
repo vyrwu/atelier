@@ -428,6 +428,81 @@ func LandOuter(h *tmuxhost.Client, sessionTarget, windowTarget string) error {
 	return nil
 }
 
+// ReturnToOuterShell dismisses any open popup chain and lands the outer
+// (workspace) client back on the shell window the user launched the tool
+// selector from — the window recorded in @atelier_outer_window by the
+// M-; root binding. This is the action behind the selector's "Shell"
+// entry.
+//
+// It deliberately targets @atelier_outer_window, NOT window index ":1".
+// Workspaces are windows within a tmux session, so ":1" is whichever
+// workspace happens to be first, not the one the user is on — selecting
+// it yanked the user to a different workspace on every M-; → Shell from a
+// non-first window (the "M-; → Shell keeps switching workspace" bug).
+//
+// A window id is unique across the whole server, so select-window needs
+// no -c <client> / session target: the outer client stays attached to its
+// session and simply shows the window we select.
+//
+// When popup (inner) clients are open, we can't select-window immediately
+// — the popup pty would swallow it. Instead we register a one-shot
+// client-detached hook that selects the outer window after the last popup
+// detaches, then detach the popup clients. Inner clients are those whose
+// session name starts with "_" (atelier + bash popup-backing sessions).
+func ReturnToOuterShell(h *tmuxhost.Client) error {
+	outerWindow, _ := h.ShowGlobalOption("@atelier_outer_window")
+	outerWindow = strings.TrimSpace(outerWindow)
+	inner := innerPopupClients(h)
+
+	if len(inner) == 0 {
+		// No popup chain to dismiss — just ensure the outer client is on
+		// its shell window. Unknown outer window: nothing safe to select.
+		if outerWindow == "" {
+			return nil
+		}
+		_, err := h.Run("select-window", "-t", outerWindow)
+		return err
+	}
+
+	if outerWindow != "" {
+		if _, err := h.Run("set-hook", "-g", "client-detached", shellReturnHookAction(outerWindow)); err != nil {
+			return err
+		}
+	}
+	for _, c := range inner {
+		_, _ = h.Run("detach-client", "-t", c)
+	}
+	return nil
+}
+
+// shellReturnHookAction builds the one-shot client-detached hook body for
+// ReturnToOuterShell: select the outer window, then remove the hook so it
+// fires exactly once. Pure — unit-tested without tmux.
+func shellReturnHookAction(windowTarget string) string {
+	return fmt.Sprintf("select-window -t %s ; set-hook -ug client-detached", windowTarget)
+}
+
+// innerPopupClients returns the names of attached popup (inner) clients —
+// those whose session name starts with "_" (atelier `_atelier_*` and bash
+// `_popup_`/`_claudepop_`/… backing sessions). Returns nil on error.
+func innerPopupClients(h *tmuxhost.Client) []string {
+	out, err := h.Run("list-clients", "-F", "#{client_session}|#{client_name}")
+	if err != nil {
+		return nil
+	}
+	var inner []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.HasPrefix(parts[0], "_") {
+			inner = append(inner, parts[1])
+		}
+	}
+	return inner
+}
+
 // restampOuterGlobals updates @atelier_outer_session / _window / _pane
 // to point at the workspace LandOuter just switched to. Best-effort —
 // errors are logged, not returned, because the switch itself is the
