@@ -162,7 +162,10 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			continue
 		}
 		// Only include sessions stamped with @repo_path OR @ai_workspace_kind.
-		if repoPath == "" && kind == "" {
+		// Shared with the status-line attention rollup (countAttentionWindows)
+		// so the picker and the ⏺ badge can never disagree on what counts as a
+		// listable workspace.
+		if !workspace.Listable(repoPath, kind) {
 			continue
 		}
 

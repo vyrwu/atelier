@@ -243,6 +243,23 @@ func SetRecap(h *tmuxhost.Client, windowID, recap string) error {
 	return nil
 }
 
+// Listable reports whether a window carries enough atelier metadata to be
+// surfaced as a workspace: a real repo path (worktree kind) OR an AI
+// workspace-kind (multi-repo, which is repo-less so has no @repo_path).
+// Windows with neither are raw tmux windows or spent popups.
+//
+// This is the single inclusion predicate shared by the M-s picker
+// (which lists workspaces) and the status-line attention rollup (which
+// counts them). Keeping ONE predicate is load-bearing: when the two
+// diverged, a multi-repo workspace that lost its @ai_workspace_kind still
+// counted toward the ⏺ badge but never appeared in the picker — a phantom
+// "notification with no workspace". Callers pass the two option values they
+// already read; this package stays agnostic of the adapter-owned
+// `@ai_workspace_kind` option name.
+func Listable(repoPath, aiWorkspaceKind string) bool {
+	return repoPath != "" || aiWorkspaceKind != ""
+}
+
 // SetTag assigns (or clears, when tag == "") the workspace tag on
 // windowID's window and mirrors it to the statestore so it survives a
 // tmux server restart. One tag per window: setting a new value replaces
