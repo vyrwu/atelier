@@ -84,20 +84,21 @@ func TestClearLaunchPrompt_SpentPromptDoesNotSurviveRespawn(t *testing.T) {
 	}
 
 	// Act: OpenAgent consumes the one-shot prompt.
-	clearLaunchPrompt(srv.Client, wid, prompt, kind)
+	clearLaunchPrompt(srv.Client, wid, prompt)
 
-	// Live window: prompt + kind gone, session id preserved.
+	// Live window: prompt gone; kind + session id preserved (kind is durable —
+	// it's the picker's workspace signal, not a one-shot launch input).
 	if got, _ := srv.Client.GetWindowOption(wid, OptPrompt); got != "" {
 		t.Errorf("live @ai_prompt not cleared: %q", got)
 	}
-	if got, _ := srv.Client.GetWindowOption(wid, OptWorkspaceKind); got != "" {
-		t.Errorf("live @ai_workspace_kind not cleared: %q", got)
+	if got, _ := srv.Client.GetWindowOption(wid, OptWorkspaceKind); got != kind {
+		t.Errorf("live @ai_workspace_kind must survive: got %q want %q", got, kind)
 	}
 	if got, _ := srv.Client.GetWindowOption(wid, OptActiveSessionID); got != sessID {
 		t.Errorf("live @ai_active_session_id must survive: got %q want %q", got, sessID)
 	}
 
-	// Cache mirror: prompt + kind cleared, session id preserved.
+	// Cache mirror: prompt cleared; kind + session id preserved.
 	cached, err := statestore.Load()
 	if err != nil || cached == nil {
 		t.Fatalf("reload cache: %v (nil=%v)", err, cached == nil)
@@ -106,15 +107,15 @@ func TestClearLaunchPrompt_SpentPromptDoesNotSurviveRespawn(t *testing.T) {
 	if md[MetaPrompt] != "" {
 		t.Errorf("cached ai.prompt not cleared: %q", md[MetaPrompt])
 	}
-	if md[MetaWorkspaceKind] != "" {
-		t.Errorf("cached ai.workspace_kind not cleared: %q", md[MetaWorkspaceKind])
+	if md[MetaWorkspaceKind] != kind {
+		t.Errorf("cached ai.workspace_kind must survive: got %q want %q", md[MetaWorkspaceKind], kind)
 	}
 	if md[MetaActiveSessionID] != sessID {
 		t.Errorf("cached ai.active_session_id must survive: got %q want %q", md[MetaActiveSessionID], sessID)
 	}
 
-	// Full respawn: a fresh server + Restore must re-stamp ONLY the resumable
-	// session id — no prompt, no kind — so Claude resumes.
+	// Full respawn: a fresh server + Restore must re-stamp the resumable
+	// session id AND the durable kind — but NOT the spent prompt.
 	srv.Kill()
 	srv2 := testtmux.New(t)
 	if err := workspace.Restore(srv2.Client); err != nil {
@@ -140,7 +141,60 @@ func TestClearLaunchPrompt_SpentPromptDoesNotSurviveRespawn(t *testing.T) {
 	if got, _ := srv2.Client.GetWindowOption(wid2, OptPrompt); got != "" {
 		t.Errorf("restored window must NOT carry the spent prompt: %q", got)
 	}
-	if got, _ := srv2.Client.GetWindowOption(wid2, OptWorkspaceKind); got != "" {
-		t.Errorf("restored window must NOT carry the spent kind: %q", got)
+	if got, _ := srv2.Client.GetWindowOption(wid2, OptWorkspaceKind); got != kind {
+		t.Errorf("restored window must carry the durable kind: got %q want %q", got, kind)
+	}
+}
+
+// TestClearLaunchPrompt_MultiRepoStaysListable is the regression guard for
+// the phantom-notification bug: a repo-less multi-repo workspace (no
+// @repo_path) is listable in the M-s picker ONLY via @ai_workspace_kind.
+// clearLaunchPrompt used to strip that option on every Claude launch, so the
+// workspace vanished from the picker while its later Stop-hook @needs_attention
+// flag still inflated the ⏺ rollup — a notification with no workspace behind
+// it. After launch the kind must survive and the window must stay Listable.
+func TestClearLaunchPrompt_MultiRepoStaysListable(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	const (
+		session = "auto/rotate-rails-secrets"
+		prompt  = "Rotate SECRET_KEY_BASE and RAILS_MASTER_KEY with zero downtime."
+	)
+
+	srv := testtmux.New(t)
+	srv.NewSession(session)
+
+	widOut, err := srv.Client.Run("display-message", "-p", "-t", session+":1", "#{window_id}")
+	if err != nil {
+		t.Fatalf("resolve window id: %v", err)
+	}
+	wid := strings.TrimSpace(string(widOut))
+
+	// A repo-less multi-repo workspace: NO @repo_path, kind is its only
+	// listable signal.
+	if err := srv.Client.SetWindowOption(wid, OptPrompt, prompt); err != nil {
+		t.Fatalf("stamp @ai_prompt: %v", err)
+	}
+	if err := srv.Client.SetWindowOption(wid, OptWorkspaceKind, WorkspaceKindMultiRepo); err != nil {
+		t.Fatalf("stamp @ai_workspace_kind: %v", err)
+	}
+
+	// Precondition: listable before launch.
+	if !workspace.Listable("", WorkspaceKindMultiRepo) {
+		t.Fatal("multi-repo workspace must be listable before launch")
+	}
+
+	clearLaunchPrompt(srv.Client, wid, prompt)
+
+	if got, _ := srv.Client.GetWindowOption(wid, OptPrompt); got != "" {
+		t.Errorf("live @ai_prompt not cleared: %q", got)
+	}
+	kind, _ := srv.Client.GetWindowOption(wid, OptWorkspaceKind)
+	if kind != WorkspaceKindMultiRepo {
+		t.Fatalf("live @ai_workspace_kind must survive launch: got %q want %q", kind, WorkspaceKindMultiRepo)
+	}
+	repoPath, _ := srv.Client.GetWindowOption(wid, workspace.OptRepoPath)
+	if !workspace.Listable(repoPath, kind) {
+		t.Errorf("multi-repo workspace vanished from the picker after launch (repo=%q kind=%q)", repoPath, kind)
 	}
 }

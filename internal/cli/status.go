@@ -334,21 +334,33 @@ func findWindowIDByDigits(h *tmuxhost.Client, sidDigits, widDigits string) (stri
 // popup window instead of the parent workspace — so without this filter
 // a single Claude Stop hook can inflate the rollup to 2.
 func countAttentionWindows(h *tmuxhost.Client) int {
+	// session_name is placed LAST so a stray '|' in it can't shift the
+	// fixed fields; @repo_path is a filesystem path and @ai_workspace_kind
+	// is a controlled token, neither contains '|'.
 	out, err := h.Run("list-windows", "-a",
-		"-F", "#{session_name}|#{?#{==:#{E:"+attentionOption+"},1},1,0}")
+		"-F", "#{?#{==:#{E:"+attentionOption+"},1},1,0}|#{"+workspace.OptRepoPath+"}|#{@ai_workspace_kind}|#{session_name}")
 	if err != nil {
 		return 0
 	}
 	count := 0
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		i := strings.IndexByte(line, '|')
-		if i < 0 {
+		f := strings.SplitN(line, "|", 4)
+		if len(f) < 4 {
 			continue
 		}
-		if line[i+1:] != "1" {
+		attn, repoPath, kind, session := f[0], f[1], f[2], f[3]
+		if attn != "1" {
 			continue
 		}
-		if isPopupSession(line[:i]) {
+		if isPopupSession(session) {
+			continue
+		}
+		// Same inclusion predicate as the M-s picker (sessionlist.go): a
+		// window with attention but no workspace metadata — a raw tmux
+		// window, a spent popup, or a multi-repo workspace that lost its
+		// @ai_workspace_kind — has no picker row to land on, so it must not
+		// inflate the rollup into a phantom notification.
+		if !workspace.Listable(repoPath, kind) {
 			continue
 		}
 		count++
