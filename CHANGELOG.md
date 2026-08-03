@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2](https://github.com/vyrwu/atelier/compare/v0.5.1...v0.5.2) (2026-08-03)
+
+
+### Bug fixes
+
+* **claude:** keep [@ai](https://github.com/ai)_workspace_kind durable ([#79](https://github.com/vyrwu/atelier/issues/79)) ([651ec57](https://github.com/vyrwu/atelier/commit/651ec57397ef8cf168cca4541c6ab41ecc2b7d36))
+* **host/popup:** open tools on the invoked client, not the first ([#73](https://github.com/vyrwu/atelier/issues/73)) ([51a86c5](https://github.com/vyrwu/atelier/commit/51a86c5134ffaff78f52a0a0e375bf09f89ca6bb))
+
+
+### Refactors
+
+* **aws:** replace aws-vault with granted assume ([#76](https://github.com/vyrwu/atelier/issues/76)) ([cc6210c](https://github.com/vyrwu/atelier/commit/cc6210c907e6ec1c6872ede0779ea0b42be1b400))
+
 ## [0.5.1](https://github.com/vyrwu/atelier/compare/v0.5.0...v0.5.1) (2026-07-22)
 
 
