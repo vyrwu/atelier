@@ -56,7 +56,8 @@ type RenderOptions struct {
 //  6. Core bindings (M-?, M-q).
 //  7. Hooks (cleanup, attention, last-seen).
 //  8. Statusline (stamp-statusline injection).
-//  9. Restore (workspace rehydration from cache).
+//  9. Background refresh loop (continuous freshness/forge + self-heal).
+//  10. Restore (workspace rehydration from cache).
 //
 // Adding new emission steps means adding them here ONCE — both the
 // bundled launcher and plugin mode pick them up automatically.
@@ -100,6 +101,8 @@ func Render(w io.Writer, opts RenderOptions) (*plugin.DiscoveryResult, error) {
 	fmt.Fprint(w, HooksBlock())
 	fmt.Fprintln(w)
 	fmt.Fprint(w, StatuslineBlock())
+	fmt.Fprintln(w)
+	fmt.Fprint(w, RefreshLoopBlock())
 	fmt.Fprintln(w)
 	fmt.Fprint(w, RestoreBlock())
 

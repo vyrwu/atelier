@@ -97,4 +97,8 @@ func AddCommands(root *cobra.Command) {
 	// Kernel forge-badge slot commands (fed by the active ForgeIntegration).
 	root.AddCommand(ForgeRefreshCommand())
 	root.AddCommand(OpenForgeCommand())
+	// Continuous background refresh daemon (freshness + forge + self-heal).
+	root.AddCommand(RefreshLoopCommand())
+	// Live-update M-s: records the picker's fzf --listen port for the loop.
+	root.AddCommand(MSListenCommand())
 }

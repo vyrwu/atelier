@@ -117,3 +117,27 @@ func TestJoinRecords(t *testing.T) {
 		t.Fatalf("NUL join = %q", got)
 	}
 }
+
+func TestFzfVersionAtLeast(t *testing.T) {
+	cases := []struct {
+		out              string
+		wantMaj, wantMin int
+		want             bool
+	}{
+		{"0.55.0 (abc1234)", 0, 41, true}, // newer
+		{"0.41.0", 0, 41, true},           // exact
+		{"0.41.1 (brew)", 0, 41, true},    // patch above
+		{"0.40.0", 0, 41, false},          // one minor below → omit live flags
+		{"0.36.0", 0, 41, false},          // has --listen but not --track
+		{"1.0.0", 0, 41, true},            // major above
+		{"  0.42.0\n", 0, 41, true},       // whitespace-wrapped
+		{"", 0, 41, false},                // no output
+		{"garbage", 0, 41, false},         // unparseable
+		{"0", 0, 41, false},               // too few parts
+	}
+	for _, c := range cases {
+		if got := fzfVersionAtLeast(c.out, c.wantMaj, c.wantMin); got != c.want {
+			t.Errorf("fzfVersionAtLeast(%q, %d, %d) = %v, want %v", c.out, c.wantMaj, c.wantMin, got, c.want)
+		}
+	}
+}

@@ -148,10 +148,25 @@ func SessionsCommand() *cobra.Command {
 				opts = append(opts, fzfstyle.WithBind("alt-o",
 					"execute-silent("+dispatch.ToolCmd("workspaces", "_open-forge", "{1}", "{2}")+")"))
 			}
+			// Live update: with a new-enough fzf (and outside e2e), expose an
+			// fzf --listen control port so the background refresh loop can push a
+			// reload when it updates attention / recap / badges, and --track to
+			// keep the cursor on the focused workspace across those reloads. The
+			// port is stashed in a tmux global on start and cleared on close, so
+			// the loop only pushes while this picker is actually open.
+			liveReload := !agentAutoOpenSkipped() && fzf.SupportsLiveReload()
+			if liveReload {
+				opts = append(opts, fzfstyle.WithBind("start",
+					"execute-silent("+dispatch.ToolCmd("workspaces", "_ms-listen", "$FZF_PORT")+")"))
+				defer clearMSPickerPort(h)
+			}
 			opts = append(opts, fzfstyle.WithFooter(footer))
 			args := fzfstyle.Args("栽 ", "Select Workspace", "red", opts...)
 			if emptyHeader != "" {
 				args = append(args, "--header="+emptyHeader)
+			}
+			if liveReload {
+				args = append(args, "--listen", "127.0.0.1:0", "--track")
 			}
 
 			debuglog.Logf("workspaces.sessions: opening picker (%d rows)", len(lines))
@@ -802,6 +817,31 @@ func SessionListCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// MSListenCommand is the hidden `_ms-listen <port>`: the M-s picker's fzf
+// `start` bind calls it with $FZF_PORT to record the live-update control port
+// in a tmux global, so the background refresh loop knows a picker is open and
+// where to POST reloads. Cleared by the picker on close (clearMSPickerPort).
+func MSListenCommand() *cobra.Command {
+	var socket string
+	c := &cobra.Command{
+		Use:    "_ms-listen <port>",
+		Short:  "internal: record the M-s picker's fzf --listen port for live reload",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return tmuxhost.New(socket).SetGlobalOption(optMSPickerPort, strings.TrimSpace(args[0]))
+		},
+	}
+	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
+	return c
+}
+
+// clearMSPickerPort removes the live-update port global so the refresh loop
+// stops pushing reloads once the picker has closed. Best-effort.
+func clearMSPickerPort(h *tmuxhost.Client) {
+	_ = h.UnsetGlobalOption(optMSPickerPort)
 }
 
 // AutoSessionCommand: port of tmux_workspace_auto_session
@@ -2325,6 +2365,33 @@ func runGit(dir string, args ...string) error {
 	debuglog.LogGitCmd(dir, args, errBuf.Bytes(), err, dur)
 	perf.Add("git", dur)
 	if err != nil {
+		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
+	}
+	return nil
+}
+
+// runGitCtx is runGit under a caller-supplied deadline. A background refresh
+// tick runs `git fetch` synchronously in-process; on a flaky network that
+// fetch can hang indefinitely, wedging the loop (and, before the loop, leaving
+// the freshness icon silently empty). The context kills the git process at the
+// deadline and returns a clear timeout error so the caller stamps a pull-error
+// instead of blocking.
+func runGitCtx(ctx context.Context, dir string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	var errBuf bytes.Buffer
+	cmd.Stderr = &errBuf
+	start := time.Now()
+	err := cmd.Run()
+	dur := time.Since(start)
+	debuglog.LogGitCmd(dir, args, errBuf.Bytes(), err, dur)
+	perf.Add("git", dur)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("git %s: timed out (network hang?)", strings.Join(args, " "))
+		}
 		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
 	}
 	return nil

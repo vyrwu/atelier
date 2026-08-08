@@ -11,8 +11,45 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
+
+// SupportsLiveReload reports whether the installed fzf is new enough for
+// atelier's live-update picker path: the --listen HTTP control server (fzf
+// >= 0.36) plus --track cursor tracking (fzf >= 0.41). Older fzf ABORTS on
+// these flags, which would break the picker entirely, so callers omit them
+// when this returns false. Best-effort: any failure to determine the version
+// disables the feature.
+func SupportsLiveReload() bool {
+	out, err := exec.Command("fzf", "--version").Output()
+	if err != nil {
+		return false
+	}
+	return fzfVersionAtLeast(string(out), 0, 41)
+}
+
+// fzfVersionAtLeast parses `fzf --version` output (e.g. "0.55.0 (abc1234)" or
+// "0.41.1") and reports whether it is >= wantMajor.wantMinor. Pure.
+func fzfVersionAtLeast(versionOutput string, wantMajor, wantMinor int) bool {
+	fields := strings.Fields(strings.TrimSpace(versionOutput))
+	if len(fields) == 0 {
+		return false
+	}
+	parts := strings.SplitN(fields[0], ".", 3)
+	if len(parts) < 2 {
+		return false
+	}
+	major, err1 := strconv.Atoi(parts[0])
+	minor, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	if major != wantMajor {
+		return major > wantMajor
+	}
+	return minor >= wantMinor
+}
 
 // NUL is the record separator fzf uses in --read0 / --print0 mode. A
 // picker that renders multi-line items (a single selectable entry spanning

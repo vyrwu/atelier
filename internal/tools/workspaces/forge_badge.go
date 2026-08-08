@@ -32,9 +32,16 @@ const (
 	OptForgeTs = "@forge_ts"
 )
 
-// forgeRefreshTTL bounds how often the forge is queried per window; repeated
-// picker opens within this window reuse the cached state.
+// forgeRefreshTTL bounds how often the forge is queried per window on the
+// EVENT-driven path (picker-open, navigate); repeated opens within this window
+// reuse the cached state.
 const forgeRefreshTTL = 1 * time.Minute
+
+// forgeLoopRefreshTTL is the TTL the CONTINUOUS background loop uses. Set to 1
+// minute so a PR going draft/ready/merged shows on the badge within ~a minute.
+// The `gh` cost is modest at real workspace counts (~N calls/min) and well under
+// GitHub's REST budget, so freshness wins here over polling frugality.
+const forgeLoopRefreshTTL = 1 * time.Minute
 
 // forgeStateOrder is the kernel's picker sort order for forge states: open
 // first, then draft, merged, closed. Windows with no forge item sort last.
@@ -184,7 +191,7 @@ func ForgeRefreshCommand() *cobra.Command {
 			if forge == nil {
 				return nil
 			}
-			return refreshForgeBadges(tmuxhost.New(socket), forge, time.Now())
+			return refreshForgeBadges(tmuxhost.New(socket), forge, time.Now(), forgeRefreshTTL)
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
@@ -216,7 +223,7 @@ func OpenForgeCommand() *cobra.Command {
 	return c
 }
 
-func refreshForgeBadges(h *tmuxhost.Client, forge integration.ForgeIntegration, now time.Time) error {
+func refreshForgeBadges(h *tmuxhost.Client, forge integration.ForgeIntegration, now time.Time, ttl time.Duration) error {
 	out, err := h.Run("list-windows", "-a", "-F",
 		"#{window_id}|#{@repo_path}|#{session_name}|#{window_name}|#{"+OptForgeTs+"}")
 	if err != nil {
@@ -243,7 +250,7 @@ func refreshForgeBadges(h *tmuxhost.Client, forge integration.ForgeIntegration, 
 			stampForge(h, windowID, OptForgeState, "forge.state", "")
 			continue
 		}
-		if forgeFresh(now, tsStr) {
+		if forgeFresh(now, tsStr, ttl) {
 			continue
 		}
 		// Stamp the timestamp regardless so a branch with no forge item isn't
@@ -293,14 +300,15 @@ func stampForge(h *tmuxhost.Client, windowID, opt, metaKey, value string) {
 	_ = workspace.PersistWindowMetadata(h, windowID, metaKey, value)
 }
 
-// forgeFresh reports whether an @forge_ts value is within forgeRefreshTTL of
-// now. Empty/unparseable = stale. Pure.
-func forgeFresh(now time.Time, tsStr string) bool {
+// forgeFresh reports whether an @forge_ts value is within ttl of now.
+// Empty/unparseable = stale. Pure — the caller supplies the TTL so the
+// event-driven path and the background loop can throttle at different cadences.
+func forgeFresh(now time.Time, tsStr string, ttl time.Duration) bool {
 	secs, err := strconv.ParseInt(strings.TrimSpace(tsStr), 10, 64)
 	if err != nil || secs <= 0 {
 		return false
 	}
-	return now.Sub(time.Unix(secs, 0)) < forgeRefreshTTL
+	return now.Sub(time.Unix(secs, 0)) < ttl
 }
 
 // parseForgeRow splits a picker row ("<session>\t<window>\t<display>") into

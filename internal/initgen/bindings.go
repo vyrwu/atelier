@@ -164,6 +164,28 @@ run-shell -b 'atelier popup cleanup --startup'
 `
 }
 
+// RefreshLoopBlock starts the background refresh daemon (issue #17). One
+// long-lived process, launched via `run-shell -b` so it doesn't block config
+// sourcing and inherits ATELIER_TMUX_SOCKET for routing. It binds to the tmux
+// server by pid and self-exits when that server goes away or is replaced (it
+// does not rely on being signaled on server exit), and is singleton-guarded
+// with per-tick self-eviction, so re-sourcing the config or attaching a second
+// client never stacks a second daemon.
+//
+// What it does each tick: TTL-throttled freshness + forge badge refresh (so
+// the status line stays current without the user navigating in) plus a
+// level-triggered kernel reconcile (so misrouted/phantom attention and orphan
+// popups self-heal continuously). Rendering was already continuous; this makes
+// the DATA continuous too.
+func RefreshLoopBlock() string {
+	return `# --- background refresh loop ---
+# See internal/tools/workspaces/refresh_loop.go. run-shell -b: non-blocking;
+# the daemon binds to this server's pid and self-exits when it's gone/replaced,
+# and is singleton-guarded internally.
+run-shell -b 'atelier tools workspaces _refresh-loop'
+`
+}
+
 // StatuslineBlock returns the statusline wiring block.
 //
 // Segments are injected into window-status-current-format ONLY — the bar

@@ -190,6 +190,45 @@ func TestReconcile_ClearsMisroutedAttentionOnPopup(t *testing.T) {
 	}
 }
 
+// TestReconcileLoop_RepairsSafeButSkipsRacyHook guards the C3 fix: the
+// continuous heartbeat auto-repairs the loop-safe violations (here, misrouted
+// popup attention) but must NOT disarm a client-detached hook — armed
+// transiently by OpenOnOuter, it would race an in-flight popup open. The
+// human-invoked Reconcile still fixes it (TestReconcile_RepairsHookArmedAtRest).
+func TestReconcileLoop_RepairsSafeButSkipsRacyHook(t *testing.T) {
+	h := newFakeHost()
+	h.setSessionsWithIDs("$1|vyrwu/atelier", "$7|_atelier_claude_1_2")
+	h.runOut["list-windows"] = strings.Join([]string{
+		windowLine("$1", "@2", "feat/x", "/repo", "", "0", "", "", "", ""),
+		windowLine("$7", "@14", "cd", "", "", "1", "", "", "", ""), // popup window carries attention
+	}, "\n")
+	h.setClients() // no popup client → VHookArmedAtRest predicate holds
+	h.runOut["show-hooks"] = "client-detached[0] run-shell -b foo ; set-hook -ug client-detached"
+
+	results, err := ReconcileLoop(h)
+	if err != nil {
+		t.Fatalf("ReconcileLoop: %v", err)
+	}
+	var attn, hook bool
+	for _, r := range results {
+		switch r.Code {
+		case VMisroutedAttention:
+			attn = true
+			if !r.Repaired {
+				t.Error("loop must repair misrouted popup attention (loop-safe)")
+			}
+		case VHookArmedAtRest:
+			hook = true
+			if r.Repaired {
+				t.Error("loop must NOT disarm client-detached — it can race an in-flight popup open")
+			}
+		}
+	}
+	if !attn || !hook {
+		t.Fatalf("expected both violations surfaced; attn=%v hook=%v results=%+v", attn, hook, results)
+	}
+}
+
 func TestReconcile_CleanServerNoHookFalsePositive(t *testing.T) {
 	h := newFakeHost()
 	h.setSessionsWithIDs("$1|vyrwu/atelier")

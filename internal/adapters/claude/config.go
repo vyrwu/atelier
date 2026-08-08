@@ -1,6 +1,10 @@
 package claude
 
-import "github.com/vyrwu/atelier/internal/config"
+import (
+	"time"
+
+	"github.com/vyrwu/atelier/internal/config"
+)
 
 // DefaultMultiRepoSystemPrompt is the verbatim bash claude_start
 // IMPL_SYS_MULTIREPO string — appended via --append-system-prompt when claude
@@ -19,21 +23,44 @@ Continuously update ~/code/CLAUDE.md with newly discovered repo summaries — ke
 // output is expected to be a single tight clause. The one hard rule the
 // prompt must keep is ONE line (no embedded newlines) — truncateLine keeps
 // only the first line, and wrapping is the picker's job, not the model's.
-const DefaultRecapSystemPrompt = `You read a Claude Code session transcript snippet (newline-delimited JSON message events).
+const DefaultRecapSystemPrompt = `You read the tail of a Claude Code session transcript (newline-delimited JSON message events), optionally followed by a "Workspace code changes (git delta)" section summarizing what actually changed in the repo (uncommitted diff, changed files, and a patch).
 
-Output ONE line (NO line breaks), up to ~120 characters. It's shown on one line in the UI (truncated if too wide), so stay tight and skimmable, never padded.
+Output EXACTLY two lines:
 
+Line 1 — the attention verdict, one of:
+  ATTENTION: blocked   — the agent is waiting on the USER: it asked a question, presented options/a plan to approve, or hit an error needing a human decision. The last thing in the transcript is an assistant turn addressed to the user, with no further work queued.
+  ATTENTION: idle      — the agent finished cleanly, or is waiting on sub-agents / tools / background tasks to complete. No user action is needed.
+  ATTENTION: running   — the agent is actively executing (mid tool-use, unresolved tool calls).
+Decide from the transcript tail: the last assistant message's intent, any unresolved tool_use calls, and the stop reason. Only "blocked" means the user's eyes are needed — be conservative, prefer "idle" when unsure.
+
+Line 2 — the recap, ONE line (NO line breaks), up to ~120 characters, shown truncated-to-width in the UI, so stay tight and skimmable, never padded.
 Content priority (lead with the most important):
   1. Pending user action — what the user must do/answer NOW. If the agent asked a question with options, surface options.
-  2. Latest agent action — past-tense verb + object.
-  3. Current objective.
+  2. What actually changed — prefer the git delta (files/areas touched, kind of change) over what the conversation only discussed; when code changed, name it concretely.
+  3. Latest agent action — past-tense verb + object.
+  4. Current objective.
 
-Style rules:
+Style rules (apply to line 2):
   - Be terse. Use abbreviations (cfg, db, PR, deps). Drop articles.
   - Concrete specifics over vague descriptions.
   - NO line breaks, NO leading/trailing whitespace, NO quotes, NO labels like "Recap:", NO code blocks, NO markdown.
 
-Output ONLY the recap line, nothing else.`
+Output ONLY the two lines (the ATTENTION verdict, then the recap), nothing else.`
+
+// maxTranscriptRunes bounds the transcript tail fed to the summarizer — the
+// last several turns, which is all the classifier + one-line recap need. Kept
+// modest on purpose: the observer re-summarizes a churning workspace every
+// tick, so with many parallel agents this per-call input size is the dominant
+// token cost. ~8k runes ≈ ~2k tokens keeps that in check without starving the
+// summary of recent context.
+const maxTranscriptRunes = 8000
+
+// runningWindow is how recently the transcript must have been written for a
+// workspace to count as "running" (blue dot) when there's no brand-new content
+// this tick. Set above the loop's tick interval so a single quiet tick doesn't
+// flip an actively-working agent to idle; an agent that stops writing for
+// longer than this settles to idle.
+const runningWindow = 90 * time.Second
 
 // RecapMaxRunes is the ceiling truncateLine enforces as a safety net. The
 // recap shows on one line in the picker (truncated to width), so ~one wide
