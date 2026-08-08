@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0](https://github.com/vyrwu/atelier/compare/v0.6.0...v0.7.0) (2026-08-08)
+
+
+### Features
+
+* **workspaces:** continuous workspace observer — live badges, recap, agent status ([#85](https://github.com/vyrwu/atelier/issues/85)) ([902bc25](https://github.com/vyrwu/atelier/commit/902bc25ffe0ccf26ae3df23ab117292a5fbbac77)), closes [#17](https://github.com/vyrwu/atelier/issues/17) [#51](https://github.com/vyrwu/atelier/issues/51)
+
+
+### Docs
+
+* sync docs with observer-loop + kernel state ([#88](https://github.com/vyrwu/atelier/issues/88)) ([005ec99](https://github.com/vyrwu/atelier/commit/005ec9971e8df7d0a7294ab076aea6eeac6dfbcf))
+
 ## [0.6.0](https://github.com/vyrwu/atelier/compare/v0.5.2...v0.6.0) (2026-08-08)
 
 
