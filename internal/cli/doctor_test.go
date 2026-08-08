@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/plugin"
 	"github.com/vyrwu/atelier/internal/statestore"
+	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
 // TestCheckStatestoreParseable_NoCache locks the FIRST-RUN case:
@@ -169,5 +171,53 @@ func TestCheckToolsRegistered_ReportsBuiltins(t *testing.T) {
 	}
 	if !strings.Contains(r.Detail, "built-in") {
 		t.Errorf("PASS detail must mention built-in count, got %q", r.Detail)
+	}
+}
+
+// TestClassifyRefreshDaemon locks the daemon-health thresholds doctor reports:
+// a missing/dead owner pid is FAIL (but cheaply fixed by the watchdog), a live
+// pid with a stale heartbeat (>2× interval) WARNs for a wedged loop, and a live
+// pid ticking within tolerance — or one that just started and hasn't ticked yet
+// — is PASS. A pid is not a pulse: aliveness alone isn't enough.
+func TestClassifyRefreshDaemon(t *testing.T) {
+	const iv = 45 * time.Second
+	cases := []struct {
+		name       string
+		health     workspaces.DaemonHealth
+		wantStatus CheckStatus
+		wantDetail string // substring
+	}{
+		{"no owner pid → FAIL",
+			workspaces.DaemonHealth{Pid: "", Interval: iv},
+			StatusFail, "not running"},
+		{"pid set but dead → FAIL",
+			workspaces.DaemonHealth{Pid: "4242", Alive: false, Interval: iv},
+			StatusFail, "not alive"},
+		{"alive, no heartbeat yet → PASS",
+			workspaces.DaemonHealth{Pid: "4242", Alive: true, HasHeartbeat: false, Interval: iv},
+			StatusPass, "awaiting first tick"},
+		{"alive, fresh heartbeat → PASS",
+			workspaces.DaemonHealth{Pid: "4242", Alive: true, HasHeartbeat: true, SinceTick: 8 * time.Second, Interval: iv},
+			StatusPass, "last tick"},
+		{"alive, one missed tick (<2×) → PASS",
+			workspaces.DaemonHealth{Pid: "4242", Alive: true, HasHeartbeat: true, SinceTick: 80 * time.Second, Interval: iv},
+			StatusPass, "last tick"},
+		{"alive, stale heartbeat (>2×) → WARN",
+			workspaces.DaemonHealth{Pid: "4242", Alive: true, HasHeartbeat: true, SinceTick: 5 * time.Minute, Interval: iv},
+			StatusWarn, "wedged"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := classifyRefreshDaemon(c.health)
+			if got.Status != c.wantStatus {
+				t.Errorf("status = %s, want %s (detail %q)", got.Status, c.wantStatus, got.Detail)
+			}
+			if !strings.Contains(got.Detail, c.wantDetail) {
+				t.Errorf("detail %q missing %q", got.Detail, c.wantDetail)
+			}
+			if got.Status == StatusFail && got.Remediation == "" {
+				t.Error("FAIL result must include a remediation")
+			}
+		})
 	}
 }

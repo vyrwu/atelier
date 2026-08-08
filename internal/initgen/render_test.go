@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+// TestRender_RefreshLoopWatchdog guards the daemon's crash recovery: the
+// rendered config must both launch the loop once AND wire a client-attached
+// watchdog that re-runs the guarded launch, so a daemon that died mid-session
+// respawns on the next attach (the singleton lock makes the re-launch a no-op
+// while it's alive). Both modes emit it — the observer isn't a theme feature.
+func TestRender_RefreshLoopWatchdog(t *testing.T) {
+	for _, theme := range []bool{false, true} {
+		var buf strings.Builder
+		if _, err := Render(&buf, RenderOptions{IncludeTheme: theme}); err != nil {
+			t.Fatalf("Render(IncludeTheme=%v): %v", theme, err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "run-shell -b 'atelier tools workspaces _refresh-loop'") {
+			t.Errorf("IncludeTheme=%v: missing initial daemon launch", theme)
+		}
+		if !strings.Contains(out, `set-hook -g client-attached 'run-shell -b "atelier tools workspaces _refresh-loop"'`) {
+			t.Errorf("IncludeTheme=%v: missing client-attached watchdog re-launch", theme)
+		}
+	}
+}
+
 // TestRender_BareModeKeepsPopupCopyMode is the end-to-end regression
 // guard for the actual bug: `atelier init --bare` (IncludeTheme false)
 // strips the popup prefix via the engine (popup.ApplyStyle sets prefix

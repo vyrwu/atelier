@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/vyrwu/atelier/internal/plugin"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
 // CheckStatus is doctor's per-check result classification.
@@ -79,6 +81,7 @@ func DoctorCommand() *cobra.Command {
 			results = append(results,
 				checkStatestoreParseable(),
 				checkAgentHooks(),
+				checkRefreshDaemon(h),
 				checkWorktreeDirsExist(),
 			)
 
@@ -292,6 +295,48 @@ func checkAgentHooks() CheckResult {
 	}
 	return CheckResult{Name: "agent hooks", Status: StatusPass,
 		Detail: fmt.Sprintf("%s: recap + attention pulled by the refresh loop (no agent hook installed)", ai.Name())}
+}
+
+// checkRefreshDaemon reports the observer refresh loop's liveness: is it
+// running, and is it actually ticking (not just a live pid whose loop wedged)?
+// The daemon stamps an owner pid + a per-tick heartbeat; this reads both. SKIP
+// when no tmux server is up (nothing to observe).
+func checkRefreshDaemon(h *tmuxhost.Client) CheckResult {
+	health, up := workspaces.ReadDaemonHealth(h, time.Now())
+	if !up {
+		return CheckResult{Name: "refresh daemon", Status: StatusSkip,
+			Detail: "no tmux server running on this socket"}
+	}
+	return classifyRefreshDaemon(health)
+}
+
+// classifyRefreshDaemon maps a daemon health snapshot to a doctor result. Pure,
+// so the running/dead/hung thresholds are unit-tested without a tmux server. A
+// heartbeat older than 2× the interval means the loop is likely wedged (one
+// missed tick is within jitter; two is not). A dead/missing owner pid is FAIL,
+// but the fix is cheap — the client-attached watchdog respawns it on next attach.
+func classifyRefreshDaemon(h workspaces.DaemonHealth) CheckResult {
+	const name = "refresh daemon"
+	switch {
+	case h.Pid == "":
+		return CheckResult{Name: name, Status: StatusFail,
+			Detail:      "not running (no owner pid recorded)",
+			Remediation: "attach a client (the client-attached watchdog relaunches it) or re-source atelier init"}
+	case !h.Alive:
+		return CheckResult{Name: name, Status: StatusFail,
+			Detail:      fmt.Sprintf("owner pid %s not alive (crashed/killed)", h.Pid),
+			Remediation: "attach a client — the client-attached watchdog respawns it; or re-source atelier init"}
+	case !h.HasHeartbeat:
+		return CheckResult{Name: name, Status: StatusPass,
+			Detail: fmt.Sprintf("running (pid %s), awaiting first tick", h.Pid)}
+	case h.SinceTick > 2*h.Interval:
+		return CheckResult{Name: name, Status: StatusWarn,
+			Detail:      fmt.Sprintf("running (pid %s) but last tick %s ago (interval %s) — loop may be wedged", h.Pid, h.SinceTick.Round(time.Second), h.Interval),
+			Remediation: "inspect ~/.cache/atelier/debug.log; kill the pid and re-source atelier init to respawn"}
+	default:
+		return CheckResult{Name: name, Status: StatusPass,
+			Detail: fmt.Sprintf("running (pid %s), last tick %s ago", h.Pid, h.SinceTick.Round(time.Second))}
+	}
 }
 
 // checkWorktreeDirsExist scans the statestore cache for workspaces

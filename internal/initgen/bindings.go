@@ -172,6 +172,12 @@ run-shell -b 'atelier popup cleanup --startup'
 // with per-tick self-eviction, so re-sourcing the config or attaching a second
 // client never stacks a second daemon.
 //
+// A `client-attached` watchdog re-runs the same guarded launch on every attach,
+// so a daemon that died mid-session (crash, OOM, kill) is respawned the next
+// time a client attaches — without re-sourcing the config. The singleton lock
+// (validated with a signal-0 probe, so a crashed loop's stale pid never blocks
+// a fresh one) makes the re-launch a no-op while the loop is alive.
+//
 // What it does each tick: TTL-throttled freshness + forge badge refresh (so
 // the status line stays current without the user navigating in) plus a
 // level-triggered kernel reconcile (so misrouted/phantom attention and orphan
@@ -181,8 +187,11 @@ func RefreshLoopBlock() string {
 	return `# --- background refresh loop ---
 # See internal/tools/workspaces/refresh_loop.go. run-shell -b: non-blocking;
 # the daemon binds to this server's pid and self-exits when it's gone/replaced,
-# and is singleton-guarded internally.
+# and is singleton-guarded internally (a second launch no-ops while one is live).
 run-shell -b 'atelier tools workspaces _refresh-loop'
+# Watchdog: re-ensure the daemon on every client attach so a mid-session
+# crash/kill recovers without re-sourcing the config. Idempotent via the lock.
+set-hook -g client-attached 'run-shell -b "atelier tools workspaces _refresh-loop"'
 `
 }
 
