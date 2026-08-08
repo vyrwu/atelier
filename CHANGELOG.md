@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0](https://github.com/vyrwu/atelier/compare/v0.7.0...v0.8.0) (2026-08-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** old [integrations]/[workspaces] name_gen_model/[claude] config keys are no longer read. Migrate to [ai]/[forge] per the map above.
+
+### Features
+
+* **config:** centralise AI config under [ai]/[forge] ([#94](https://github.com/vyrwu/atelier/issues/94)) ([8499dc5](https://github.com/vyrwu/atelier/commit/8499dc508d511a88ff35ab638772ca42c04c2efb)), closes [#34](https://github.com/vyrwu/atelier/issues/34)
+* **workspaces:** make tag colors distinct ([#89](https://github.com/vyrwu/atelier/issues/89)) ([d25021f](https://github.com/vyrwu/atelier/commit/d25021fd25ea37df837a10e33a185c2b46dafa50))
+* **workspaces:** watchdog + health check for refresh daemon ([#93](https://github.com/vyrwu/atelier/issues/93)) ([03a91f8](https://github.com/vyrwu/atelier/commit/03a91f8f39eaca9b2114b43770acf20781fdcdae))
+
+
+### Bug fixes
+
+* **state:** canonicalize session-name keys in statestore ([#90](https://github.com/vyrwu/atelier/issues/90)) ([e296e43](https://github.com/vyrwu/atelier/commit/e296e43b4fffc3f1d729090de167f8ae3139a551))
+* **workspaces:** finished turn is idle, not running ([#91](https://github.com/vyrwu/atelier/issues/91)) ([beb8326](https://github.com/vyrwu/atelier/commit/beb83269e7853b1bdf5cd45104e6c4e9ea12601f))
+
 ## [0.7.0](https://github.com/vyrwu/atelier/compare/v0.6.0...v0.7.0) (2026-08-08)
 
 
