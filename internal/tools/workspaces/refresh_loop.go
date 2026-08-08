@@ -49,6 +49,10 @@ const (
 	// optRefreshLoopPid holds the pid of the loop that owns this server, so a
 	// re-sourced config (or a second launcher) doesn't stack a second daemon.
 	optRefreshLoopPid = "@atelier_refresh_loop_pid"
+	// optRefreshLoopLastTick holds the unix time of the loop's last completed
+	// tick — a heartbeat, so `atelier doctor` can tell a live-and-ticking daemon
+	// from one whose pid is alive but whose loop has wedged. A pid is not a pulse.
+	optRefreshLoopLastTick = "@atelier_refresh_loop_last_tick"
 	// optMSPickerPort holds the fzf --listen port of an open M-s picker (set by
 	// the picker's start bind, cleared on close). When set, the loop pushes a
 	// live reload after any tick that changed picker-visible state.
@@ -102,6 +106,10 @@ func runRefreshLoop(h *tmuxhost.Client, interval time.Duration) error {
 		return nil
 	}
 	debuglog.Logf("workspaces._refresh-loop: started pid=%d server=%s interval=%s", os.Getpid(), serverPid, interval)
+	// Stamp an initial heartbeat immediately so doctor sees a fresh pulse during
+	// the first interval, before the first tick lands — otherwise a just-started
+	// daemon looks heartbeat-less for one interval.
+	stampHeartbeat(h, time.Now())
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -116,11 +124,56 @@ func runRefreshLoop(h *tmuxhost.Client, interval time.Duration) error {
 			return nil
 		}
 		refreshTick(h, integration.Active().Forge, time.Now())
+		// Heartbeat: record that this tick completed so doctor can distinguish a
+		// live-and-ticking daemon from a pid that's alive but wedged.
+		stampHeartbeat(h, time.Now())
 		// After the sweeps, push a live reload to an open M-s picker if the
 		// picker-visible state changed this tick (the point of the observer:
 		// see new attention/recap without reopening M-s).
 		lastPickerSig = maybeReloadPicker(h, lastPickerSig)
 	}
+}
+
+// stampHeartbeat records the wall-clock time of a completed tick in a server
+// global, read by `atelier doctor` to gauge daemon liveness. Best-effort.
+func stampHeartbeat(h *tmuxhost.Client, now time.Time) {
+	if err := h.SetGlobalOption(optRefreshLoopLastTick, strconv.FormatInt(now.Unix(), 10)); err != nil {
+		debuglog.LogErr("workspaces._refresh-loop: heartbeat", err)
+	}
+}
+
+// DaemonHealth is a liveness snapshot of the observer refresh loop, derived from
+// the server globals the loop stamps (owner pid + per-tick heartbeat). The loop
+// is the sole writer of these globals; `atelier doctor` is the reader.
+type DaemonHealth struct {
+	Pid          string        // @atelier_refresh_loop_pid; "" when unset
+	Alive        bool          // Pid is set AND names a live process (signal-0)
+	HasHeartbeat bool          // a heartbeat has been stamped (false only pre-first-stamp)
+	SinceTick    time.Duration // age of the last heartbeat (meaningful iff HasHeartbeat)
+	Interval     time.Duration // the tick interval, the staleness yardstick
+}
+
+// ReadDaemonHealth reads the observer's liveness globals from the server on h.
+// serverUp is false when no tmux server answers (caller should treat as N/A,
+// not a failure). Interval reflects the compiled default; a --interval override
+// is rare and only shifts the staleness threshold, not correctness.
+func ReadDaemonHealth(h *tmuxhost.Client, now time.Time) (health DaemonHealth, serverUp bool) {
+	if _, err := h.DisplayMessage("#{pid}"); err != nil {
+		return DaemonHealth{}, false
+	}
+	health.Interval = defaultRefreshInterval
+	pid, _ := h.ShowGlobalOption(optRefreshLoopPid)
+	health.Pid = strings.TrimSpace(pid)
+	if n, err := strconv.Atoi(health.Pid); err == nil {
+		health.Alive = processAlive(n)
+	}
+	if ts, _ := h.ShowGlobalOption(optRefreshLoopLastTick); strings.TrimSpace(ts) != "" {
+		if secs, err := strconv.ParseInt(strings.TrimSpace(ts), 10, 64); err == nil {
+			health.HasHeartbeat = true
+			health.SinceTick = now.Sub(time.Unix(secs, 0))
+		}
+	}
+	return health, true
 }
 
 // maybeReloadPicker pushes a live reload to an open M-s picker when the
