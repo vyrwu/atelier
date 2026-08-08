@@ -137,17 +137,21 @@ push into open slots.
 
 The kernel keeps the *policy* (naming system-prompt + conventional-commit
 validation; the forge state vocabulary + glyph + sort order); the adapter
-supplies the raw value. Selected + configured via `[integrations]`; when
-unset the capability degrades gracefully (no summary/badge, manual
-naming). **Dependency rule:** integrations import the kernel's ports; the
-kernel imports NO integration; `cmd/atelier` (composition root) is the
-only place that maps config → concrete adapter and installs it via
-`integration.SetActive`.
+supplies the raw value. Adapter *selection* is `[ai] provider` / `[forge]
+provider`; AI *tuning* (model + prompts) lives under `[ai]` too but is
+interpreted by the active adapter (the model aliases + default prompts are
+provider-specific). When unset the capability degrades gracefully (no
+summary/badge, manual naming). **Dependency rule:** integrations import the
+kernel's ports; the kernel imports NO integration; `cmd/atelier` (composition
+root) is the only place that maps config → concrete adapter and installs it
+via `integration.SetActive`.
 
 ```toml
-[integrations]
-ai    = "claude"   # AIIntegration adapter (default: claude; "" disables)
-forge = "github"   # ForgeIntegration adapter (default: off)
+[ai]
+provider = "claude"   # AIIntegration adapter (default: claude; "" disables)
+model    = "haiku"    # default model; [ai.models]/[ai.prompts] tune per task
+[forge]
+provider = "github"   # ForgeIntegration adapter (default: off)
 ```
 
 **3. Launchers (config).** A plain TUI is not an integration — it fills

@@ -69,37 +69,84 @@ const runningWindow = 90 * time.Second
 // callers (and tests) share the limit instead of duplicating the literal.
 const RecapMaxRunes = 120
 
-// Config is the claude plugin's own config, loaded from `[claude]`.
+// Config is the claude adapter's slice of the centralised `[ai]` section:
+// the model + prompt tuning the active adapter interprets. Provider selection
+// (`[ai] provider`, `[forge] provider`) is owned by the composition root
+// (cmd/atelier/integrations.go) and deliberately absent here — this adapter is
+// only built once `provider = "claude"` has already been chosen.
+//
+// The keys are uniform across adapters (any adapter reads `model`,
+// `[ai.models]`, `[ai.prompts]`); the VALUES are provider-specific — "haiku"
+// and "sonnet" are Claude model aliases, and the default prompts are
+// Claude-authored, so their defaults live here, not in a neutral config layer.
 type Config struct {
-	// MultiRepoSystemPrompt is appended via --append-system-prompt when
-	// claude opens in a multi-repo workspace. Inline string (not a path).
-	// Empty falls back to DefaultMultiRepoSystemPrompt.
-	MultiRepoSystemPrompt string `toml:"multi_repo_system_prompt"`
-	// RecapModel is the Claude model used to summarize the latest
-	// transcript into a one-line @attention_recap. Default: haiku.
-	RecapModel string `toml:"recap_model"`
-	// RecapSystemPrompt overrides DefaultRecapSystemPrompt.
-	RecapSystemPrompt string `toml:"recap_system_prompt"`
+	// Model is the default Claude model for AI tasks that don't set their
+	// own under [ai.models]. Default: haiku.
+	Model string `toml:"model"`
+	// Models holds per-task model overrides; empty means "use Model".
+	Models ModelConfig `toml:"models"`
+	// Prompts holds capability-level system-prompt overrides; empty means
+	// "use the built-in default".
+	Prompts PromptConfig `toml:"prompts"`
+}
+
+// ModelConfig is `[ai.models]` — per-task model overrides. An empty value
+// falls back to Config.Model.
+type ModelConfig struct {
+	// Naming is the model that names branches/sessions (M-n). Defaults to
+	// "sonnet" — naming benefits from a sharper model than the haiku default.
+	Naming string `toml:"naming"`
+	// Recap is the model for one-line session recaps (M-s rows / attention).
+	Recap string `toml:"recap"`
+}
+
+// PromptConfig is `[ai.prompts]` — capability-level system-prompt overrides.
+type PromptConfig struct {
+	// Recap overrides DefaultRecapSystemPrompt.
+	Recap string `toml:"recap"`
+	// MultiRepo is appended via --append-system-prompt when claude opens in
+	// a multi-repo workspace. Empty falls back to DefaultMultiRepoSystemPrompt.
+	MultiRepo string `toml:"multi_repo"`
+}
+
+// NamingModel resolves the model for branch/session naming: the per-task
+// override if set, else the global default.
+func (c Config) NamingModel() string {
+	if c.Models.Naming != "" {
+		return c.Models.Naming
+	}
+	return c.Model
+}
+
+// RecapModel resolves the model for recaps: the per-task override if set, else
+// the global default.
+func (c Config) RecapModel() string {
+	if c.Models.Recap != "" {
+		return c.Models.Recap
+	}
+	return c.Model
 }
 
 func DefaultConfig() Config {
 	return Config{
-		RecapModel:            "haiku",
-		MultiRepoSystemPrompt: DefaultMultiRepoSystemPrompt,
-		RecapSystemPrompt:     DefaultRecapSystemPrompt,
+		Model:  "haiku",
+		Models: ModelConfig{Naming: "sonnet"},
 	}
 }
 
 func LoadConfig() (Config, error) {
 	cfg := DefaultConfig()
-	if err := config.LoadSection("claude", &cfg); err != nil {
+	if err := config.LoadSection("ai", &cfg); err != nil {
 		return cfg, err
 	}
-	if cfg.MultiRepoSystemPrompt == "" {
-		cfg.MultiRepoSystemPrompt = DefaultMultiRepoSystemPrompt
+	if cfg.Model == "" {
+		cfg.Model = "haiku"
 	}
-	if cfg.RecapSystemPrompt == "" {
-		cfg.RecapSystemPrompt = DefaultRecapSystemPrompt
+	if cfg.Prompts.MultiRepo == "" {
+		cfg.Prompts.MultiRepo = DefaultMultiRepoSystemPrompt
+	}
+	if cfg.Prompts.Recap == "" {
+		cfg.Prompts.Recap = DefaultRecapSystemPrompt
 	}
 	return cfg, nil
 }

@@ -11,33 +11,36 @@ import (
 	"github.com/vyrwu/atelier/internal/integration"
 )
 
-// integrationsConfig is the `[integrations]` section of config.toml. It
-// selects which adapter realizes each kernel capability port. An empty /
-// absent value disables that capability; the kernel degrades gracefully.
+// providerConfig selects which adapter realizes a kernel capability port. AI
+// lives under `[ai] provider`, forge under `[forge] provider`; an empty /
+// absent value disables that capability and the kernel degrades gracefully.
 //
-//	[integrations]
-//	forge = "github"   # per-workspace PR badge + open-in-browser (default: off)
-//	ai    = "claude"   # workspace agent + naming + summary + attention (default: claude)
+//	[ai]
+//	provider = "claude"   # workspace agent + naming + summary + attention (default: claude)
+//	[forge]
+//	provider = "github"   # per-workspace PR badge + open-in-browser (default: off)
 //
 // AI defaults to "claude" (the flagship agent, and atelier's out-of-the-box
-// behavior); set `ai = ""` to disable it or `ai = "mock"` to swap in the
-// deterministic offline adapter. Forge defaults to off; `forge = "github"`
-// needs `gh`, while `forge = "mock"` is the deterministic offline adapter
-// (reads a fixture map — used by the demo sandbox and tests).
-type integrationsConfig struct {
-	Forge string `toml:"forge"`
-	AI    string `toml:"ai"`
+// behavior); set `provider = ""` to disable it or `provider = "mock"` to swap
+// in the deterministic offline adapter. Forge defaults to off; `github` needs
+// `gh`, while `mock` is the deterministic offline adapter (reads a fixture
+// map — used by the demo sandbox and tests). Model/prompt tuning lives under
+// [ai] too but is owned by the active adapter, not this selector.
+type providerConfig struct {
+	Provider string `toml:"provider"`
 }
 
 // composeIntegrations is the composition root: the ONLY place that maps
 // config strings to concrete adapters. Keeping this out of internal/kernel
 // preserves the dependency rule — the kernel never imports an adapter.
 func composeIntegrations() integration.Set {
-	cfg := integrationsConfig{AI: "claude"} // default: claude on
-	_ = config.LoadSection("integrations", &cfg)
+	ai := providerConfig{Provider: "claude"} // default: claude on
+	_ = config.LoadSection("ai", &ai)
+	forge := providerConfig{} // default: off
+	_ = config.LoadSection("forge", &forge)
 
 	var set integration.Set
-	switch cfg.Forge {
+	switch forge.Provider {
 	case "":
 		// disabled (default)
 	case "github":
@@ -45,9 +48,9 @@ func composeIntegrations() integration.Set {
 	case "mock":
 		set.Forge = mock.New()
 	default:
-		fmt.Fprintf(os.Stderr, "atelier: unknown [integrations] forge = %q (known: github, mock, \"\" to disable); forge disabled\n", cfg.Forge)
+		fmt.Fprintf(os.Stderr, "atelier: unknown [forge] provider = %q (known: github, mock, \"\" to disable); forge disabled\n", forge.Provider)
 	}
-	switch cfg.AI {
+	switch ai.Provider {
 	case "":
 		// explicitly disabled
 	case "claude":
@@ -55,7 +58,7 @@ func composeIntegrations() integration.Set {
 	case "mock":
 		set.AI = mock.New()
 	default:
-		fmt.Fprintf(os.Stderr, "atelier: unknown [integrations] ai = %q (known: claude, mock, \"\" to disable); AI disabled\n", cfg.AI)
+		fmt.Fprintf(os.Stderr, "atelier: unknown [ai] provider = %q (known: claude, mock, \"\" to disable); AI disabled\n", ai.Provider)
 	}
 	return set
 }

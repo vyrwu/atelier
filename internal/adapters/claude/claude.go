@@ -107,7 +107,7 @@ func (Adapter) OpenAgent(h *tmuxhost.Client) error {
 		// Claude's config. The recap + attention verdict are pulled by the
 		// refresh loop reading the transcript (RefreshRecap), so Claude launches
 		// with the user's own untouched config.
-		return buildClaudeStartCmd(prompt, kind, cfg.MultiRepoSystemPrompt, "", resumeID), nil
+		return buildClaudeStartCmd(prompt, kind, cfg.Prompts.MultiRepo, "", resumeID), nil
 	})
 }
 
@@ -161,8 +161,9 @@ func clearLaunchPrompt(h *tmuxhost.Client, windowID, prompt string) {
 // contract yields one line; the tag-aware contract yields two (name, then
 // tag). This just runs the model. (Was workspaces' inline claudegen.)
 func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (string, error) {
+	cfg, _ := LoadConfig()
 	gen := claudegen.New()
-	gen.Model = "sonnet"
+	gen.Model = cfg.NamingModel()
 	raw, err := gen.RunWithSystemPrompt(systemPrompt, intent)
 	if err != nil {
 		return "", err
@@ -249,10 +250,8 @@ func (Adapter) RefreshRecap(h *tmuxhost.Client, windowID, cwd string) error {
 		return nil
 	}
 	gen := claudegen.New()
-	if cfg.RecapModel != "" {
-		gen.Model = cfg.RecapModel
-	}
-	out, err := gen.RunWithSystemPrompt(cfg.RecapSystemPrompt, input)
+	gen.Model = cfg.RecapModel()
+	out, err := gen.RunWithSystemPrompt(cfg.Prompts.Recap, input)
 	if err != nil {
 		return err
 	}

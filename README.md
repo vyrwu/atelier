@@ -177,15 +177,28 @@ section is loaded independently, so you only include the sections you change.
 The block below is the complete schema, showing every option at its default:
 
 ```toml
-[integrations]
-ai    = "claude"   # AI adapter: "claude" | "mock" | "" (disables AI features)
-forge = ""         # forge/PR-badge adapter: "github" | "" (off)
+# All AI configuration lives under one roof. `provider` selects the adapter;
+# everything else is capability-level tuning the active adapter interprets
+# (model names + prompts below are Claude values).
+[ai]
+provider = "claude"   # AI adapter: "claude" | "mock" | "" (disables AI features)
+model    = "haiku"    # default model for AI tasks that don't set their own
+
+[ai.models]           # per-task model overrides (empty = use `model` above)
+naming = "sonnet"     # model that names branches/sessions (M-n)
+recap  = ""           # model for one-line session recaps (M-s rows); inherits `model`
+
+[ai.prompts]          # empty = built-in default
+recap      = ""       # override the recap system prompt
+multi_repo = ""       # extra system prompt in multi-repo workspaces
+
+[forge]
+provider = ""         # forge/PR-badge adapter: "github" | "mock" | "" (off)
 
 [workspaces]
 code_root       = "~/code/github"             # where M-n clones single repos
 worktree_root   = "~/code/.worktrees/github"  # where M-n creates git worktrees
 multi_repo_root = "~/code"                     # root for multi-repo workspaces
-name_gen_model  = "haiku"                      # Claude model that names branches (M-n)
 auto_tag        = true                         # let the AI suggest a tag at M-n creation
 
 [k8s]
@@ -194,12 +207,6 @@ configs  = "~/.config/atelier/k8s/configs.yaml"   # k9s cluster configs
 
 [pg]
 contexts = "~/.config/atelier/pg/contexts.yaml"   # postgres endpoint definitions
-
-# Only when [integrations] ai = "claude". Empty prompt = built-in default.
-[claude]
-recap_model              = "haiku"   # model for one-line session recaps (M-s rows)
-recap_system_prompt      = ""         # override the recap prompt
-multi_repo_system_prompt = ""         # extra system prompt in multi-repo workspaces
 
 # [tools.<name>] launcher blocks register arbitrary TUIs in popups —
 # see "Extending atelier" for every field.
@@ -242,9 +249,10 @@ write an adapter satisfying the kernel port (`internal/integration`:
 `AIIntegration`, `ForgeIntegration`) and select it in config:
 
 ```toml
-[integrations]
-ai    = "claude"
-forge = "github"
+[ai]
+provider = "claude"
+[forge]
+provider = "github"
 ```
 
 Bundled adapters live in `internal/adapters/{claude,github,mock}`. Adding

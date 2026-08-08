@@ -250,7 +250,7 @@ func TestHydrate_WritesConfigWithIntegrations(t *testing.T) {
 		t.Fatalf("read config.toml: %v", err)
 	}
 	cfg := string(data)
-	for _, want := range []string{l.CodeRoot, `ai    = "claude"`, `forge = "mock"`, "[tools.lazygit]", `launch       = "lazygit"`} {
+	for _, want := range []string{l.CodeRoot, "[ai]", `provider = "claude"`, "[forge]", `provider = "mock"`, "[tools.lazygit]", `launch       = "lazygit"`} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("config.toml missing %q:\n%s", want, cfg)
 		}

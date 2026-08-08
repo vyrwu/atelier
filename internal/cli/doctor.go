@@ -291,7 +291,7 @@ func checkAgentHooks() CheckResult {
 	ai := integration.Active().AI
 	if ai == nil {
 		return CheckResult{Name: "agent hooks", Status: StatusSkip,
-			Detail: "no AI integration configured ([integrations] ai)"}
+			Detail: "no AI integration configured ([ai] provider)"}
 	}
 	return CheckResult{Name: "agent hooks", Status: StatusPass,
 		Detail: fmt.Sprintf("%s: recap + attention pulled by the refresh loop (no agent hook installed)", ai.Name())}

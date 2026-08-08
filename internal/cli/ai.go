@@ -23,7 +23,7 @@ func AICommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "ai <subcommand>",
 		Short: "Drive the configured AI integration (agent, naming, summary, attention)",
-		Long: `Kernel entry to the AI integration selected by ` + "`[integrations] ai`" + ` in
+		Long: `Kernel entry to the AI integration selected by ` + "`[ai] provider`" + ` in
 config.toml (claude | mock | …). Subcommands delegate to the active
 adapter through the kernel's AIIntegration port; with none configured they
 error rather than silently no-op.`,
@@ -35,7 +35,7 @@ error rather than silently no-op.`,
 func activeAI() (integration.AIIntegration, error) {
 	ai := integration.Active().AI
 	if ai == nil {
-		return nil, fmt.Errorf("no AI integration configured (set `[integrations] ai = \"claude\"` in config.toml)")
+		return nil, fmt.Errorf("no AI integration configured (set `[ai] provider = \"claude\"` in config.toml)")
 	}
 	return ai, nil
 }
