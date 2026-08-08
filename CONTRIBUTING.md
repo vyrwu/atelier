@@ -95,6 +95,7 @@ it (when `Tool: true`); `atelier doctor` checks `Requires`.
 | `Description` | shown in `atelier tools list` + selector |
 | `Tool` | `true` to appear in the M-; selector; omit for pure providers |
 | `Popup` | `KindWorkspace` / `KindGlobal` / `KindNone` — launch shape |
+| `PrimaryInvoke` | subcommand the M-; selector launches (default `open`; e.g. pg → `pgcli`) |
 | `Binding` / `Bindings` | tmux key bindings emitted by `atelier init` |
 | `Requires` | external commands `atelier doctor` verifies on PATH |
 | `UI` | icon / accent color / popup title for the selector |
@@ -130,12 +131,14 @@ case "codex":
 
 Then `[integrations] ai = "codex"` selects it. Ports:
 
-- `AIIntegration` — `OpenAgent`, `SetPrompt`, `GenerateName`, `OnStop`,
-  `Summarize`, `EnsureHooks`, `AgentPopupSession`, `HasResumableState`.
+- `AIIntegration` — `Name`, `DisplayName`, `OpenAgent`, `SetPrompt`,
+  `GenerateName`, `RefreshRecap`, `AgentPopupSession`, `HasResumableState`.
   The KERNEL owns the naming instruction + conventional-commit validation;
   the adapter runs its model and manages its own resume/session semantics.
-- `ForgeIntegration` — `Status` (classify into the kernel's `ForgeState`),
-  `Open`. The KERNEL renders the glyph + sort order.
+  `RefreshRecap` is pull-based — it re-reads the agent transcript and writes
+  the recap plus a three-state attention verdict; there is no push/stop-hook.
+- `ForgeIntegration` — `Name`, `Status` (classify into the kernel's
+  `ForgeState`), `Open`. The KERNEL renders the glyph + sort order.
 
 **Dependency rule:** an adapter imports `internal/integration` (the port)
 + kernel primitives; it must NEVER be imported by the kernel. Only
@@ -148,8 +151,8 @@ adapter shows the minimum.
 Tools call back into the core for shared services. CLI surface:
 
 ```bash
-# Inspect runtime state (where am I? what's the outer pane?)
-atelier state
+# Inspect runtime state (topology + invariant report; where am I? outer pane?)
+atelier state show
 
 # Get info about the workspace containing a pane
 atelier workspace info --format=json
@@ -211,40 +214,39 @@ never changes — the registry is the single wiring point. In-process
 dispatch (cancel → exit 130, error → pause-and-exit) is handled for you by
 `toolmain.Dispatch`; you don't call it directly.
 
-## Agent stop-hook integration
+## Agent observation (pull-based recap + attention)
 
-The kernel exposes `atelier ai on-stop` as the agent stop-hook entry
-point. The active AI adapter's `OnStop` raises `@needs_attention` on the
-workspace's parent window (unless the popup is attached) and refreshes the
-summary (`@attention_recap`) from the agent's latest transcript — both via
-the kernel verbs `workspace.SetAttention` / `SetRecap`.
+Atelier does **not** install a stop-hook into the agent's config — Claude
+launches with your untouched `~/.config/claude/settings.json`. Instead the
+background refresh loop (`atelier tools workspaces _refresh-loop`, started
+by `atelier init`) periodically calls the active AI adapter's
+`RefreshRecap`, which re-reads the workspace agent's latest session
+transcript and, in one cheap model pass, derives BOTH:
 
-The Claude adapter installs this automatically (via `EnsureHooks` →
-atelier's `--settings` file), so you don't hand-edit
-`~/.config/claude/settings.json`. The canonical hook it writes is:
+- a one-line recap → `@attention_recap` (+ `@attention_recap_ts`)
+- a three-state agent status → `@agent_status`: `blocked` (waiting on
+  you), `running` (working / waiting on a sub-agent), or `idle`
 
-```json
-{
-  "hooks": {
-    "Stop": [
-      { "type": "command", "command": "atelier ai on-stop" }
-    ]
-  }
-}
-```
+Only `blocked` raises `@needs_attention` on the workspace window, so the
+status-line rollup (`atelier status attention count`) surfaces just the
+workspaces that actually need you. Attention clears when you open the
+window (`after-select-window` hook) or attach to its popup
+(`client-session-changed` hook). All writes go through the kernel verbs
+(`workspace.SetRecapTS` / `SetAgentStatus` / `SetAttention`).
 
-The hook runs inside the agent popup, which is an atelier-managed tmux
-session. `OnStop` resolves the outer (workspace) window from the chain and
-sets the options on it. Your tmux status line then shows the attention
-rollup via `atelier status attention count`.
+`atelier ai recap` is the one-shot entry point the loop calls per tick;
+reads are throttled on the transcript mtime, so a quiet workspace costs
+only a `stat`.
 
-Atelier also reads two window options that you can set per-workspace from
-the workspaces tool or by hand:
+Atelier also reads two window options you can set per-workspace from the
+workspaces tool or by hand (persisted as statestore metadata, surfaced as
+`@ai_*` tmux options):
 
-- `@claude_prompt` — initial prompt passed to claude on next popup open
-- `@claude_workspace_kind` — `single-repo` | `multi-repo`. When
-  `multi-repo`, claude is launched with `--append-system-prompt
-  <claude.multi_repo_system_prompt>` from atelier's config.
+- `@ai_prompt` — initial prompt passed to the agent on next popup open
+- `@ai_workspace_kind` — distinguishes single-repo from multi-repo
+  workspaces. For a multi-repo workspace, claude is launched with
+  `--append-system-prompt <claude.multi_repo_system_prompt>` from
+  atelier's config.
 
 ## Repository conventions
 

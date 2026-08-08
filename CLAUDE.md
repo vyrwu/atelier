@@ -16,11 +16,12 @@ Concretely, the following are *prohibited* in `internal/tools/...`:
 - `tmux new-session`, `new-window`, `kill-session`, `kill-window`,
   `switch-client`, `select-window`, `respawn-pane` (the workspace-
   lifecycle verbs)
-- `set-option`/`set-window-option` calls that write
-  `@needs_attention`, `@attention_recap`, `@attention_recap_ts`,
-  `@claude_prompt`, `@claude_workspace_kind`,
-  `@claude_active_session_id`, `@repo_path` as string literals — use
-  the `workspace.Opt*` constants
+- `set-option`/`set-window-option` calls that write atelier-managed
+  window options as string literals — `@needs_attention`,
+  `@attention_recap`, `@attention_recap_ts`, `@agent_status`,
+  `@repo_path` (use the `workspace.Opt*` constants), or the adapter
+  metadata options `@ai_prompt`, `@ai_workspace_kind`,
+  `@ai_active_session_id` (write through statestore metadata, not literals)
 - The `set-option <key> + statestore.UpdateGlobal(<key>)` two-step for
   persisted tmux globals — use `workspace.SetPersistedGlobal`
 - The "spawn workspace-scoped popup" four-step recipe (resolve parent
@@ -69,12 +70,14 @@ in user memory for the explicit "no manually-verified-only fixes" rule.
 
 ## Commit + PR rules
 
-Per user's global `~/.config/claude/CLAUDE.md` — `[PLA-XXX] type(scope):
-Description` commit subject, concise body, `Co-Authored-By: Claude
-<model>` trailer. Pull requests follow the same title format; body has
+atelier uses plain [Conventional Commits](https://www.conventionalcommits.org/)
+— `type(scope): Description` subject, **no `[PLA-XXX]`/Linear key** (this repo
+is not Linear-tracked). Concise body explaining the *why*, `Co-Authored-By:
+Claude <model>` trailer. Pull requests follow the same title format; body has
 `## Summary` (3-5 bullets), separator, repo PR template if present,
 generated-by footer. Don't enumerate files in PR bodies; don't expand
-design rationale.
+design rationale. See [`RELEASING.md`](RELEASING.md) for how commit prefixes
+drive release-please version bumps.
 
 ## GitHub Issue conventions
 

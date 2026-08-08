@@ -17,7 +17,8 @@ import (
 // subcommand errors clearly rather than doing nothing — predictable.
 //
 // These are invoked by the workspace views (agent open on land) and by the
-// agent's own stop-hook (`atelier ai on-stop`, installed via EnsureHooks).
+// background refresh loop (`atelier ai recap`, which pulls the recap +
+// attention verdict from the agent transcript — there is no stop-hook).
 func AICommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "ai <subcommand>",

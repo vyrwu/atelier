@@ -30,9 +30,10 @@ you can run several coding agents (Claude Code, Codex, Aider) in parallel and
 keep track of which ones need attention.
 
 A workspace is one tmux window + one git worktree + its own tool state — agent
-session, lazygit, k9s context, postgres CLI. The engine tracks recap text,
-attention flags, and git freshness per workspace, persists them to disk, and
-rehydrates on tmux restart.
+session, lazygit, k9s context, postgres CLI. A background loop continuously
+observes each workspace's agent — re-reading its session transcript to derive a
+one-line recap and a three-state status (blocked / running / idle) — tracks git
+freshness, persists it all to disk, and rehydrates on tmux restart.
 
 ## Features
 
@@ -48,7 +49,7 @@ rehydrates on tmux restart.
   block; atelier binds a key, opens it in a popup, and owns the window state.
   No Go, no plugin protocol, no recompile.
 - **Unopinionated statusline.** atelier emits git freshness (ahead/behind) and
-  attention (agent finished while you were elsewhere) as `#(atelier status …)`
+  attention (an agent is blocked waiting on you) as `#(atelier status …)`
   commands you embed in your own statusline. Works with vanilla tmux, Dracula,
   or Powerline; it supplies data, not visuals.
 - **Persistent state.** Workspaces, recap text, attention flags, and git
@@ -185,6 +186,7 @@ code_root       = "~/code/github"             # where M-n clones single repos
 worktree_root   = "~/code/.worktrees/github"  # where M-n creates git worktrees
 multi_repo_root = "~/code"                     # root for multi-repo workspaces
 name_gen_model  = "haiku"                      # Claude model that names branches (M-n)
+auto_tag        = true                         # let the AI suggest a tag at M-n creation
 
 [k8s]
 contexts = "~/.config/atelier/k8s/contexts.yaml"  # k9s context definitions
@@ -312,7 +314,7 @@ tests. For the release process, see [RELEASING.md](RELEASING.md).
 
 ## Status
 
-Currently shipping `v0.3.x`. Known limitations:
+Currently shipping `v0.6.x`. Known limitations:
 
 - macOS only in practice (Linux builds exist but are not tested daily).
 - Requires tmux ≥ 3.4 with `display-popup`.

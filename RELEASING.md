@@ -26,10 +26,10 @@ you merge the Release PR → ~5 minutes later, `brew upgrade atelier` works.
 
 ```bash
 # 1. Normal feature work — Conventional Commits matter here.
-git checkout -b PLA-123-add-foo
+git checkout -b add-foo
 # … work …
-git commit -m "feat(workspaces): [PLA-123] add foo"
-git push -u origin PLA-123-add-foo
+git commit -m "feat(workspaces): add foo"
+git push -u origin add-foo
 # Open PR, merge to main as usual.
 
 # 2. Watch the release-please workflow update the Release PR.
@@ -65,31 +65,34 @@ release-please reads conventional-commit prefixes:
 
 | Prefix | Bump | Example |
 |---|---|---|
-| `fix:` / `fix(scope):` | patch (0.1.0 → 0.1.1) | `fix(workspaces): [PLA-101] handle empty repo_path` |
-| `feat:` / `feat(scope):` | minor pre-v1.0 (0.1.0 → 0.2.0) | `feat(claude): [PLA-102] add resume-on-restore` |
-| `feat!:` / `BREAKING CHANGE:` in body | major (0.1.0 → 1.0.0) | `feat(api)!: rename ToolManifest fields` |
+| `fix:` / `fix(scope):` | patch (0.6.0 → 0.6.1) | `fix(workspaces): handle empty repo_path` |
+| `feat:` / `feat(scope):` | minor pre-v1.0 (0.6.0 → 0.7.0) | `feat(claude): add resume-on-restore` |
+| `feat!:` / `BREAKING CHANGE:` in body | major (0.x → 1.0.0) | `feat(api)!: rename ToolManifest fields` |
 | `docs:`, `chore:`, `ci:`, `test:`, `refactor:`, `build:`, `perf:` | no bump | shows up in CHANGELOG (or hidden, per `release-please-config.json`) |
 
-The `[PLA-XXX]` Linear ID sits **after** the colon, in the description.
-Linear picks it up from anywhere in the message; release-please's parser
-ignores it. Both win.
+atelier uses plain [Conventional Commits](https://www.conventionalcommits.org/) —
+no Linear/issue key in the subject. Scope the change (`feat(workspaces):`,
+`fix(state):`) and keep the subject imperative; release-please parses the
+prefix and nothing else. (GitHub appends the `(#NN)` PR number on squash-merge.)
 
 Until `v1.0.0`, the config has `bump-minor-pre-major: true` — `feat:` bumps
 the minor (0.x.0). Once you tag `v1.0.0` manually (or via a
 `BREAKING CHANGE:` commit), bumps become standard semver.
 
-## The first-ever release
+## Seeding or overriding a version
 
-The current `.release-please-manifest.json` says `"."": "0.0.0"`. When you
-land the FIRST conventional-commit `feat:` on `main`, release-please opens
-a Release PR proposing `v0.1.0`. Merge it; the rest takes over.
+`.release-please-manifest.json` currently reads `0.6.0` — the bot maintains
+it; don't hand-edit. release-please bumps from whatever version is there on
+each merged `feat:`/`fix:`. (Historically it started at `0.0.0`, and the
+first `feat:` on `main` opened the `v0.1.0` Release PR.)
 
-You can also seed the version manually via a commit like:
+To force a specific version — a one-off jump, or re-seeding after a reset —
+use the `Release-As` trailer in a single commit:
 
 ```
-chore: release 0.1.0
+chore: release 0.7.0
 
-Release-As: 0.1.0
+Release-As: 0.7.0
 ```
 
 The `Release-As: <version>` trailer is release-please's manual override.
@@ -112,7 +115,7 @@ The `Release-As: <version>` trailer is release-please's manual override.
 
 Almost always a commit-message issue. If a `feat:` accidentally landed as
 `chore:`, the bot won't bump minor. Fix forward: land a corrective commit
-(`feat: [PLA-...] correct prior version-bump intent`) and the bot will
+(`feat: correct prior version-bump intent`) and the bot will
 update the Release PR.
 
 ### "Release PR was merged but tag didn't fire"
@@ -156,17 +159,18 @@ That's it for setup. After this, the loop runs on its own.
 
 ## Public API surface (what stays stable across releases)
 
-Atelier ships two contracts that external users depend on. Breaking
-either requires a major version bump (post-v1.0) or a `BREAKING
+Atelier ships three contracts that external users depend on. Breaking
+any of them requires a major version bump (post-v1.0) or a `BREAKING
 CHANGE:` commit:
 
 1. **Statusline data emitters** (see [docs/EMBEDDING.md](docs/EMBEDDING.md)):
    - `atelier status freshness <behind> <ahead> <pull_error> <freshness_ts> <repo_path>`
    - `atelier status attention count`
+   - `atelier status forge <forge_state>`
 
    These are invoked from user tmux configs via `#(...)`. The arg
-   shape, exit code, and output format are part of the contract.
-   Locked in by `internal/cli/status_emitters_e2e_test.go`.
+   shape, exit code, and output format are part of the contract
+   (glyphs/colors are not — wrap the emitter if you need different visuals).
 
 2. **Launcher config schema** (`[tools.<name>]` in config.toml):
    The fields a user's launcher block may set (`launch`, `popup`,
@@ -191,7 +195,7 @@ output against parse errors on a fresh tmux server.
   on every release. Any edits in the tap repo get overwritten next tag.
   If you need to customize cask behavior, do it in
   `.goreleaser.yaml`'s `homebrew_casks:` block.
-- **Tagging the first commit**: the manifest starts at `0.0.0`. The
-  bot won't open a Release PR until there's a `feat:` or `fix:` commit
-  to bump from. If you need to "seed" a version, use `Release-As: x.y.z`
-  in a single commit (see "The first-ever release").
+- **Tagging the first commit**: the manifest started at `0.0.0`, and the
+  bot won't open a Release PR until there's a `feat:` or `fix:` commit to
+  bump from. To force a specific version, use `Release-As: x.y.z` in a
+  single commit (see "Seeding or overriding a version").

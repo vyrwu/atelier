@@ -13,14 +13,15 @@ already wired for you. Everyone else: this is how.
 
 ## The three emitters
 
-Both are subcommands of the `atelier` binary. They print to stdout
+All three are subcommands of the `atelier` binary. They print to stdout
 and exit 0 in all states (so tmux `#(...)` never produces noise).
 
 ### `atelier status freshness <behind> <ahead> <pull_error> <freshness_ts> <repo_path>`
 
 Renders the git sync status for a workspace as a colored icon. The
-arguments come from tmux options that atelier's background pull
-(`_bg-pull`) stamps on the workspace's window.
+arguments come from tmux options that atelier's background git-pull
+worker stamps on the workspace's window (`_bg-pull` on workspace switch,
+and the continuous `_refresh-loop`).
 
 | Arguments (in order) | Source | Type |
 |---|---|---|
@@ -58,11 +59,11 @@ No arguments needed.
 | No window flagged | `` (empty) |
 | N windows flagged | ` #[fg=yellow]⏺ N#[default]` |
 
-The flag is set by the Claude integration's Stop hook when a Claude session
-completes work in a window the user wasn't viewing at the time. It
-clears automatically when the user opens that window (via
-`after-select-window` hook) or attaches to its popup (via
-`client-session-changed` hook).
+The flag is set by atelier's background observer loop when a workspace's
+agent is *blocked* waiting on you (derived by re-reading the agent's
+transcript each tick — not a hook the agent installs). It clears
+automatically when the user opens that window (via `after-select-window`
+hook) or attaches to its popup (via `client-session-changed` hook).
 
 ### `atelier status forge '<forge_state>'`
 
@@ -170,11 +171,12 @@ emitters:
   (`workspaces` plugin).
 - `@workspace_behind`, `@workspace_ahead`,
   `@workspace_freshness_ts`, `@workspace_pull_error` — set by
-  atelier's background-pull worker, which fires on every workspace
-  switch and at startup for stale workspaces.
-- `@needs_attention` — set by the Claude integration's Stop hook on
-  Claude session completion; cleared by atelier's `after-select-window`
-  and `client-session-changed` hooks.
+  atelier's background git-pull worker, which fires on every workspace
+  switch, at startup for stale workspaces, and on the continuous
+  `_refresh-loop` heartbeat.
+- `@needs_attention` — set by atelier's observer loop when a workspace's
+  agent is blocked waiting on you; cleared by atelier's
+  `after-select-window` and `client-session-changed` hooks.
 - `@forge_state` — set by the forge-refresh worker
   (`SpawnForgeRefresh`), which classifies each workspace's PR/MR via
   the active forge adapter. Fires on every workspace-land event and on
