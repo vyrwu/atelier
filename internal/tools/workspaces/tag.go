@@ -25,29 +25,29 @@ import (
 // to the same palette entry, independent of creation order — so the eye
 // can cluster related workspaces without reading every name.
 
-// tagPalette is a hand-curated slice of 256-color codes in the medium
-// (level-3) brightness band — clearly legible on the dracula-dark popup
-// background without tipping into neon primaries or near-white. Chosen for
-// wide hue spread so adjacent tags stay distinct at a glance. The color
-// assigned to a tag is tagPalette[fnv32a(name) % len(tagPalette)] — a pure
-// function of the name, so it is stable across restarts and machines.
+// tagPalette is a hand-curated slice of 256-color codes: distinct hues
+// stepped ~25° apart around the whole color wheel so every pair is
+// unmistakable at a glance, but kept in the vivid-but-soft band (lowest
+// channel lifted off 0, e.g. #ff5f5f not #ff0000) so they read as clear,
+// separate colors without the eye-searing harshness of pure neon primaries.
+// None blends into the dim grey chrome or the muted brick-red clear row.
+// The color assigned to a tag is tagPalette[fnv32a(name) % len(tagPalette)]
+// — a pure function of the name, stable across restarts and machines.
 var tagPalette = []string{
-	"74",  // sky blue
-	"79",  // aqua
-	"114", // soft green
-	"150", // light green
-	"149", // yellow-green
-	"179", // gold
-	"173", // terracotta
-	"174", // coral
-	"175", // pink
-	"176", // orchid
-	"140", // medium purple
-	"110", // periwinkle
-	"170", // magenta-orchid
-	"80",  // bright teal
-	"180", // tan
-	"181", // soft rose
+	"203", // red
+	"209", // orange
+	"215", // amber
+	"221", // yellow
+	"155", // lime
+	"84",  // green
+	"79",  // teal
+	"45",  // cyan
+	"75",  // sky blue
+	"69",  // blue
+	"99",  // violet
+	"171", // purple
+	"207", // magenta
+	"205", // pink
 }
 
 // tagColor returns the 256-color code assigned to a tag name. Pure and
