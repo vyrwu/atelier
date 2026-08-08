@@ -42,6 +42,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
@@ -231,6 +232,21 @@ func Path() string {
 // Load reads the cache file. Returns (nil, nil) if absent or schema
 // mismatch — callers treat that as "no prior state, start fresh."
 // Malformed JSON returns the error.
+// CanonicalSessionName normalizes a session identifier to the form tmux
+// actually stores: tmux silently rewrites '.' and ':' to '_' in session
+// names (they're target-syntax delimiters). Every statestore key is
+// canonicalized through this on both read and write so a name derived
+// from a repo slug ("owner/repo.dk") matches the same name read back
+// from live tmux ("owner/repo_dk"). Without it, deleting a dotted-slug
+// workspace no-ops — the raw stored key never equals the mangled key
+// the picker/hooks pass — and the entry resurrects on restart.
+//
+// This is the single implementation; workspace.SessionName delegates
+// here (statestore is the lower, import-cycle-free package).
+func CanonicalSessionName(name string) string {
+	return strings.NewReplacer(".", "_", ":", "_").Replace(name)
+}
+
 func Load() (*State, error) {
 	return loadFrom(Path())
 }
@@ -259,6 +275,14 @@ func loadFrom(path string) (*State, error) {
 	// cache poisoned by older code paths (pre-scope-fix, or test
 	// seeds) doesn't keep resurrecting random sessions on restore.
 	s.Workspaces = filterAtelierManaged(s.Workspaces)
+	// Canonicalize keys on read so legacy rows persisted with a raw
+	// dotted/colon slug (e.g. "owner/repo.dk") match the mangled name
+	// tmux and the pickers use ("owner/repo_dk"). Migrates in place —
+	// the next Save rewrites the file in canonical form.
+	for i := range s.Workspaces {
+		s.Workspaces[i].SessionName = CanonicalSessionName(s.Workspaces[i].SessionName)
+	}
+	s.LastActiveSession = CanonicalSessionName(s.LastActiveSession)
 	debuglog.Logf("statestore.Load: path=%s workspaces=%d sessions=%v last_active=%q",
 		path, len(s.Workspaces), sessionNames(s.Workspaces), s.LastActiveSession)
 	return &s, nil
@@ -398,6 +422,7 @@ func UpdateWorkspace(sessionName string, mutate func(*Workspace)) error {
 // Empty session name no-ops (which also clears the field — useful
 // when the active session is the bundled "default" itself).
 func SetLastActiveSession(session string) error {
+	session = CanonicalSessionName(session)
 	return withWriteLock(Path(), func() error {
 		s, err := Load()
 		if err != nil {
@@ -435,6 +460,7 @@ func UpdateGlobal(key, value string) error {
 // RemoveSession drops a workspace from the cache entirely. Called by
 // the session-closed tmux hook.
 func RemoveSession(sessionName string) error {
+	sessionName = CanonicalSessionName(sessionName)
 	return withWriteLock(Path(), func() error {
 		s, err := Load()
 		if err != nil {
@@ -467,6 +493,7 @@ func RemoveSession(sessionName string) error {
 // and the stale-read save clobbers the other writer's mutations —
 // e.g. a freshly-persisted window's ai.prompt metadata silently lost.
 func RemoveWindow(sessionName, windowName string) error {
+	sessionName = CanonicalSessionName(sessionName)
 	debuglog.Logf("statestore.RemoveWindow: session=%q window=%q path=%s", sessionName, windowName, Path())
 	return withWriteLock(Path(), func() error {
 		s, err := Load()
@@ -507,6 +534,7 @@ func RenameWindow(sessionName, oldName, newName string) error {
 	if oldName == newName {
 		return nil
 	}
+	sessionName = CanonicalSessionName(sessionName)
 	return withWriteLock(Path(), func() error {
 		s, err := Load()
 		if err != nil {
@@ -537,6 +565,7 @@ func (s *State) FindWindow(sessionName, windowName string) *Window {
 	if s == nil {
 		return nil
 	}
+	sessionName = CanonicalSessionName(sessionName)
 	for i := range s.Workspaces {
 		ws := &s.Workspaces[i]
 		if ws.SessionName != sessionName {
@@ -552,6 +581,7 @@ func (s *State) FindWindow(sessionName, windowName string) *Window {
 }
 
 func findOrAppendWorkspace(s *State, sessionName string) *Workspace {
+	sessionName = CanonicalSessionName(sessionName)
 	for i := range s.Workspaces {
 		if s.Workspaces[i].SessionName == sessionName {
 			return &s.Workspaces[i]

@@ -214,7 +214,7 @@ func OpenDefaultBranch(
 // Filesystem paths and display strings must keep the raw name — only the
 // tmux/statestore identity is normalized.
 func SessionName(name string) string {
-	return strings.NewReplacer(".", "_", ":", "_").Replace(name)
+	return statestore.CanonicalSessionName(name)
 }
 
 // EnsureSession creates the workspace's tmux session if absent. The

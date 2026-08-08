@@ -366,3 +366,80 @@ func TestPath_FixedAndEnvIndependent(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalSessionName(t *testing.T) {
+	cases := map[string]string{
+		"vyrwu/cloudnativedenmark.dk": "vyrwu/cloudnativedenmark_dk",
+		"owner/repo:tag":              "owner/repo_tag",
+		"vyrwu/atelier":               "vyrwu/atelier", // no delimiters, unchanged
+		"owner/repo_dk":               "owner/repo_dk", // already mangled, idempotent
+		"":                            "",
+	}
+	for in, want := range cases {
+		if got := CanonicalSessionName(in); got != want {
+			t.Errorf("CanonicalSessionName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Regression (fix/stale-sessions-after-restart): a workspace persisted
+// under a raw slug containing '.' ("owner/repo.dk") must be deletable
+// via the mangled name tmux and the pickers actually pass back
+// ("owner/repo_dk"). Before statestore canonicalized its keys, the raw
+// stored key never equalled the mangled lookup key, so RemoveWindow /
+// RemoveSession silently no-op'd and the entry resurrected on restart.
+func TestRemoveWindow_MangledKeyMatchesDottedSlug(t *testing.T) {
+	setupCacheDir(t)
+	_ = Save(&State{Workspaces: []Workspace{
+		{SessionName: "vyrwu/cloudnativedenmark.dk", RepoPath: "/r", Kind: "worktree",
+			Windows: []Window{{Name: "feat/x"}}},
+	}})
+	if err := RemoveWindow("vyrwu/cloudnativedenmark_dk", "feat/x"); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := Load()
+	if s != nil && len(s.Workspaces) != 0 {
+		t.Errorf("dotted-slug workspace not removed by mangled key: %+v", s.Workspaces)
+	}
+}
+
+func TestRemoveSession_MangledKeyMatchesDottedSlug(t *testing.T) {
+	setupCacheDir(t)
+	_ = Save(&State{Workspaces: []Workspace{
+		{SessionName: "vyrwu/cloudnativedenmark.dk", RepoPath: "/r", Kind: "worktree",
+			Windows: []Window{{Name: "feat/x"}}},
+		{SessionName: "vyrwu/atelier", RepoPath: "/r2", Kind: "worktree",
+			Windows: []Window{{Name: "main"}}},
+	}})
+	if err := RemoveSession("vyrwu/cloudnativedenmark_dk"); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := Load()
+	if len(s.Workspaces) != 1 || s.Workspaces[0].SessionName != "vyrwu/atelier" {
+		t.Errorf("dotted-slug session not removed by mangled key: %+v", s.Workspaces)
+	}
+}
+
+// Load canonicalizes legacy dotted/colon keys in place so a cache
+// written by an older path self-heals on the next read+save.
+func TestLoad_CanonicalizesLegacySessionNames(t *testing.T) {
+	path := setupCacheDir(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"schema_version":2,"last_active_session":"vyrwu/cloudnativedenmark.dk","workspaces":[` +
+		`{"session_name":"vyrwu/cloudnativedenmark.dk","repo_path":"/r","kind":"worktree","windows":[{"name":"feat/x"}]}]}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Workspaces[0].SessionName; got != "vyrwu/cloudnativedenmark_dk" {
+		t.Errorf("session name not canonicalized on load: %q", got)
+	}
+	if s.LastActiveSession != "vyrwu/cloudnativedenmark_dk" {
+		t.Errorf("last_active not canonicalized on load: %q", s.LastActiveSession)
+	}
+}
