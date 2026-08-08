@@ -27,9 +27,9 @@ atelier                            # boot the bundled tmux runtime (default)
 atelier workspace list|info|create|switch|delete   # workspace primitive
 atelier tools list                 # list registered tools + their capabilities
 atelier tools <name> <action>      # e.g. atelier tools k8s open
-atelier ai open | set-prompt | on-stop     # drive the configured AI integration
-atelier status freshness ... | attention count     # status-line emitters
-atelier state show [--json]        # live topology + invariant report (introspection)
+atelier ai open | set-prompt | recap        # drive the configured AI integration
+atelier status freshness … | attention count | forge …   # status-line emitters
+atelier state show [--json] | sync | restore   # topology + invariant report / cache ops
 atelier reconcile [--fix]          # report (default) / repair invariant violations
 atelier init [--bare]              # generate the tmux.conf snippet
 atelier doctor                     # verify tmux, fzf, tools, requirements
@@ -127,7 +127,8 @@ bounded provider, never a driver. The kernel pulls; integrations don't
 push into open slots.
 
 - `AIIntegration` — the agent that inhabits a workspace: open-in-popup,
-  branch naming, on-stop attention + summary. Adapters:
+  branch naming, and pull-based recap + attention verdict (`RefreshRecap`
+  re-reads the transcript; there is no stop-hook). Adapters:
   `internal/adapters/claude` (default), `mock` (tests/dev). A
   codex/gemini adapter would implement the same port.
 - `ForgeIntegration` — per-workspace code-forge status → the picker
@@ -192,34 +193,43 @@ exercise with zero Claude, zero network.
 
 ```
 atelier/
-├── cmd/atelier/             # the single binary: cobra root + tools dispatcher
+├── cmd/atelier/             # the single binary: cobra root + composition root (integrations.go)
 ├── internal/
+│   ├── cli/                 # cobra command tree (ai, state, reconcile, status, popup, server, …)
 │   ├── integration/         # KERNEL PORTS: AIIntegration, ForgeIntegration, active Set
 │   ├── adapters/            # ADAPTERS (imported only by cmd/atelier):
-│   │   ├── claude/          #   AIIntegration (default AI agent)
-│   │   ├── github/          #   ForgeIntegration (PR badge)
-│   │   └── mock/            #   AIIntegration (deterministic; tests/dev)
-│   ├── plugin/              # tool registry: RegisterBuiltin, Discover, launchers
-│   ├── manifest/            # Manifest type (in-tree literal / synthesized)
+│   │   ├── claude/          #   AIIntegration (default AI agent; pull-based recap/attention)
+│   │   ├── github/          #   ForgeIntegration (PR badge via gh)
+│   │   └── mock/            #   AIIntegration + ForgeIntegration (deterministic; tests/sandbox)
+│   ├── plugin/              # tool registry: RegisterBuiltin, Discover, launcher specs
+│   ├── manifest/            # Manifest type (in-tree literal / synthesized from [tools.*])
 │   ├── toolmain/            # in-process tool dispatch (cancel/error → exit code)
-│   ├── workspace/           # workspace-lifecycle primitive (kernel)
+│   ├── workspace/           # workspace-lifecycle primitive + option-key constants (kernel)
 │   ├── popup/               # popup-lifecycle primitive (kernel)
-│   ├── statestore/          # persisted state (kernel)
-│   ├── initgen/             # `atelier init` binding/hook/statusline generation
-│   ├── tmuxhost/            # tmux invocation abstraction (testable)
-│   ├── config/              # TOML loader
+│   ├── host/popup/          # host-facing popup helpers used by the kernel
+│   ├── state/               # live tmux topology + invariants (derive-and-validate; reconcile)
+│   ├── statestore/          # persisted disk cache (~/.cache/atelier/state.json) + rehydrate
+│   ├── initgen/             # `atelier init` binding/hook/statusline/theme generation
+│   ├── tmuxhost/            # sole tmux shell-out layer (testable)
+│   ├── awsassume/           # `granted assume` shell-function wrapper (aws tool)
+│   ├── config/              # TOML loader + path expansion
+│   ├── dispatch/            # shell-string builders for `atelier tools …` dispatch
+│   ├── fzf/ + fzfstyle/     # fzf invocation/parsing + shared picker styling
+│   ├── spinner/             # progress-indicator popup UI
+│   ├── seed/scenarios/      # scenario YAML → real repos/worktrees/state (sandbox + e2e)
+│   ├── perf/ + debuglog/    # perf instrumentation + ~/.cache/atelier/debug.log
+│   ├── testtmux/            # isolated tmux-server fixtures for e2e tests
 │   └── tools/               # kernel views + built-in logic-carrying tools
 │       ├── all/             # registers every built-in tool (blank-imported by main)
-│       ├── workspaces/      # kernel view: creator/selector/history + forge-badge slot
+│       ├── workspaces/      # kernel view: creator/selector/history + forge badge + refresh loop
 │       ├── toolselector/    # kernel view: M-; tool picker
-│       ├── k8s/             # built-in tool: k9s context+auth picker
-│       ├── pg/              # built-in tool: pgcli picker
-│       └── ...
-├── flake.nix
-├── go.mod
-├── Makefile
-├── .golangci.yml
-└── .github/workflows/ci.yml
+│       ├── k8s/             # built-in tool: k9s context picker (requires k9s)
+│       ├── pg/              # built-in tool: pgcli context picker (requires pgcli)
+│       └── aws/             # built-in tool: granted-assume profile picker (requires granted)
+├── sandbox/                 # ephemeral seeded demo runtime (package main, not shipped)
+├── examples/tmux/           # reference embeddings (minimal / powerline / vyrwu)
+├── flake.nix · go.mod · Makefile · .golangci.yml
+└── .github/workflows/       # ci.yml, release.yml, release-please.yml
 ```
 
 ## Engine ⇄ tmux split
@@ -272,7 +282,7 @@ load-bearing details.
 
 ## Window management belongs to the workspace primitive
 
-**Rule:** tools MUST NOT call `tmux switch-client`, `select-window`, `new-window`, `new-session`, or stamp workspace metadata (`@claude_*`, `@repo_path`, `@attention_*`) directly. They go through `internal/workspace`.
+**Rule:** tools MUST NOT call `tmux switch-client`, `select-window`, `new-window`, `new-session`, or stamp workspace metadata (`@ai_*`, `@repo_path`, `@attention_*`, `@agent_status`) directly. They go through `internal/workspace`.
 
 **Why:** every tool that opens or transitions to a workspace hits the same set of edge cases — picking the right outer client, ordering select-window before switch-client, killing auto-created default-branch windows, propagating `@atelier_outer_client` through popup-pty chains. When this logic is inlined per-tool, a fix in one place leaves the same bug latent in every other tool. When it lives in the primitive, a fix lands once.
 
@@ -293,18 +303,20 @@ A built-in tool contributes two symbols and one registration line:
 ```go
 // internal/tools/<name>/register.go
 var Manifest = &manifest.Manifest{
-    Name:     "claude",
-    Popup:    manifest.KindWorkspace,      // launch shape: workspace | global | none
-    Binding:  &manifest.Binding{Key: "...", Style: manifest.StyleFull, Invoke: "open"},
-    Requires: []string{"claude"},          // doctor checks these on PATH
-    Provides: []capability.Kind{capability.Attention, capability.Summary},
-    // Badge *Badge, UI *UI, PickerBindings ..., Tool bool
+    Name:          "k8s",
+    Description:   "k9s context picker",
+    Popup:         manifest.KindGlobal,   // launch shape: workspace | global | none
+    PrimaryInvoke: "open",
+    Binding:       &manifest.Binding{Key: "…", Style: manifest.StyleFull, Invoke: "open"},
+    Requires:      []string{"k9s"},       // doctor checks these on PATH
+    Tool:          true,                   // appears in the M-; selector
+    // also: Bindings, UI, PickerBindings
 }
 
 func AddCommands(root *cobra.Command) { root.AddCommand(OpenCommand(), ...) }
 
 // internal/tools/all/all.go
-plugin.RegisterBuiltin(claude.Manifest, claude.AddCommands)
+plugin.RegisterBuiltin(k8s.Manifest, k8s.AddCommands)
 ```
 
 The manifest is a compile-time Go literal (built-ins) or synthesized
@@ -312,13 +324,15 @@ from a `[tools.*]` block (launchers) — never marshalled across a
 subprocess boundary. `Popup` classifies the backing-session lifecycle:
 
 - **workspace** — popup session per parent window; dies when the window
-  dies (Claude, popup shell, lazygit)
+  dies (the AI agent, popup shell, lazygit)
 - **global** — singleton backing session across all workspaces (k9s,
   pgcli)
 - **none** — no persistent popup (pickers, providers)
 
-`Provides` declares capability slots the tool fills beyond the ones
-derived from `Popup`/`Badge`. See [capabilities](#capabilities).
+Presentation *capabilities* — the AI summary/attention, the forge badge —
+are NOT declared on a manifest. They are kernel ports filled by swappable
+integration adapters (see the kernel/integration split above), so a tool's
+manifest carries only how it binds, its popup shape, and what it requires.
 
 ## Non-goals
 
