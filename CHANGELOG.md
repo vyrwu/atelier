@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/vyrwu/atelier/compare/v0.5.2...v0.6.0) (2026-08-08)
+
+
+### Features
+
+* **state:** kernelize tmux state — one model, invariants, reconcile ([#80](https://github.com/vyrwu/atelier/issues/80)) ([bbaa039](https://github.com/vyrwu/atelier/commit/bbaa039f74fb383cf68bd7a3c2cbfdf7a3c268ef))
+
 ## [0.5.2](https://github.com/vyrwu/atelier/compare/v0.5.1...v0.5.2) (2026-08-03)
 
 
