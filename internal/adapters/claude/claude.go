@@ -12,7 +12,10 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -171,16 +174,24 @@ func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (str
 // windowID from the agent's latest session transcript under cwd (the worktree),
 // then writes both via the kernel verbs SetRecap / SetAgentStatus.
 //
-// The 3-state agent status is driven primarily by TRANSCRIPT PROGRESSION, not
-// the model — "running" is nearly impossible to infer from a static JSONL
-// snapshot (it logs completed events, not mid-execution), so the reliable
-// signal is: is the transcript still being written? The haiku pass only decides
-// the one thing it CAN see — whether the agent is blocked waiting on the user
-// (asked a question / needs a decision):
+// The 3-state agent status comes from two signals, not just "did the transcript
+// grow". Growth alone is a trap: an agent finishing its turn and handing results
+// back to the user is ALSO a write, so treating every write as "running" pins an
+// idle/waiting workspace to the blue dot forever. Instead:
 //
-//   - progressed since last stamp  → blocked (haiku) else running
-//   - no new content, still active (wrote within runningWindow) → running
-//   - no new content, gone quiet   → idle
+//   - running: the transcript tail shows a tool IN FLIGHT (a dispatched
+//     tool_use with no result yet, or a tool_result the agent hasn't replied
+//     to). This is deterministic — the shape of the last event, gated on
+//     recency so a frozen mid-tool state from a dead process doesn't linger.
+//   - blocked/idle: when no tool is in flight the turn has been handed back, so
+//     the haiku verdict decides — blocked = waiting on the user (asked a
+//     question / needs a decision), idle = finished cleanly or delegated.
+//
+// So:
+//   - tool in flight (any tick)     → running
+//   - progressed, turn handed back  → haiku verdict (blocked | idle)
+//   - no new content, blocked+unseen → stays blocked until the user visits
+//   - no new content, otherwise      → idle
 //
 // It is a PULL — the refresh loop calls it every tick; the haiku call is
 // throttled to actual progression, so a quiet workspace only re-evaluates the
@@ -200,6 +211,11 @@ func (Adapter) RefreshRecap(h *tmuxhost.Client, windowID, cwd string) error {
 	}
 	mtime := fi.ModTime().Unix()
 	active := time.Now().Unix()-mtime < int64(runningWindow.Seconds())
+	// Deterministic "running": the tail shows a tool in flight. A completed turn
+	// ends with an assistant text block; a trailing tool_use/tool_result (or
+	// thinking) means work is still going. Gated on recency so a mid-tool state
+	// frozen by a dead process settles to idle instead of reading as running.
+	working := active && agentActivelyWorking(transcript)
 
 	progressed := true
 	if prev, _ := h.GetWindowOption(windowID, workspace.OptRecapTs); strings.TrimSpace(prev) != "" {
@@ -209,19 +225,24 @@ func (Adapter) RefreshRecap(h *tmuxhost.Client, windowID, cwd string) error {
 	}
 
 	if !progressed {
-		// No new transcript content since the last summary — don't spend a model
-		// call, but DO update running↔idle from activity. A workspace already
-		// flagged blocked stays blocked until the user visits (after-select-window
-		// clears @needs_attention); re-setting here would re-raise it, so leave it.
+		// No new transcript content since the last summary — skip the model call.
+		// A tool in flight is running; otherwise a workspace already flagged
+		// blocked stays blocked until the user visits (after-select-window clears
+		// @needs_attention — re-setting here would re-raise it); anything else has
+		// handed its turn back and is idle.
+		if working {
+			return setAgentStatusIfChanged(h, windowID, workspace.AgentRunning)
+		}
 		if att, _ := h.GetWindowOption(windowID, workspace.OptAttention); strings.TrimSpace(att) == "1" {
 			return nil
 		}
-		return setAgentStatusIfChanged(h, windowID, activityStatus(active))
+		return setAgentStatusIfChanged(h, windowID, workspace.AgentIdle)
 	}
 
-	// Progressed → the agent just wrote something (it is active). Re-summarize
-	// and classify: a question to the user is blocked; anything else that's
-	// actively progressing is running.
+	// Progressed → re-summarize and classify. Trust the haiku 3-way verdict for
+	// the handoff case: a turn that merely wrote its results back to the user is
+	// NOT running just because it wrote — that write IS the handoff. Only a tool
+	// in flight (deterministic) forces running over the verdict.
 	cfg, _ := LoadConfig()
 	input := buildRecapInput(dumpTranscript(transcript), worktreeDelta(cwd))
 	if input == "" {
@@ -243,19 +264,88 @@ func (Adapter) RefreshRecap(h *tmuxhost.Client, windowID, cwd string) error {
 			return err
 		}
 	}
-	status := workspace.AgentRunning
-	if verdict == workspace.AgentBlocked {
-		status = workspace.AgentBlocked
+	status := verdict
+	if working {
+		status = workspace.AgentRunning
 	}
 	return workspace.SetAgentStatus(h, windowID, status)
 }
 
-// activityStatus maps "did the agent write recently" to running vs idle.
-func activityStatus(active bool) string {
-	if active {
-		return workspace.AgentRunning
+// agentActivelyWorking reports whether the transcript tail shows the agent
+// mid-execution rather than a turn handed back to the user. It scans from the
+// newest event: an assistant message whose last content block is a tool_use (or
+// thinking) is work in flight; a user tool_result is a finished tool the agent
+// hasn't yet replied to (still working); an assistant message ending in text is
+// a completed turn (not working); a plain human message is not the agent
+// working. The model can't see mid-execution in a static snapshot — the shape
+// of the last event can. Best-effort: any parse trouble yields false.
+func agentActivelyWorking(transcriptPath string) bool {
+	for _, line := range lastTranscriptLines(transcriptPath, 40) {
+		var e struct {
+			Message struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(line), &e) != nil {
+			continue
+		}
+		switch e.Message.Role {
+		case "assistant":
+			var blocks []struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(e.Message.Content, &blocks) == nil && len(blocks) > 0 {
+				return blocks[len(blocks)-1].Type != "text"
+			}
+			return true
+		case "user":
+			var blocks []struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(e.Message.Content, &blocks) == nil {
+				for _, b := range blocks {
+					if b.Type == "tool_result" {
+						return true // tool finished, agent's reply pending
+					}
+				}
+			}
+			return false // plain human message → the agent isn't working
+		}
 	}
-	return workspace.AgentIdle
+	return false
+}
+
+// lastTranscriptLines returns up to n newest non-empty lines of a JSONL
+// transcript, newest first, reading only a trailing window so a multi-MB file
+// stays cheap to poll every tick. Nil on any read error.
+func lastTranscriptLines(path string, n int) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil
+	}
+	const window = 128 << 10
+	off := int64(0)
+	if fi.Size() > window {
+		off = fi.Size() - window
+	}
+	buf := make([]byte, fi.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && !errors.Is(err, io.EOF) {
+		return nil
+	}
+	raw := strings.Split(strings.TrimRight(string(buf), "\n"), "\n")
+	out := make([]string, 0, n)
+	for i := len(raw) - 1; i >= 0 && len(out) < n; i-- {
+		if s := strings.TrimSpace(raw[i]); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // setAgentStatusIfChanged writes the status only when it actually differs from
