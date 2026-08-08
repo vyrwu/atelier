@@ -11,6 +11,7 @@ import (
 
 	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/integration"
+	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
@@ -434,35 +435,15 @@ func LandOuter(h *tmuxhost.Client, sessionTarget, windowTarget string) error {
 // load-bearing action; stale globals are a soft regression that the
 // next M-; / M-n / M-s press would correct anyway.
 func restampOuterGlobals(h *tmuxhost.Client, sessionTarget, windowTarget string) {
-	sessionRef := stripEqualsPrefix(sessionTarget)
-	windowRef := windowTarget
-	if windowRef == "" {
-		windowRef = sessionRef
-	} else {
-		windowRef = stripEqualsPrefix(windowRef)
-	}
-	sid, err := h.DisplayMessageAt(sessionRef, "#{session_id}")
-	if err != nil || strings.TrimSpace(sid) == "" {
-		debuglog.LogErr("LandOuter restamp: session_id", err)
+	// The write-time guard lives in state.SetOuter: it refuses to stamp the
+	// launcher or a popup as the outer workspace (the "weird default shell"
+	// bug). Best-effort — a refused or failed stamp is a soft regression the
+	// switch itself already survived; log and move on.
+	if err := state.SetOuter(h, sessionTarget, windowTarget); err != nil {
+		debuglog.LogErr("LandOuter restamp", err)
 		return
 	}
-	wid, err := h.DisplayMessageAt(windowRef, "#{window_id}")
-	if err != nil || strings.TrimSpace(wid) == "" {
-		debuglog.LogErr("LandOuter restamp: window_id", err)
-		return
-	}
-	pid, err := h.DisplayMessageAt(windowRef, "#{pane_id}")
-	if err != nil || strings.TrimSpace(pid) == "" {
-		debuglog.LogErr("LandOuter restamp: pane_id", err)
-		return
-	}
-	sid = strings.TrimSpace(sid)
-	wid = strings.TrimSpace(wid)
-	pid = strings.TrimSpace(pid)
-	_ = h.SetGlobalOption("@atelier_outer_session", sid)
-	_ = h.SetGlobalOption("@atelier_outer_window", wid)
-	_ = h.SetGlobalOption("@atelier_outer_pane", pid)
-	debuglog.Logf("LandOuter restamp: session=%s window=%s pane=%s", sid, wid, pid)
+	debuglog.Logf("LandOuter restamp: session=%s window=%s", sessionTarget, windowTarget)
 }
 
 // detachStalePopups closes popup overlays whose backing session is
@@ -546,7 +527,7 @@ func resolveSidWidDigits(h *tmuxhost.Client, sessionTarget, windowTarget string)
 	if err != nil || wid == "" {
 		return ""
 	}
-	return digitsOnly(sid) + "_" + digitsOnly(wid)
+	return state.Digits(sid) + "_" + state.Digits(wid)
 }
 
 func stripEqualsPrefix(s string) string {
@@ -554,16 +535,6 @@ func stripEqualsPrefix(s string) string {
 		return s[1:]
 	}
 	return s
-}
-
-func digitsOnly(s string) string {
-	out := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] >= '0' && s[i] <= '9' {
-			out = append(out, s[i])
-		}
-	}
-	return string(out)
 }
 
 // lastWindowIndex returns the highest window index in `session`.

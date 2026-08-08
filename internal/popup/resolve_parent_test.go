@@ -85,6 +85,8 @@ func TestResolveParentContext_GlobalFallback(t *testing.T) {
 			"@atelier_outer_pane":    "%7",
 		},
 		displayMsgAt: map[string]string{
+			// OuterHint validates the stored session resolves to a workspace.
+			"$5|#{session_name}":      "vyrwu/atelier",
 			"%7|#{pane_current_path}": "/projects/foo",
 		},
 	}
@@ -162,7 +164,13 @@ func TestResolveParentContext_SigilRestored(t *testing.T) {
 // passes one but not the other (defensive).
 func TestResolveParentContext_PartialEnv(t *testing.T) {
 	h := &fakeClient{
-		globals: map[string]string{"@atelier_outer_window": "@42"},
+		globals: map[string]string{
+			"@atelier_outer_session": "$5",
+			"@atelier_outer_window":  "@42",
+		},
+		// The stored outer must validate as a workspace for its window to fill
+		// the env-missing field.
+		displayMsgAt: map[string]string{"$5|#{session_name}": "vyrwu/atelier"},
 	}
 	env := envFn(map[string]string{"TMUX_PARENT_SESSION_ID": "$1"})
 	got, err := resolveParentContext(h, env)
@@ -171,5 +179,33 @@ func TestResolveParentContext_PartialEnv(t *testing.T) {
 	}
 	if got.SessionID != "$1" || got.WindowID != "@42" {
 		t.Errorf("mixed env+global: got %+v", got)
+	}
+}
+
+// TestResolveParentContext_LauncherGlobalIgnored is the read-side guard: when
+// the stored @atelier_outer_* points at the launcher (the raw M-; binding
+// stamped it while on the default session), OuterHint rejects it and the
+// resolver falls through to the current pane — the popup opens against the
+// real current workspace, not the launcher (the "weird default shell" bug on
+// the popup-parent path).
+func TestResolveParentContext_LauncherGlobalIgnored(t *testing.T) {
+	h := &fakeClient{
+		globals: map[string]string{
+			"@atelier_outer_session": "$0",
+			"@atelier_outer_window":  "@0",
+			"@atelier_outer_pane":    "%0",
+		},
+		displayMsgAt: map[string]string{"$0|#{session_name}": "default"}, // launcher
+		displayMsg: map[string]string{
+			"#{session_id}": "$9", // current pane
+			"#{window_id}":  "@9",
+		},
+	}
+	got, err := resolveParentContext(h, envFn(nil))
+	if err != nil {
+		t.Fatalf("resolveParentContext: %v", err)
+	}
+	if got.SessionID != "$9" || got.WindowID != "@9" {
+		t.Errorf("launcher global must be ignored, fall through to current pane: got %+v", got)
 	}
 }

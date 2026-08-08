@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
+	"github.com/vyrwu/atelier/internal/state"
 )
 
 // SessionPrefix is the common prefix for every atelier-managed popup
@@ -118,11 +119,28 @@ func resolveParentContext(h Client, getenv func(string) string) (ParentContext, 
 		WindowID:  getenv("TMUX_PARENT_WINDOW_ID"),
 	}
 
-	if ctx.SessionID == "" {
-		ctx.SessionID, _ = h.ShowGlobalOption("@atelier_outer_session")
-	}
-	if ctx.WindowID == "" {
-		ctx.WindowID, _ = h.ShowGlobalOption("@atelier_outer_window")
+	ctx.Cwd = getenv("TMUX_PARENT_PANE_PWD")
+
+	// Globals tier: use the stored @atelier_outer_* pointer only if it still
+	// validates to a live workspace. state.OuterHint rejects a stale, launcher,
+	// or popup stamp (the M-; root binding stamps whatever session it fired
+	// from — a raw hint, not authority), so a poisoned pointer falls through to
+	// the current-pane tier below instead of opening the popup against the
+	// wrong parent/cwd. Env vars still win; we only consult the hint — and pay
+	// its tmux round-trip — when env left a field empty, so the common
+	// fully-env-pinned popup-open path touches no globals.
+	if ctx.SessionID == "" || ctx.WindowID == "" || ctx.Cwd == "" {
+		if hintSession, hintWindow, hintPane, hintOK := state.OuterHint(h); hintOK {
+			if ctx.SessionID == "" {
+				ctx.SessionID = hintSession
+			}
+			if ctx.WindowID == "" {
+				ctx.WindowID = hintWindow
+			}
+			if ctx.Cwd == "" && hintPane != "" {
+				ctx.Cwd, _ = h.DisplayMessageAt(hintPane, "#{pane_current_path}")
+			}
+		}
 	}
 
 	if ctx.SessionID == "" {
@@ -142,13 +160,6 @@ func resolveParentContext(h Client, getenv func(string) string) (ParentContext, 
 
 	ctx.SessionID = ensureSigil(ctx.SessionID, "$")
 	ctx.WindowID = ensureSigil(ctx.WindowID, "@")
-
-	ctx.Cwd = getenv("TMUX_PARENT_PANE_PWD")
-	if ctx.Cwd == "" {
-		if outer, _ := h.ShowGlobalOption("@atelier_outer_pane"); outer != "" {
-			ctx.Cwd, _ = h.DisplayMessageAt(outer, "#{pane_current_path}")
-		}
-	}
 
 	return ctx, nil
 }
@@ -172,7 +183,7 @@ type WorkspaceScoped struct {
 // and the given parent IDs.
 func (w *WorkspaceScoped) SessionName(parentSessionID, parentWindowID string) string {
 	return fmt.Sprintf("%s_%s_%s_%s", SessionPrefix, w.Tool,
-		digits(parentSessionID), digits(parentWindowID))
+		state.Digits(parentSessionID), state.Digits(parentWindowID))
 }
 
 // Ensure creates the backing session if absent. Idempotent. Does not attach.
@@ -319,14 +330,4 @@ func (s *SessionGlobal) Respawn(h Client, shellCmd string) error {
 		cmd = "$SHELL"
 	}
 	return h.NewSessionWithCommand(name, cmd)
-}
-
-func digits(s string) string {
-	out := make([]rune, 0, len(s))
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			out = append(out, r)
-		}
-	}
-	return string(out)
 }

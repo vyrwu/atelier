@@ -29,11 +29,46 @@ atelier tools list                 # list registered tools + their capabilities
 atelier tools <name> <action>      # e.g. atelier tools k8s open
 atelier ai open | set-prompt | on-stop     # drive the configured AI integration
 atelier status freshness ... | attention count     # status-line emitters
+atelier state show [--json]        # live topology + invariant report (introspection)
+atelier reconcile [--fix]          # report (default) / repair invariant violations
 atelier init [--bare]              # generate the tmux.conf snippet
 atelier doctor                     # verify tmux, fzf, tools, requirements
 ```
 
 Plain English. Metaphor lives at the binary name only; not in the API.
+
+### State model & recovery
+
+`internal/state` owns one validated model of atelier's tmux entity graph —
+sessions (repos), windows (workspaces), popups (tools), clients, the launcher,
+and the outer-focus pointer — captured from a single tmux read. The model is
+**derive-and-validate, not cache-and-trust**: persisted tmux options are a
+hint, re-derived when stale. Two commands expose it:
+
+- `atelier state show [--json]` — one-shot topology + invariant report.
+  Read-only. Replaces the `tmux list-*/show-*` archaeology a wedged state used
+  to require.
+- `atelier reconcile` — reports invariant violations (dry run). `--fix`
+  repairs the **fixable** ones. It operates only on live tmux; the persisted
+  cache is reconciled separately by `atelier state sync`.
+
+Violations split into two classes, and this distinction is load-bearing for
+what `--fix` will and won't do:
+
+| Class | Violations | `--fix` behavior |
+|---|---|---|
+| **Fixable** | orphan popup, outer-on-launcher/popup/stale, detached outer-client hint, client-moving hook armed at rest, attention stranded on a **popup** window | auto-repaired (kill / clear / disarm) |
+| **Report-only** | attention on a non-listable **workspace** window, working-dir-gone, >1 workspace client per tty | surfaced only — the fix is a human action |
+
+(Attention *misrouted onto a popup-backing window* is fixable — a popup must never carry it and the rollup ignores popups, so clearing is safe. Attention on a real-but-non-listable workspace window is report-only, since it might be a genuine signal on a workspace that lost its metadata.)
+
+**`reconcile` is not for clearing the attention badge.** Attention on a
+*listable* workspace (`⏺`) is a legitimate per-workspace signal — an agent
+finished and you haven't looked — not a fault. It clears when you visit the
+workspace (the `after-select-window` hook). Only attention on a *popup or
+non-listable* window is a violation (`misrouted_attention`), and that is
+report-only. So a healthy server with pending attention correctly reports
+"no violations".
 
 ## Architecture — kernel (ports) + integrations (adapters) + launchers
 

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
@@ -257,7 +258,7 @@ func SetRecap(h *tmuxhost.Client, windowID, recap string) error {
 // already read; this package stays agnostic of the adapter-owned
 // `@ai_workspace_kind` option name.
 func Listable(repoPath, aiWorkspaceKind string) bool {
-	return repoPath != "" || aiWorkspaceKind != ""
+	return state.Listable(repoPath, aiWorkspaceKind)
 }
 
 // SetTag assigns (or clears, when tag == "") the workspace tag on

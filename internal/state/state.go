@@ -30,6 +30,11 @@ const (
 	OptOuterPane    = "@atelier_outer_pane"
 	OptOuterSession = "@atelier_outer_session"
 	OptOuterWindow  = "@atelier_outer_window"
+	// OptOuterClient is the client-name of whoever pressed M-; / M-n / M-s.
+	// The tmux root binding stamps it raw (a hint); the outer-pointer
+	// contract validates it on read. Grouped with its siblings as the one
+	// home for the outer-* tracking option names.
+	OptOuterClient = "@atelier_outer_client"
 
 	// SessionNamePrefix is the prefix every atelier-managed popup session
 	// starts with. Anything else is treated as a regular workspace session.
@@ -78,11 +83,13 @@ func Capture(h *tmuxhost.Client) (*State, error) {
 		s.PopupTool = extractTool(s.CurrentName)
 	}
 
-	s.OuterPane, _ = h.ShowGlobalOption(OptOuterPane)
-	s.OuterSession, _ = h.ShowGlobalOption(OptOuterSession)
-	s.OuterWindow, _ = h.ShowGlobalOption(OptOuterWindow)
+	// Read the outer pointer through the validated hint: a stored pointer
+	// that no longer resolves to a live workspace (stale, or the launcher/a
+	// popup the raw M-; binding happened to stamp) is treated as absent, so
+	// we derive from the current pane instead of trusting a poisoned value.
+	s.OuterSession, s.OuterWindow, s.OuterPane, _ = OuterHint(h)
 
-	// If no popup chain is active, the current pane IS the outer.
+	// No valid outer pointer → the current pane IS the outer.
 	if s.OuterPane == "" {
 		s.OuterPane = s.CurrentPane
 		s.OuterSession = s.CurrentSession
@@ -115,8 +122,9 @@ func MarkChainStart(h *tmuxhost.Client, s *State) error {
 }
 
 // ClearChain wipes the global outer-pane tracking options. Called when the
-// last popup in a chain closes (via `atelier popup cleanup` or hook).
-func ClearChain(h *tmuxhost.Client) error {
+// last popup in a chain closes (via SweepOrphanPopups / hook) or when
+// Reconcile drops a bad outer pointer.
+func ClearChain(h Host) error {
 	_ = h.UnsetGlobalOption(OptOuterPane)
 	_ = h.UnsetGlobalOption(OptOuterSession)
 	_ = h.UnsetGlobalOption(OptOuterWindow)

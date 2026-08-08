@@ -69,6 +69,7 @@ Subcommands expose the engine for power users:
 	root.AddCommand(cli.PopupCommand())
 	root.AddCommand(cli.StatusCommand())
 	root.AddCommand(cli.StateCommand())
+	root.AddCommand(cli.ReconcileCommand())
 	root.AddCommand(cli.ServerCommand())
 	root.AddCommand(cli.InternalCommand())
 	root.AddCommand(cli.DebugCommand())

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
+	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
 
@@ -132,9 +133,7 @@ func serverGCCmd() *cobra.Command {
 func countPopupSessions(sessions []string) int {
 	n := 0
 	for _, s := range sessions {
-		if strings.HasPrefix(s, "_atelier_") || strings.HasPrefix(s, "_claudepop_") ||
-			strings.HasPrefix(s, "_popup_") || strings.HasPrefix(s, "_k8spop_") ||
-			strings.HasPrefix(s, "_awspop_") || strings.HasPrefix(s, "_lazygitpop_") {
+		if state.IsPopupSession(s) {
 			n++
 		}
 	}

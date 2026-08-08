@@ -80,7 +80,15 @@ func PickCommand() *cobra.Command {
 // `tmux_aws_picker` bash script).
 func resolveCallerPane(h *tmuxhost.Client) string {
 	if s, err := state.Capture(h); err == nil && s.OuterPane != "" {
-		return s.OuterPane
+		// Guard the respawn target: when Capture can't validate the outer
+		// pointer it falls back OuterPane = CurrentPane. Inside the aws popup
+		// that current pane IS the picker's own pane, so respawning it with
+		// -k would kill the picker and run `assume` in the ephemeral popup
+		// (creds lost). Only trust OuterPane as a caller pane when it's a real
+		// outer, not the popup we're running in.
+		if !s.InPopup || s.OuterPane != s.CurrentPane {
+			return s.OuterPane
+		}
 	}
 	out, err := h.Run("show-environment", "-g", "_CALLER_PANE")
 	if err != nil {

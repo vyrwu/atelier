@@ -25,6 +25,7 @@ func StateCommand() *cobra.Command {
 		Short: "Atelier runtime + persisted state operations",
 	}
 	c.AddCommand(runtimeStateDebugCmd())
+	c.AddCommand(stateShowCmd())
 	c.AddCommand(stateRestoreCmd())
 	c.AddCommand(stateSaveCmd())
 	c.AddCommand(stateSyncCmd())

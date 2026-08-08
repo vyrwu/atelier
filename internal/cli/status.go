@@ -9,6 +9,7 @@ import (
 
 	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/integration"
+	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
@@ -261,11 +262,11 @@ func attentionClearPopupCmd() *cobra.Command {
 				}
 				sessionName = out
 			}
-			sid, wid, ok := parsePopupParent(sessionName)
+			info, ok := state.ParsePopup(sessionName)
 			if !ok {
 				return nil
 			}
-			windowID, ok, err := findWindowIDByDigits(h, sid, wid)
+			windowID, ok, err := findWindowIDByDigits(h, info.SidDigit, info.WidDigit)
 			if err != nil || !ok {
 				return nil
 			}
@@ -275,33 +276,6 @@ func attentionClearPopupCmd() *cobra.Command {
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	c.Flags().StringVar(&sessionName, "session", "", "session name to evaluate (default: current session)")
 	return c
-}
-
-// parsePopupParent extracts parent (sid, wid) from a popup session name.
-// Recognizes both atelier (`_atelier_<tool>_<sid>_<wid>`) and bash naming
-// (`_popup_`, `_claudepop_`, `_k8spop_`, `_awspop_`, `_lazygitpop_`).
-// Returns ok=false for session-global popups or non-popup sessions.
-func parsePopupParent(sessionName string) (sid, wid string, ok bool) {
-	if strings.HasPrefix(sessionName, "_atelier_") {
-		rest := strings.TrimPrefix(sessionName, "_atelier_")
-		parts := strings.Split(rest, "_")
-		if len(parts) < 3 {
-			return "", "", false
-		}
-		return parts[1], parts[2], true
-	}
-	for _, p := range []string{"_popup_", "_claudepop_", "_k8spop_", "_awspop_", "_lazygitpop_"} {
-		if !strings.HasPrefix(sessionName, p) {
-			continue
-		}
-		rest := strings.TrimPrefix(sessionName, p)
-		parts := strings.SplitN(rest, "_", 3)
-		if len(parts) < 2 {
-			return "", "", false
-		}
-		return parts[0], parts[1], true
-	}
-	return "", "", false
 }
 
 // findWindowIDByDigits returns the tmux window ID whose session_id /
@@ -316,7 +290,7 @@ func findWindowIDByDigits(h *tmuxhost.Client, sidDigits, widDigits string) (stri
 		if len(fields) < 2 {
 			continue
 		}
-		if digitsOf(fields[0]) == sidDigits && digitsOf(fields[1]) == widDigits {
+		if state.Digits(fields[0]) == sidDigits && state.Digits(fields[1]) == widDigits {
 			return fields[1], true, nil
 		}
 	}
@@ -352,7 +326,7 @@ func countAttentionWindows(h *tmuxhost.Client) int {
 		if attn != "1" {
 			continue
 		}
-		if isPopupSession(session) {
+		if state.IsPopupSession(session) {
 			continue
 		}
 		// Same inclusion predicate as the M-s picker (sessionlist.go): a
@@ -366,23 +340,4 @@ func countAttentionWindows(h *tmuxhost.Client) int {
 		count++
 	}
 	return count
-}
-
-func isPopupSession(name string) bool {
-	for _, p := range []string{"_atelier_", "_claudepop_", "_popup_", "_k8spop_", "_awspop_", "_lazygitpop_"} {
-		if strings.HasPrefix(name, p) {
-			return true
-		}
-	}
-	return false
-}
-
-func digitsOf(s string) string {
-	out := make([]rune, 0, len(s))
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			out = append(out, r)
-		}
-	}
-	return string(out)
 }

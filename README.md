@@ -57,6 +57,13 @@ rehydrates on tmux restart.
 - **Always-on diagnostics.** Every tmux call from every atelier process is
   logged to `~/.cache/atelier/debug.log`. `atelier doctor` reports missing
   dependencies.
+- **Introspectable, self-healing state.** atelier keeps one validated model of
+  its tmux entity graph — repos, workspaces, popups, and the outer-focus
+  pointer. `atelier state show [--json]` prints the graph plus any invariant
+  violations; `atelier reconcile` reports them, and `atelier reconcile --fix`
+  repairs the *structural* ones (orphan popups, a stranded outer pointer, a
+  leaked hook). It does **not** clear the attention badge — that's a real
+  per-workspace signal (`⏺`), cleared by visiting the workspace, not a fault.
 
 ## Installation
 
