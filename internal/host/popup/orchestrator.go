@@ -251,136 +251,36 @@ func OpenOuter(h *tmuxhost.Client, _ *state.State, shellCmd string, width, heigh
 	return OpenOnOuter(h, args, shellCmd)
 }
 
-// CleanupOrphanedPopups kills popup sessions whose parent (session, window)
-// no longer exists. Recognizes BOTH atelier (`_atelier_<tool>_<sid>_<wid>`)
-// and bash (`_popup_`, `_claudepop_`, `_k8spop_`, `_awspop_`,
-// `_lazygitpop_`) naming. Bash format encodes sid + wid as the first two
-// underscore-separated tokens (digit-only).
+// CleanupOrphanedPopups kills popup sessions whose parent window is gone and
+// clears the outer chain when none remain. Thin delegate to
+// state.SweepOrphanPopups — the kernel owns the orphan-popup taxonomy and
+// logic. This entry point survives only because the tmux hooks and the
+// `atelier popup cleanup` / `atelier server gc` CLIs call it by name.
 func CleanupOrphanedPopups(h *tmuxhost.Client) error {
-	sessions, err := h.ListSessions()
-	if err != nil {
-		return err
-	}
-	if len(sessions) == 0 {
-		return nil
-	}
-
-	windows, err := h.ListWindows()
-	if err != nil {
-		return err
-	}
-	live := make(map[string]bool, len(windows))
-	for _, line := range windows {
-		var sid, wid string
-		if _, err := fmt.Sscanf(line, "%s %s", &sid, &wid); err == nil {
-			live[digits(sid)+"_"+digits(wid)] = true
-		}
-	}
-
-	for _, name := range sessions {
-		var sid, wid string
-		var ok bool
-		switch {
-		case isAtelierPopup(name):
-			sid, wid, ok = parseWorkspaceScopedName(name)
-		case isBashPopup(name):
-			sid, wid, ok = parseBashPopupName(name)
-		default:
-			continue
-		}
-		if !ok {
-			continue
-		}
-		if !live[sid+"_"+wid] {
-			_ = h.KillSession(name)
-		}
-	}
-
-	remaining, _ := h.ListSessions()
-	stillAny := false
-	for _, n := range remaining {
-		if isAtelierPopup(n) || isBashPopup(n) {
-			stillAny = true
-			break
-		}
-	}
-	if !stillAny {
-		_ = state.ClearChain(h)
-	}
-	return nil
+	return state.SweepOrphanPopups(h)
 }
 
-var bashPopupPrefixes = []string{
-	"_popup_", "_claudepop_", "_k8spop_", "_awspop_", "_lazygitpop_",
-}
-
-func isBashPopup(name string) bool {
-	for _, p := range bashPopupPrefixes {
-		if strings.HasPrefix(name, p) {
-			return true
-		}
-	}
-	return false
-}
-
-// parseBashPopupName extracts sid+wid from a bash-style popup session name.
-// Naming: `<prefix>sid_wid[_extra]` where prefix is one of bashPopupPrefixes,
-// and sid/wid are digits. Returns (sid, wid, true) on success.
-func parseBashPopupName(name string) (sid, wid string, ok bool) {
-	rest := name
-	for _, p := range bashPopupPrefixes {
-		if strings.HasPrefix(name, p) {
-			rest = name[len(p):]
-			break
-		}
-	}
-	parts := strings.SplitN(rest, "_", 3)
-	if len(parts) < 2 {
-		return "", "", false
-	}
-	if !allDigits(parts[0]) || !allDigits(parts[1]) {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
-func allDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// listClients classifies attached clients into (outer, inner) by session-name
-// prefix. Sessions starting with "_" are popup-managed (atelier or otherwise);
-// the rest are workspace clients. The first non-popup client wins as outer.
+// listClients classifies attached clients into (outer, inner) via the state
+// taxonomy. Popup clients are inner; workspace clients are outer candidates;
+// the launcher ("default") client is NEITHER — never a popup target, which is
+// what keeps the launcher out of the outer pick (the "weird default shell"
+// bug). pickOuter then chooses among the outer candidates, preferring the
+// client the user actually drove (@atelier_outer_client).
 func listClients(h *tmuxhost.Client) (outer string, inner []string, err error) {
-	out, err := h.Run("list-clients", "-F", "#{client_session}|#{client_name}")
+	clients, err := state.ClassifyClients(h)
 	if err != nil {
 		return "", nil, err
 	}
 	var outers []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		session, name := parts[0], parts[1]
-		if strings.HasPrefix(session, "_") {
-			inner = append(inner, name)
-		} else {
-			outers = append(outers, name)
+	for _, c := range clients {
+		switch c.Kind {
+		case state.ClientPopup:
+			inner = append(inner, c.Name)
+		case state.ClientWorkspace:
+			outers = append(outers, c.Name)
 		}
 	}
-	pref, _ := h.ShowGlobalOption("@atelier_outer_client")
+	pref, _ := h.ShowGlobalOption(state.OptOuterClient)
 	return pickOuter(outers, strings.TrimSpace(pref)), inner, nil
 }
 
@@ -407,48 +307,4 @@ func pickOuter(outers []string, preferred string) string {
 		return outers[0]
 	}
 	return ""
-}
-
-func isAtelierPopup(name string) bool {
-	return len(name) > len(state.SessionNamePrefix) &&
-		name[:len(state.SessionNamePrefix)] == state.SessionNamePrefix
-}
-
-func parseWorkspaceScopedName(name string) (sid, wid string, ok bool) {
-	const prefix = "_atelier_"
-	if len(name) <= len(prefix) {
-		return "", "", false
-	}
-	rest := name[len(prefix):]
-	parts := splitN(rest, '_', 3)
-	if len(parts) < 3 {
-		return "", "", false
-	}
-	return parts[1], parts[2], true
-}
-
-func splitN(s string, sep byte, n int) []string {
-	out := make([]string, 0, n)
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == sep {
-			out = append(out, s[start:i])
-			start = i + 1
-			if len(out) == n-1 {
-				break
-			}
-		}
-	}
-	out = append(out, s[start:])
-	return out
-}
-
-func digits(s string) string {
-	out := make([]rune, 0, len(s))
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			out = append(out, r)
-		}
-	}
-	return string(out)
 }

@@ -36,9 +36,9 @@ func TestCountAttentionWindows_MatchesPicker(t *testing.T) {
 
 	seed("repo/worktree", map[string]string{"@repo_path": "/tmp/x", "@needs_attention": "1"})
 	seed("auto/multi-repo", map[string]string{"@ai_workspace_kind": "multi-repo", "@needs_attention": "1"})
-	seed("bare/no-metadata", map[string]string{"@needs_attention": "1"})            // phantom
-	seed("_atelier_claude_9_9", map[string]string{"@needs_attention": "1"})         // misrouted popup
-	seed("repo/idle", map[string]string{"@repo_path": "/tmp/y"})                    // listable but no attention
+	seed("bare/no-metadata", map[string]string{"@needs_attention": "1"})    // phantom
+	seed("_atelier_claude_9_9", map[string]string{"@needs_attention": "1"}) // misrouted popup
+	seed("repo/idle", map[string]string{"@repo_path": "/tmp/y"})            // listable but no attention
 
 	if got := countAttentionWindows(srv.Client); got != 2 {
 		t.Errorf("countAttentionWindows = %d, want 2 (worktree + multi-repo only)", got)
