@@ -64,10 +64,10 @@ func TestCheckAgentHooks_SkipsWithoutAI(t *testing.T) {
 	}
 }
 
-// TestCheckAgentHooks_InstallsViaClaudeAdapter: with the claude adapter
-// active, EnsureHooks installs the canonical settings (with the Stop hook)
-// and the check PASSes.
-func TestCheckAgentHooks_InstallsViaClaudeAdapter(t *testing.T) {
+// TestCheckAgentHooks_PassesWithAI: with an AI adapter active the check PASSes
+// and reports the pull model — atelier installs NO hook into the agent's config
+// (recap + attention are pulled by the refresh loop).
+func TestCheckAgentHooks_PassesWithAI(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheRoot)
 	integration.SetActive(integration.Set{AI: claude.New()})
@@ -75,15 +75,12 @@ func TestCheckAgentHooks_InstallsViaClaudeAdapter(t *testing.T) {
 
 	r := checkAgentHooks()
 	if r.Status != StatusPass {
-		t.Fatalf("claude adapter should install hooks + PASS, got %s (%q)", r.Status, r.Detail)
+		t.Fatalf("claude adapter should PASS, got %s (%q)", r.Status, r.Detail)
 	}
+	// No settings file should be written — the hook machinery is gone.
 	path := filepath.Join(cacheRoot, "atelier", "claude", "settings.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("settings not written at %s: %v", path, err)
-	}
-	if !strings.Contains(string(data), "atelier ai on-stop") {
-		t.Errorf("settings should wire the kernel stop-hook; got %q", string(data))
+	if _, err := os.Stat(path); err == nil {
+		t.Errorf("no agent settings file should be created; found %s", path)
 	}
 }
 

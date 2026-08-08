@@ -20,11 +20,10 @@ import (
 // already lives rather than forcing a lossy value-type round-trip through
 // the kernel.
 //
-// Control-flow shapes differ per method and that is intentional:
-//   - OpenAgent / SetPrompt / GenerateName / Summarize are pull (kernel calls).
-//   - OnStop is push: the agent's stop-hook (installed by EnsureHooks) fires
-//     and calls back through it; the adapter then uses kernel verbs
-//     (workspace.SetAttention / SetRecap) to fill the kernel-owned slots.
+// Every method is PULL: the kernel calls the adapter when it needs the
+// capability. There is no push path — the recap and the attention verdict are
+// both re-derived by RefreshRecap reading the agent's transcript, driven by the
+// background refresh loop, so the agent needs no hook wired into its config.
 type AIIntegration interface {
 	// Name identifies the adapter (e.g. "claude"). Used in diagnostics.
 	Name() string
@@ -48,20 +47,16 @@ type AIIntegration interface {
 	// parses the lines (name, and optionally a grouping tag), and validates.
 	GenerateName(ctx context.Context, systemPrompt, intent string) (string, error)
 
-	// OnStop handles the agent's stop event (the hook payload). The adapter
-	// resolves the target window, decides whether to flag attention, tracks
-	// its own resume pointer, and refreshes the summary — all via the
-	// kernel verbs workspace.SetAttention / SetRecap. windowID may be empty
-	// (the adapter resolves it from the popup context).
-	OnStop(h *tmuxhost.Client, windowID string, payload []byte) error
-
-	// Summarize refreshes the workspace summary for windowID on demand,
-	// from the agent's transcript under projectDir.
-	Summarize(h *tmuxhost.Client, windowID, projectDir string) error
-
-	// EnsureHooks installs whatever wiring the agent needs to call back into
-	// the kernel on stop (attention + summary). Idempotent.
-	EnsureHooks() error
+	// RefreshRecap re-derives the workspace's recap AND its attention verdict
+	// for windowID by reading the agent's latest session transcript under cwd
+	// (the worktree), then writes them via workspace.SetRecap / SetAttention.
+	// A single model pass returns both the one-line summary and whether the
+	// agent is blocked waiting on the USER (vs idle-delegated or running) — only
+	// the blocked case raises attention. The adapter throttles on the
+	// transcript's mtime so it re-summarizes only when the agent did something,
+	// making this cheap to call every loop tick. No-op when the workspace has no
+	// agent transcript.
+	RefreshRecap(h *tmuxhost.Client, windowID, cwd string) error
 
 	// AgentPopupSession returns the backing tmux popup-session name the agent
 	// uses for the given parent workspace window. The workspace switcher uses

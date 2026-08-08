@@ -85,19 +85,27 @@ func TestBuildClaudeStartCmd(t *testing.T) {
 	}
 }
 
-func TestTargetFromAgentSession(t *testing.T) {
-	cases := []struct{ session, want string }{
-		{"_atelier_claude_1_2", "@2"},
-		{"_atelier_claude_10_47", "@47"},
-		{"_claudepop_3_9", "@9"},     // legacy bash session name
-		{"_atelier_lazygit_1_2", ""}, // not an agent popup
-		{"main", ""},                 // a real workspace session
-		{"", ""},
+func TestParseRecapVerdict(t *testing.T) {
+	cases := []struct {
+		name, raw, wantRecap, wantStatus string
+	}{
+		{"blocked", "ATTENTION: blocked\nasked which db driver to use", "asked which db driver to use", "blocked"},
+		{"running", "ATTENTION: running\nrunning migration", "running migration", "running"},
+		{"idle", "ATTENTION: idle\nfinished refactor", "finished refactor", "idle"},
+		{"case-insensitive + extra words", "attention: BLOCKED — waiting\nneeds review", "needs review", "blocked"},
+		{"missing verdict defaults idle", "just a recap line", "just a recap line", "idle"},
+		{"unknown verdict → idle", "ATTENTION: banana\nrecap", "recap", "idle"},
 	}
 	for _, c := range cases {
-		if got := targetFromAgentSession(c.session); got != c.want {
-			t.Errorf("targetFromAgentSession(%q) = %q, want %q", c.session, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			recap, status := parseRecapVerdict(c.raw)
+			if recap != c.wantRecap {
+				t.Errorf("recap = %q, want %q", recap, c.wantRecap)
+			}
+			if status != c.wantStatus {
+				t.Errorf("status = %q, want %q", status, c.wantStatus)
+			}
+		})
 	}
 }
 
@@ -112,18 +120,6 @@ func TestEnsurePrefix(t *testing.T) {
 		if got := ensurePrefix(c.in, c.prefix); got != c.want {
 			t.Errorf("ensurePrefix(%q,%q)=%q want %q", c.in, c.prefix, got, c.want)
 		}
-	}
-}
-
-func TestTailNLines(t *testing.T) {
-	if got := tailNLines("a\nb\nc", 2); got != "b\nc" {
-		t.Errorf("tailNLines last-2 = %q", got)
-	}
-	if got := tailNLines("a", 5); got != "a" {
-		t.Errorf("tailNLines fewer-than-n = %q", got)
-	}
-	if got := tailNLines("a\nb\n", 5); got != "a\nb" {
-		t.Errorf("tailNLines trailing-newline = %q", got)
 	}
 }
 

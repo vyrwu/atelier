@@ -2,14 +2,13 @@ package cli
 
 import (
 	"fmt"
-	"io"
-	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/workspace"
 )
 
 // AICommand is the kernel-side entry to the configured AI integration. Each
@@ -28,7 +27,7 @@ config.toml (claude | mock | …). Subcommands delegate to the active
 adapter through the kernel's AIIntegration port; with none configured they
 error rather than silently no-op.`,
 	}
-	c.AddCommand(aiOpenCmd(), aiSetPromptCmd(), aiOnStopCmd(), aiRecapCmd())
+	c.AddCommand(aiOpenCmd(), aiSetPromptCmd(), aiRecapCmd())
 	return c
 }
 
@@ -88,30 +87,11 @@ func aiSetPromptCmd() *cobra.Command {
 	return c
 }
 
-func aiOnStopCmd() *cobra.Command {
-	var window, socket string
-	c := &cobra.Command{
-		Use:   "on-stop",
-		Short: "Agent stop-hook entry: flag attention + refresh summary (reads payload on stdin)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			ai, err := activeAI()
-			if err != nil {
-				return err
-			}
-			payload, _ := io.ReadAll(os.Stdin)
-			return ai.OnStop(tmuxhost.New(socket), window, payload)
-		},
-	}
-	c.Flags().StringVar(&window, "window", "", "target tmux window id (default: resolved from popup context)")
-	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
-	return c
-}
-
 func aiRecapCmd() *cobra.Command {
-	var window, project, socket string
+	var window, cwd, socket string
 	c := &cobra.Command{
 		Use:   "recap",
-		Short: "Refresh the workspace summary from the agent's latest transcript",
+		Short: "Re-derive the workspace recap + attention from the agent's latest transcript",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			ai, err := activeAI()
 			if err != nil {
@@ -128,11 +108,16 @@ func aiRecapCmd() *cobra.Command {
 			if window == "" {
 				return fmt.Errorf("--window required")
 			}
-			return ai.Summarize(h, window, project)
+			if cwd == "" {
+				if w, err := workspace.Info(h, window); err == nil {
+					cwd = w.Cwd
+				}
+			}
+			return ai.RefreshRecap(h, window, cwd)
 		},
 	}
 	c.Flags().StringVar(&window, "window", "", "tmux window id (default: outer window)")
-	c.Flags().StringVar(&project, "project", "", "agent project root (default: workspace cwd)")
+	c.Flags().StringVar(&cwd, "cwd", "", "workspace worktree (default: resolved from the window)")
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	return c
 }

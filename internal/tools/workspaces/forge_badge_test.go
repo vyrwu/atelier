@@ -199,14 +199,23 @@ func TestForgeFresh(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	fresh := now.Add(-time.Second).Unix() // within TTL
 	stale := now.Add(-2 * forgeRefreshTTL).Unix()
-	if !forgeFresh(now, itoa(fresh)) {
+	if !forgeFresh(now, itoa(fresh), forgeRefreshTTL) {
 		t.Error("timestamp within TTL should be fresh")
 	}
-	if forgeFresh(now, itoa(stale)) {
+	if forgeFresh(now, itoa(stale), forgeRefreshTTL) {
 		t.Error("timestamp beyond TTL should be stale")
 	}
+	// TTL is a parameter: the same timestamp is fresh under a longer TTL and
+	// stale under a shorter one — the point of parameterizing it per caller.
+	midAge := now.Add(-90 * time.Second).Unix()
+	if forgeFresh(now, itoa(midAge), 1*time.Minute) {
+		t.Error("90s old should be stale under a 1m TTL")
+	}
+	if !forgeFresh(now, itoa(midAge), 5*time.Minute) {
+		t.Error("90s old should be fresh under a 5m TTL")
+	}
 	for _, bad := range []string{"", "notanumber", "0", "-5"} {
-		if forgeFresh(now, bad) {
+		if forgeFresh(now, bad, forgeRefreshTTL) {
 			t.Errorf("forgeFresh(%q) should be stale", bad)
 		}
 	}

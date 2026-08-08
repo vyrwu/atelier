@@ -1,25 +1,25 @@
 // Package claude is atelier's AIIntegration adapter for Claude Code. It
 // satisfies the kernel's integration.AIIntegration port: it opens Claude in
 // a workspace popup, generates branch names from a kernel-supplied naming
-// instruction, handles Claude's Stop hook (flagging attention + refreshing
-// the summary via the kernel's workspace verbs), and installs the Stop-hook
-// wiring. Everything Claude-specific — resume semantics, project encoding,
-// hook payload shape, the `--settings`/`--append-system-prompt` flags —
-// lives here, behind the port. Swap Claude for codex/gemini by writing
-// another adapter and selecting it in config; the kernel does not change.
+// instruction, and re-derives the workspace recap + attention verdict by
+// reading the agent's transcript (RefreshRecap, pulled by the refresh loop).
+// Everything Claude-specific — resume semantics, project encoding, the
+// `--settings`/`--append-system-prompt` flags — lives here, behind the port.
+// Swap Claude for codex/gemini by writing another adapter and selecting it in
+// config; the kernel does not change. Note: atelier installs NO hook into
+// Claude's own config — recap + attention are pull-only.
 package claude
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vyrwu/atelier/internal/adapters/claude/claudegen"
 	"github.com/vyrwu/atelier/internal/adapters/claude/claudeproj"
-	"github.com/vyrwu/atelier/internal/adapters/claude/claudesettings"
 	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/popup"
@@ -100,11 +100,11 @@ func (Adapter) OpenAgent(h *tmuxhost.Client) error {
 		clearLaunchPrompt(h, ctx.WindowID, prompt)
 
 		cfg, _ := LoadConfig()
-		settingsPath, settingsErr := claudesettings.Ensure()
-		if settingsErr != nil {
-			debuglog.LogErr("claudesettings.Ensure", settingsErr)
-		}
-		return buildClaudeStartCmd(prompt, kind, cfg.MultiRepoSystemPrompt, settingsPath, resumeID), nil
+		// No --settings injection: atelier no longer installs a Stop hook into
+		// Claude's config. The recap + attention verdict are pulled by the
+		// refresh loop reading the transcript (RefreshRecap), so Claude launches
+		// with the user's own untouched config.
+		return buildClaudeStartCmd(prompt, kind, cfg.MultiRepoSystemPrompt, "", resumeID), nil
 	})
 }
 
@@ -167,113 +167,165 @@ func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (str
 	return strings.TrimRight(raw, "\r\n"), nil
 }
 
-// OnStop handles Claude's Stop hook: resolve the target outer window, flag
-// attention (unless the popup is currently attached), track the resume
-// session id from the transcript path, and spawn a detached summary refresh
-// so the hook returns instantly. Uses the kernel verb workspace.SetAttention.
-// (Was `notify-attention`.)
-func (Adapter) OnStop(h *tmuxhost.Client, windowID string, payload []byte) error {
-	session, _ := h.DisplayMessage("#{session_name}")
-	attached := "0"
-	target := windowID
-
-	if t := targetFromAgentSession(session); t != "" {
-		attached, _ = h.DisplayMessageAt(session, "#{session_attached}")
-		target = t
-	} else if target == "" {
-		if v := os.Getenv("TMUX_PARENT_WINDOW"); v != "" {
-			target = v
-		} else if v := os.Getenv("TMUX_PARENT_WINDOW_ID"); v != "" {
-			target = v
-		} else if v, _ := h.ShowGlobalOption("@atelier_outer_window"); v != "" {
-			target = v
-		} else if v, err := h.DisplayMessage("#{window_id}"); err == nil {
-			target = v
-		}
-	}
-	if target == "" {
-		return fmt.Errorf("claude.OnStop: could not resolve target window")
-	}
-	target = ensurePrefix(target, "@")
-	debuglog.Logf("claude.OnStop: session=%q attached=%q target=%q", session, attached, target)
-
-	if attached == "" || attached == "0" {
-		_ = workspace.SetAttention(h, target, true)
-	}
-
-	// No hook payload → attention only (matches the old notify-attention:
-	// no transcript to track a resume id from, no recap to generate).
-	if len(payload) == 0 {
+// RefreshRecap re-derives the workspace's recap AND attention verdict for
+// windowID from the agent's latest session transcript under cwd (the worktree),
+// then writes both via the kernel verbs SetRecap / SetAgentStatus.
+//
+// The 3-state agent status is driven primarily by TRANSCRIPT PROGRESSION, not
+// the model — "running" is nearly impossible to infer from a static JSONL
+// snapshot (it logs completed events, not mid-execution), so the reliable
+// signal is: is the transcript still being written? The haiku pass only decides
+// the one thing it CAN see — whether the agent is blocked waiting on the user
+// (asked a question / needs a decision):
+//
+//   - progressed since last stamp  → blocked (haiku) else running
+//   - no new content, still active (wrote within runningWindow) → running
+//   - no new content, gone quiet   → idle
+//
+// It is a PULL — the refresh loop calls it every tick; the haiku call is
+// throttled to actual progression, so a quiet workspace only re-evaluates the
+// cheap running↔idle transition. No-op when the workspace has no agent
+// transcript.
+func (Adapter) RefreshRecap(h *tmuxhost.Client, windowID, cwd string) error {
+	if windowID == "" || cwd == "" {
 		return nil
 	}
-	var probe struct {
-		TranscriptPath string `json:"transcript_path"`
+	transcript, _ := claudeproj.LatestTranscriptPath(cwd)
+	if transcript == "" {
+		return nil // no agent session for this workspace
 	}
-	if err := json.Unmarshal(payload, &probe); err == nil && probe.TranscriptPath != "" {
-		if sid := claudeSessionIDFromPath(probe.TranscriptPath); sid != "" {
-			_ = h.SetWindowOption(target, OptActiveSessionID, sid)
-			_ = workspace.PersistWindowMetadata(h, target, MetaActiveSessionID, sid)
+	fi, err := os.Stat(transcript)
+	if err != nil {
+		return nil
+	}
+	mtime := fi.ModTime().Unix()
+	active := time.Now().Unix()-mtime < int64(runningWindow.Seconds())
+
+	progressed := true
+	if prev, _ := h.GetWindowOption(windowID, workspace.OptRecapTs); strings.TrimSpace(prev) != "" {
+		if ts, e := strconv.ParseInt(strings.TrimSpace(prev), 10, 64); e == nil && mtime <= ts {
+			progressed = false
 		}
 	}
 
-	// Detached summary refresh so the Stop hook returns instantly.
-	self, err := os.Executable()
-	if err != nil {
-		self = "atelier"
+	if !progressed {
+		// No new transcript content since the last summary — don't spend a model
+		// call, but DO update running↔idle from activity. A workspace already
+		// flagged blocked stays blocked until the user visits (after-select-window
+		// clears @needs_attention); re-setting here would re-raise it, so leave it.
+		if att, _ := h.GetWindowOption(windowID, workspace.OptAttention); strings.TrimSpace(att) == "1" {
+			return nil
+		}
+		return setAgentStatusIfChanged(h, windowID, activityStatus(active))
 	}
-	cmd := exec.Command(self, "ai", "recap", "--window", target)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
-	if err := cmd.Start(); err != nil {
+
+	// Progressed → the agent just wrote something (it is active). Re-summarize
+	// and classify: a question to the user is blocked; anything else that's
+	// actively progressing is running.
+	cfg, _ := LoadConfig()
+	input := buildRecapInput(dumpTranscript(transcript), worktreeDelta(cwd))
+	if input == "" {
+		return nil
+	}
+	gen := claudegen.New()
+	if cfg.RecapModel != "" {
+		gen.Model = cfg.RecapModel
+	}
+	out, err := gen.RunWithSystemPrompt(cfg.RecapSystemPrompt, input)
+	if err != nil {
 		return err
 	}
-	_ = cmd.Process.Release()
-	return nil
+	recap, verdict := parseRecapVerdict(out)
+	if recap != "" {
+		// Stamp keyed on the transcript mtime so the throttle above sees "already
+		// summarized this state".
+		if err := workspace.SetRecapTS(h, windowID, recap, mtime); err != nil {
+			return err
+		}
+	}
+	status := workspace.AgentRunning
+	if verdict == workspace.AgentBlocked {
+		status = workspace.AgentBlocked
+	}
+	return workspace.SetAgentStatus(h, windowID, status)
 }
 
-// targetFromAgentSession derives the outer workspace window id (`@N`) from a
-// Claude popup backing-session name (`_atelier_claude_<sid>_<wid>` or the
-// legacy `_claudepop_<sid>_<wid>`). Returns "" when session is not an agent
-// popup. Pure — unit-tested.
-func targetFromAgentSession(session string) string {
-	if !strings.HasPrefix(session, "_atelier_claude_") && !strings.HasPrefix(session, "_claudepop_") {
+// activityStatus maps "did the agent write recently" to running vs idle.
+func activityStatus(active bool) string {
+	if active {
+		return workspace.AgentRunning
+	}
+	return workspace.AgentIdle
+}
+
+// setAgentStatusIfChanged writes the status only when it actually differs from
+// the current one, so the every-tick running↔idle re-evaluation doesn't churn
+// window options (or the picker's change signature) on quiet workspaces.
+func setAgentStatusIfChanged(h *tmuxhost.Client, windowID, status string) error {
+	cur, _ := h.GetWindowOption(windowID, workspace.OptAgentStatus)
+	cur = strings.TrimSpace(cur)
+	if cur == status || (status == workspace.AgentIdle && cur == "") {
+		return nil
+	}
+	return workspace.SetAgentStatus(h, windowID, status)
+}
+
+// parseRecapVerdict splits the summarizer's two-part output into the recap line
+// and the 3-state agent status. The model emits an `ATTENTION: blocked|running|idle`
+// line plus the recap. Defensive: an unrecognized/missing verdict means idle,
+// and the first non-verdict line is the recap. Pure.
+func parseRecapVerdict(raw string) (recap, status string) {
+	status = workspace.AgentIdle
+	for _, ln := range strings.Split(strings.TrimSpace(raw), "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" {
+			continue
+		}
+		if len(t) >= len(attentionTag) && strings.EqualFold(t[:len(attentionTag)], attentionTag) {
+			switch strings.ToLower(firstWord(t[len(attentionTag):])) {
+			case workspace.AgentBlocked:
+				status = workspace.AgentBlocked
+			case workspace.AgentRunning:
+				status = workspace.AgentRunning
+			default:
+				status = workspace.AgentIdle
+			}
+			continue
+		}
+		if recap == "" {
+			recap = t
+		}
+	}
+	return truncateLine(recap, RecapMaxRunes), status
+}
+
+const attentionTag = "ATTENTION:"
+
+func firstWord(s string) string {
+	return strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), " ", 2)[0])
+}
+
+// dumpTranscript reads the tail of a transcript file, bounded to a token budget
+// (maxTranscriptRunes). The tail carries the latest turns — the part that
+// decides both the recap and the attention verdict. Empty on read error.
+func dumpTranscript(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return ""
 	}
-	rest := strings.TrimPrefix(strings.TrimPrefix(session, "_atelier_claude_"), "_claudepop_")
-	if i := strings.LastIndex(rest, "_"); i >= 0 {
-		return "@" + rest[i+1:]
-	}
-	return ""
-}
-
-// Summarize refreshes the workspace summary for windowID from the latest
-// Claude transcript under projectDir (resolved from the workspace when
-// empty), via the kernel verb workspace.SetRecap. (Was `recap`.)
-func (Adapter) Summarize(h *tmuxhost.Client, windowID, projectDir string) error {
-	if windowID == "" {
-		return fmt.Errorf("claude.Summarize: windowID required")
-	}
-	if projectDir == "" {
-		// Resolve cwd from the TARGET window (@N, a real workspace), NOT the
-		// current pane: OnStop spawns `atelier ai recap` from inside the
-		// agent popup, whose pane is an atelier popup session that
-		// workspace.Info rejects. Using windowID targets the outer workspace.
-		if w, err := workspace.Info(h, windowID); err == nil {
-			projectDir = w.Cwd
+	s := strings.TrimRight(string(data), "\n")
+	r := []rune(s)
+	if len(r) > maxTranscriptRunes {
+		s = string(r[len(r)-maxTranscriptRunes:])
+		// The rune cut can land mid-line. Drop the partial leading line so the
+		// dump starts at a whole JSONL object — otherwise the tail can begin
+		// with '-' (a session-id fragment, etc.), which the `claude` CLI parses
+		// as an unknown flag, failing every summary call.
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[i+1:]
 		}
 	}
-	recap, err := latestRecap(projectDir)
-	if err != nil || recap == "" {
-		return err
-	}
-	return workspace.SetRecap(h, windowID, recap)
-}
-
-// EnsureHooks installs atelier's Claude settings (the Stop hook that routes
-// to `atelier ai on-stop`). Idempotent. Called by OpenAgent and available to
-// doctor.
-func (Adapter) EnsureHooks() error {
-	_, err := claudesettings.Ensure()
-	return err
+	return s
 }
 
 // AgentPopupSession returns the Claude popup-session name for a parent
@@ -329,7 +381,6 @@ func buildClaudeStartCmd(prompt, kind, multiRepoSys, settingsPath, resumeSession
 }
 
 // Thin delegators to the shared claudeproj package.
-func claudeSessionIDFromPath(p string) string { return claudeproj.SessionIDFromPath(p) }
 func transcriptExists(id string) bool         { return claudeproj.TranscriptExists(id) }
 func latestSessionIDForCwd(cwd string) string { return claudeproj.LatestSessionID(cwd) }
 
@@ -355,14 +406,6 @@ func ensurePrefix(s, prefix string) string {
 	return prefix + s
 }
 
-func tailNLines(s string, n int) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
-}
-
 // truncateLine returns a single-line, length-bounded recap.
 func truncateLine(s string, max int) string {
 	s = strings.TrimSpace(s)
@@ -386,25 +429,19 @@ func truncateLine(s string, max int) string {
 	return string(runes[:max-1]) + "…"
 }
 
-// latestRecap finds the most-recent Claude transcript for projectDir and asks
-// Claude to summarize it. Returns "" if no transcript.
-func latestRecap(projectDir string) (string, error) {
-	transcript, err := claudeproj.LatestTranscriptPath(projectDir)
-	if err != nil || transcript == "" {
-		return "", err
+// buildRecapInput assembles the summarizer input from the conversation tail and
+// the worktree delta, labeling each so the model can weight actual code changes
+// over what the chat merely discussed. Either part may be empty.
+func buildRecapInput(transcriptTail, delta string) string {
+	switch {
+	case transcriptTail == "" && delta == "":
+		return ""
+	case delta == "":
+		return transcriptTail
+	case transcriptTail == "":
+		return "=== Workspace code changes (git delta) ===\n" + delta
+	default:
+		return transcriptTail +
+			"\n\n=== Workspace code changes (git delta) ===\n" + delta
 	}
-	cfg, _ := LoadConfig()
-	gen := claudegen.New()
-	if cfg.RecapModel != "" {
-		gen.Model = cfg.RecapModel
-	}
-	if data, err := os.ReadFile(transcript); err == nil {
-		ctx := tailNLines(string(data), 100)
-		out, err := gen.RunWithSystemPrompt(cfg.RecapSystemPrompt, ctx)
-		if err != nil {
-			return "", err
-		}
-		return truncateLine(out, RecapMaxRunes), nil
-	}
-	return gen.RecapFromTranscript(transcript)
 }

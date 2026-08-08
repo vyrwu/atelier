@@ -280,23 +280,18 @@ func checkStatestoreParseable() CheckResult {
 			len(state.Workspaces), state.LastActiveSession)}
 }
 
-// checkAgentHooks installs the active AI integration's stop-hook wiring
-// (idempotent, via the AIIntegration.EnsureHooks port) so the agent can
-// call back into the kernel on stop. Skipped when no AI is configured —
-// no hardcoded knowledge of any specific agent.
+// checkAgentHooks reports the AI integration's callback model. atelier no
+// longer installs anything into the agent's config: the recap + attention
+// verdict are PULLED by the background refresh loop reading the transcript
+// (AIIntegration.RefreshRecap), so there is no hook wiring to verify.
 func checkAgentHooks() CheckResult {
 	ai := integration.Active().AI
 	if ai == nil {
 		return CheckResult{Name: "agent hooks", Status: StatusSkip,
 			Detail: "no AI integration configured ([integrations] ai)"}
 	}
-	if err := ai.EnsureHooks(); err != nil {
-		return CheckResult{Name: "agent hooks", Status: StatusWarn,
-			Detail:      fmt.Sprintf("%s: %v", ai.Name(), err),
-			Remediation: "ensure $XDG_CACHE_HOME (or ~/.cache) is writable"}
-	}
 	return CheckResult{Name: "agent hooks", Status: StatusPass,
-		Detail: fmt.Sprintf("%s stop-hook wiring installed", ai.Name())}
+		Detail: fmt.Sprintf("%s: recap + attention pulled by the refresh loop (no agent hook installed)", ai.Name())}
 }
 
 // checkWorktreeDirsExist scans the statestore cache for workspaces

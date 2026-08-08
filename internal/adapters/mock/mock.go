@@ -112,28 +112,17 @@ func mockTag(intent string) string {
 	return ""
 }
 
-// OnStop flags attention on the target window (no transcript to summarize).
-func (Adapter) OnStop(h *tmuxhost.Client, windowID string, _ []byte) error {
-	if windowID == "" {
-		if v, err := h.DisplayMessage("#{window_id}"); err == nil {
-			windowID = v
-		}
-	}
+// RefreshRecap sets a fixed recap + a blocked agent status so both slots are
+// observably populated (the mock always claims the agent is waiting on you).
+func (Adapter) RefreshRecap(h *tmuxhost.Client, windowID, _ string) error {
 	if windowID == "" {
 		return nil
 	}
-	return workspace.SetAttention(h, windowID, true)
-}
-
-// Summarize sets a fixed recap so the summary slot is observably populated.
-func (Adapter) Summarize(h *tmuxhost.Client, windowID, _ string) error {
-	if windowID == "" {
-		return nil
+	if err := workspace.SetRecap(h, windowID, "mock recap"); err != nil {
+		return err
 	}
-	return workspace.SetRecap(h, windowID, "mock recap")
+	return workspace.SetAgentStatus(h, windowID, workspace.AgentBlocked)
 }
-
-func (Adapter) EnsureHooks() error { return nil }
 
 func (Adapter) AgentPopupSession(parentSessionID, parentWindowID string) string {
 	return spec.SessionName(parentSessionID, parentWindowID)

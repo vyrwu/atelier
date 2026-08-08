@@ -62,7 +62,52 @@ type ReconcileResult struct {
 // repairs every fixable violation. It operates purely on live tmux runtime
 // state — it does NOT touch the persisted statestore cache (that is
 // workspace.SyncCache's separate job). Returns one result per violation.
+//
+// This is the on-demand recovery path (`atelier reconcile --fix`), invoked by
+// a human who knows no popup is mid-open. A continuous background loop must use
+// ReconcileLoop instead — see loopSafeFix.
 func Reconcile(h Host, fix bool) ([]ReconcileResult, error) {
+	return reconcileWith(h, func(v Violation) bool { return fix && v.Fixable })
+}
+
+// loopSafeFix is the subset of fixable violations a CONTINUOUS background loop
+// may auto-repair: those whose repair can't corrupt a legitimate, in-flight
+// popup/client operation on a bare-snapshot false positive.
+//
+// Deliberately EXCLUDED (repair only from the human-invoked Reconcile):
+//   - VHookArmedAtRest — a `client-detached` hook is armed transiently by
+//     OpenOnOuter between detaching the inner popup clients and the deferred
+//     open firing. In that sub-second window InnerClients()==0 AND the hook is
+//     armed — exactly VHookArmedAtRest's predicate. A 45s heartbeat that lands
+//     there would disarm the hook before it fires, and the user's popup would
+//     silently never open.
+//   - VOuterClientDetached — clears the @atelier_outer_client hint; losing it
+//     in the sub-second window while a popup opens could misroute it to the
+//     wrong terminal (the exact bug the hint exists to prevent).
+//
+// The included repairs are idempotent and don't depend on "no popup mid-open":
+// kill an orphan popup, clear a stray popup attention flag, drop an outer
+// pointer that references a dead/launcher/popup session (re-derived on the next
+// M-; / LandOuter).
+var loopSafeFix = map[ViolationCode]bool{
+	VOrphanPopup:        true,
+	VMisroutedAttention: true,
+	VOuterIsLauncher:    true,
+	VOuterIsPopup:       true,
+	VOuterStale:         true,
+}
+
+// ReconcileLoop is Reconcile for the continuous background heartbeat: it
+// repairs only the loop-safe subset (loopSafeFix). Report-only and racy-repair
+// violations are still surfaced in the results (Repaired=false) so callers can
+// log them, but are never auto-fixed on a timer.
+func ReconcileLoop(h Host) ([]ReconcileResult, error) {
+	return reconcileWith(h, func(v Violation) bool { return v.Fixable && loopSafeFix[v.Code] })
+}
+
+// reconcileWith is the shared core: capture, validate, log, and repair every
+// violation for which shouldFix reports true.
+func reconcileWith(h Host, shouldFix func(Violation) bool) ([]ReconcileResult, error) {
 	top, err := CaptureTopology(h)
 	if err != nil {
 		return nil, err
@@ -72,7 +117,7 @@ func Reconcile(h Host, fix bool) ([]ReconcileResult, error) {
 	results := make([]ReconcileResult, 0, len(violations))
 	for _, v := range violations {
 		r := ReconcileResult{Violation: v}
-		if fix && v.Fixable && repair(h, top, v) == nil {
+		if shouldFix(v) && repair(h, top, v) == nil {
 			r.Repaired = true
 		}
 		results = append(results, r)

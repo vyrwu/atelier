@@ -80,14 +80,15 @@ func formatRecapLine(recap string, indent int) string {
 //   - Repo sessions stamped with @repo_path by the workspace creator
 //   - Auto (multi-repo) sessions stamped with @ai_workspace_kind
 //   - Filters out atelier popup sessions (starts with `_`)
-//   - Icons:
+//   - Icons (the agent-status dot, derived by the refresh loop):
 //     red-bold `❯` current workspace
-//     yellow `⏺` needs attention
-//     dim `○` idle (no attention)
+//     yellow `⏺` blocked — agent waiting on you (@needs_attention)
+//     blue `⏺` running — agent working / waiting on a sub-agent (@agent_status)
+//     dim `○` idle — nothing needed
 //   - Cyan session / green window; auto sessions use orange (256:166)
 //   - Bold session+window when current
 //   - Italic-grey `· <recap>` line when @attention_recap is set
-//   - Sort: attention → tag → forge
+//   - Sort: blocked → running → idle, then tag → forge
 func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	defer perf.Start("session-list").End()
 
@@ -104,8 +105,8 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	// Absent adapter → no column, no extra field.
 	showForge := forgeActive()
 
-	const baseFields = 10
-	format := "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{" + workspace.OptWorkspaceCreatedTs + "}|#{" + workspace.OptWorkspaceTag + "}"
+	const baseFields = 11
+	format := "#{session_id}|#{window_id}|#{session_name}|#{window_name}|#{@repo_path}|#{@needs_attention}|#{@ai_workspace_kind}|#{@attention_recap}|#{" + workspace.OptWorkspaceCreatedTs + "}|#{" + workspace.OptWorkspaceTag + "}|#{" + workspace.OptAgentStatus + "}"
 	if showForge {
 		format += "|#{" + OptForgeState + "}"
 	}
@@ -116,7 +117,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	now := time.Now()
 
 	type entry struct {
-		attn      int    // 0 = needs attention, 1 = no attention
+		attn      int    // sort rank: 0 blocked, 1 running, 2 idle
 		tag       string // empty sorts last
 		forgeRank int
 		row       SessionRow
@@ -138,6 +139,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		sid, wid, session, window := fields[0], fields[1], fields[2], fields[3]
 		repoPath, attention, kind, recap, createdTs := fields[4], fields[5], fields[6], fields[7], fields[8]
 		tag := strings.TrimSpace(fields[9])
+		agentStatus := strings.TrimSpace(fields[10])
 		// Kernel forge badge: the cached @forge_state field (if present)
 		// follows the fixed fields. The picker renders the glyph itself and
 		// computes the sort rank — the adapter only classified the state.
@@ -169,7 +171,13 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			continue
 		}
 
-		isAttn := attention == "1"
+		// blocked = the agent needs you (yellow). Keyed on @needs_attention, NOT
+		// @agent_status, so visiting the workspace (after-select-window clears
+		// @needs_attention) drops the dot instantly. running = the agent is
+		// working (blue) — keyed on @agent_status so a visit doesn't hide it
+		// (the agent is still going); the loop clears it when the agent stops.
+		isBlocked := attention == "1"
+		isRunning := !isBlocked && agentStatus == workspace.AgentRunning
 		isCurrent := currentSid != "" && sid == currentSid && wid == currentWid
 
 		// Layout (multi-line item):
@@ -190,12 +198,16 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		}
 		timeCol := fmt.Sprintf("\033[38;5;103m%3s\033[0m ", ageText)
 
+		// Icon by agent state: ❯ current · yellow ⏺ blocked (needs you) ·
+		// blue ⏺ running (working / waiting on a sub-agent) · dim ○ idle.
 		var icon string
 		switch {
 		case isCurrent:
 			icon = "\033[1;31m❯\033[0m "
-		case isAttn:
+		case isBlocked:
 			icon = "\033[33m⏺\033[0m "
+		case isRunning:
+			icon = "\033[34m⏺\033[0m "
 		default:
 			icon = "\033[90m○\033[0m "
 		}
@@ -218,9 +230,13 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			weight = "1;"
 		}
 
-		attn := 1
-		if isAttn {
+		// Sort rank: blocked (needs you) first, then running, then idle.
+		attn := 2
+		switch {
+		case isBlocked:
 			attn = 0
+		case isRunning:
+			attn = 1
 		}
 
 		// Display the user-facing owner/repo (dot intact) recovered from

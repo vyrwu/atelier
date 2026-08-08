@@ -70,6 +70,37 @@ non-listable* window is a violation (`misrouted_attention`), and that is
 report-only. So a healthy server with pending attention correctly reports
 "no violations".
 
+**Continuous self-heal + badge refresh (the background loop).** Reconcile is
+also pull-based on its own — it only runs when invoked. A single long-lived
+process (`atelier tools workspaces _refresh-loop`, started from the generated
+config via `run-shell -b`) closes that gap on a heartbeat. Each tick it (1)
+refreshes freshness + forge badge *data* (rendering was already continuous; only
+the data was event-tied), TTL-throttled — with per-repo fetch dedup and a
+per-tick cap — so most ticks stamp nothing, (2) runs a **loop-safe** reconcile
+(`ReconcileLoop`) so misrouted/phantom attention and orphan popups repair
+themselves without a manual run, and (3) is the **workspace observer**: for each
+active workspace it re-reads the agent's session transcript and, in one cheap
+haiku pass, re-derives the one-line recap AND a 3-state attention verdict —
+*blocked* (waiting on you → yellow ⏺), *running* (working / waiting on a
+sub-agent → blue ⏺), or *idle* (→ no dot). This replaces the old Claude Stop
+hook: atelier installs nothing into the agent's config; recap + attention are
+pulled, throttled on the transcript mtime so a quiet workspace costs only a
+stat. Only *blocked* raises `@needs_attention` (the status-line rollup + the
+clear-on-visit hook), so the noisy "every stop = attention" signal is gone. The
+`AIIntegration` port is now pull-only. It deliberately does *not* auto-run the
+repairs whose safety depends on "no popup is mid-open" (disarming a
+`client-detached` hook, clearing the outer-client hint) — a 45s snapshot can't
+tell a leaked hook from one `OpenOnOuter` armed a millisecond ago, so those stay
+with the human-invoked `reconcile --fix`. It is a loop **around** the kernel —
+Topology/Validate/Reconcile stay the authority; the tick is only "go look", the
+reconcile against live tmux is the truth (edge-triggered wakeup, level-triggered
+reconcile). Sweeps run synchronously in-process — never a detached child per
+tick, which is what once leaked hundreds of `_bg-pull` git procs. Lifecycle is
+pid-bound (the loop self-exits when its tmux server is gone or replaced) and
+singleton-guarded with per-tick self-eviction, not reliant on a SIGHUP. A
+`tmux -C` control-mode source could later replace the ticker as the wakeup
+without touching the kernel. See issues \#17 / \#81.
+
 ## Architecture — kernel (ports) + integrations (adapters) + launchers
 
 atelier is **one binary**, structured as **ports & adapters

@@ -36,6 +36,13 @@ const (
 	// freshness suffix alongside the recap line.
 	OptRecapTs = "@attention_recap_ts"
 
+	// OptAgentStatus is the 3-state agent status the picker renders as a
+	// colored dot: AgentBlocked (yellow — waiting on you), AgentRunning (blue —
+	// actively working / waiting on its sub-agent), or unset/AgentIdle (no dot).
+	// Ephemeral: written by the refresh loop from the transcript classification,
+	// NOT persisted — a restart must not resurrect a stale "running".
+	OptAgentStatus = "@agent_status"
+
 	// Window-scoped options — async pull freshness (FR-7).
 	//   OptWorkspaceFreshnessTs — unix epoch of the most recent successful fetch.
 	//   OptWorkspaceBehind      — count of commits in origin/<default> not in this branch.
@@ -214,11 +221,40 @@ func SetAttention(h *tmuxhost.Client, windowID string, on bool) error {
 	return nil
 }
 
-// SetRecap writes a short recap string to the workspace's window. Stamps
-// @attention_recap_ts (unix epoch) alongside so the session picker can
-// show freshness ("· 30s" / "· 2h"). Clearing the recap also clears ts.
-// Mirrors recap + ts to statestore so they survive tmux server restart.
+// Agent status values for OptAgentStatus (and the AI adapter's classification).
+const (
+	AgentBlocked = "blocked" // waiting on the user — raises attention
+	AgentRunning = "running" // actively working / waiting on a sub-agent
+	AgentIdle    = "idle"    // finished or nothing to do — no dot
+)
+
+// SetAgentStatus records the 3-state agent status for the picker's colored dot
+// and derives @needs_attention from it — only AgentBlocked needs the user, so
+// only it feeds the status-line ⏺ rollup and the clear-on-visit hook. AgentIdle
+// (or "") clears the dot. @agent_status itself is deliberately NOT persisted;
+// the refresh loop re-derives it, so a restart never shows a stale "running".
+func SetAgentStatus(h *tmuxhost.Client, windowID, status string) error {
+	if status == "" || status == AgentIdle {
+		_ = h.UnsetWindowOption(windowID, OptAgentStatus)
+	} else if err := h.SetWindowOption(windowID, OptAgentStatus, status); err != nil {
+		return err
+	}
+	return SetAttention(h, windowID, status == AgentBlocked)
+}
+
+// SetRecap writes a short recap string to the workspace's window, stamped with
+// the current time. See SetRecapTS.
 func SetRecap(h *tmuxhost.Client, windowID, recap string) error {
+	return SetRecapTS(h, windowID, recap, time.Now().Unix())
+}
+
+// SetRecapTS writes a recap and stamps @attention_recap_ts to the given unix
+// epoch. The refresh loop passes the source transcript's mtime so the timestamp
+// keys the "already summarized this state" throttle on transcript change (and
+// the picker's "· 30s" age reflects when the agent last did something, not when
+// we happened to summarize). Clearing the recap also clears ts. Mirrors recap +
+// ts to statestore so they survive tmux server restart.
+func SetRecapTS(h *tmuxhost.Client, windowID, recap string, ts int64) error {
 	if recap == "" {
 		_ = h.UnsetWindowOption(windowID, OptRecapTs)
 		if err := h.UnsetWindowOption(windowID, OptRecap); err != nil {
@@ -230,7 +266,6 @@ func SetRecap(h *tmuxhost.Client, windowID, recap string) error {
 		})
 		return nil
 	}
-	ts := time.Now().Unix()
 	if err := h.SetWindowOption(windowID, OptRecap, recap); err != nil {
 		return err
 	}
