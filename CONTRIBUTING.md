@@ -129,7 +129,7 @@ case "codex":
     set.AI = codex.New()
 ```
 
-Then `[integrations] ai = "codex"` selects it. Ports:
+Then `[ai] provider = "codex"` selects it. Ports:
 
 - `AIIntegration` — `Name`, `DisplayName`, `OpenAgent`, `SetPrompt`,
   `GenerateName`, `RefreshRecap`, `AgentPopupSession`, `HasResumableState`.
@@ -245,7 +245,7 @@ workspaces tool or by hand (persisted as statestore metadata, surfaced as
 - `@ai_prompt` — initial prompt passed to the agent on next popup open
 - `@ai_workspace_kind` — distinguishes single-repo from multi-repo
   workspaces. For a multi-repo workspace, claude is launched with
-  `--append-system-prompt <claude.multi_repo_system_prompt>` from
+  `--append-system-prompt <ai.prompts.multi_repo>` from
   atelier's config.
 
 ## Repository conventions

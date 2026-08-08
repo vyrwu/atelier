@@ -63,7 +63,7 @@ func TestAgentAndForge_AreKernelIntegrations_NotTools(t *testing.T) {
 	res, _ := plugin.Discover()
 	for _, name := range []string{"claude", "ghpr"} {
 		if _, ok := res.FindByName(name); ok {
-			t.Errorf("%q must NOT be a registered tool — it is a kernel integration adapter selected via [integrations] in config", name)
+			t.Errorf("%q must NOT be a registered tool — it is a kernel integration adapter selected via [ai]/[forge] provider in config", name)
 		}
 	}
 }

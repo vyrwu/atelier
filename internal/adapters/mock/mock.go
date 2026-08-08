@@ -3,8 +3,8 @@
 // kernel's agent-fed capabilities (branch naming, summary, attention, agent
 // popup) and its code-forge capability (per-workspace PR badge) are
 // exercisable without Claude, `gh`, a network, or an API key — both as real
-// config options (`[integrations] ai = "mock"`, `forge = "mock"`) and as the
-// injectable adapters for kernel tests. It is the proof that the ports are
+// config options (`[ai] provider = "mock"`, `[forge] provider = "mock"`) and
+// as the injectable adapters for kernel tests. It is the proof that the ports are
 // genuinely swappable.
 package mock
 

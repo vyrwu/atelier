@@ -23,7 +23,7 @@ func TestAdapter_SatisfiesPort(t *testing.T) {
 
 // These mirror the kernel's naming-validation regexes (workspaces
 // conventionalBranchRe / autoSessionNameRe). The mock's GenerateName must
-// satisfy them so auto-mode works with `[integrations] ai = "mock"` — the
+// satisfy them so auto-mode works with `[ai] provider = "mock"` — the
 // proof that the AI port is genuinely swappable.
 var (
 	branchRe  = regexp.MustCompile(`^(feat|fix|chore|refactor|docs|test|perf|style)/[a-z0-9-]+$`)

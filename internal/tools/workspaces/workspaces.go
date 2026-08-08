@@ -1921,7 +1921,7 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 	// model to satisfy it. Auto-mode requires an AI integration.
 	ai := integration.Active().AI
 	if ai == nil {
-		return "", "", "", fmt.Errorf("auto-mode requires an AI integration (set `[integrations] ai` in config.toml)")
+		return "", "", "", fmt.Errorf("auto-mode requires an AI integration (set `[ai] provider` in config.toml)")
 	}
 	// When auto-tagging is on, use the two-line contract and feed the
 	// existing tag vocabulary so the model reuses labels (issue #56).
@@ -2110,7 +2110,7 @@ func runAutoSession(initialPrompt string) error {
 			// the active AI integration runs its model. Auto-mode needs one.
 			ai := integration.Active().AI
 			if ai == nil {
-				return fmt.Errorf("auto-mode requires an AI integration (set `[integrations] ai` in config.toml)")
+				return fmt.Errorf("auto-mode requires an AI integration (set `[ai] provider` in config.toml)")
 			}
 			sysPrompt, intent := sessionNamingSysPrompt, truncateForBranchPrompt(prompt)
 			if autoTag {

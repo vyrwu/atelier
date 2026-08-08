@@ -120,8 +120,8 @@ type Window struct {
 	// (empty = no PR, no badge). Hydrate stores it as the forge.* metadata
 	// the picker reads (@forge_state for the glyph + sort), with a
 	// far-future @forge_ts so the picker's offline `gh` refresh leaves it
-	// alone. Requires [integrations] forge to be active (the sandbox sets
-	// forge = "mock").
+	// alone. Requires [forge] provider to be active (the sandbox sets
+	// provider = "mock").
 	PR string `yaml:"pr"`
 
 	Metadata map[string]string `yaml:"metadata"` // plugin-namespaced (e.g. ai.*)

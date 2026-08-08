@@ -151,7 +151,7 @@ func integrationDiagnostics(set integration.Set) []diagnostic {
 	if set.Forge != nil {
 		ds = append(ds, diagnostic{0, "forge integration: " + set.Forge.Name(), ""})
 	} else {
-		ds = append(ds, diagnostic{1, "forge integration: off", `set [integrations] forge = "github" in config.toml for PR badges`})
+		ds = append(ds, diagnostic{1, "forge integration: off", `set [forge] provider = "github" in config.toml for PR badges`})
 	}
 	return ds
 }
