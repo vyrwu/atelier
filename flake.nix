@@ -15,7 +15,6 @@
           buildInputs = with pkgs; [
             # runtime deps (pinned via nixpkgs)
             tmux
-            fzf
             git
             jq
             yq-go

@@ -1,7 +1,6 @@
 package workspaces
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -72,50 +71,6 @@ func forgeStateRank(state string) int {
 	return len(forgeStateOrder)
 }
 
-// renderForgeBadge returns the spliceable, ANSI-colored badge token (leading
-// space) for a forge state, using the kernel-owned glyph + color spec
-// (integration.ForgeGlyph) so the picker badge and the status-line segment
-// stay in visual lockstep. Empty for ForgeNone/unknown. Pure.
-func renderForgeBadge(state string) string {
-	glyph, color, ok := integration.ForgeGlyph(integration.ForgeState(strings.TrimSpace(state)))
-	if !ok {
-		return ""
-	}
-	return " \033[38;5;" + color + "m" + glyph + "\033[0m"
-}
-
-// formatSessionDisplay assembles one session-picker row. The column ORDER is
-// load-bearing and has silently regressed before (an unrelated PR moved the
-// badge after the workspace name, and the test guarding it was deleted in the
-// same commit — see #11 reverting #15). It lives as a pure function, tested at
-// the rendered-string level, so a future reorder fails loudly regardless of
-// how the badge itself is produced.
-//
-// Layout (the picker's searchable name line):
-//
-//	<time> <attention-icon> <forge-badge> <#tag> <window> <session>
-//
-// The tag pill and the window (branch) LEAD — the fields that distinguish
-// parallel workspaces within a repo scan first; the session (repo) trails,
-// separated by a single space (no delimiter glyph). Colors travel with their
-// field, not their position: branch stays green, repo stays sessionColor, the
-// tag pill its own stable palette color.
-//
-// The AI recap is NOT part of this line — it's emitted as a separate picker
-// field so fzf search can target the name alone (see SessionRow). sessionColor
-// is the SGR color body for the session name ("36" cyan for git workspaces,
-// "38;5;166" orange for auto sessions); weight is "" or "1;". The tag pill
-// (renderTagPill) renders as plain visible "#tag" text, so fzf's name-field
-// search (--nth=1) narrows on "#tag" / "tag" too; empty tag adds nothing. Pure.
-func formatSessionDisplay(timeCol, icon, badgeCol, weight, sessionColor, session, window, tag string) string {
-	lead := ""
-	if pill := strings.TrimSpace(renderTagPill(tag)); pill != "" {
-		lead = pill + " "
-	}
-	return fmt.Sprintf("%s%s%s%s\033[%s32m%s\033[0m \033[%s%sm%s\033[0m",
-		timeCol, icon, badgeCol, lead, weight, window, weight, sessionColor, session)
-}
-
 // forgeWorkspaceCwd returns the CANONICAL directory for a workspace window —
 // the branch's worktree, or the repo root for the default-branch window.
 // Forge lookups MUST use this, never #{pane_current_path}: a bare or cd'd-away
@@ -161,18 +116,6 @@ func forgeDirExists(p string) bool {
 	return err == nil && fi.IsDir()
 }
 
-// forgeBadgeColumn normalizes a rendered forge badge to a fixed 2-cell slot
-// so the workspace-name column stays aligned across rows with and without a
-// PR. Empty → two spaces; present → glyph + trailing space (renderForgeBadge
-// emits a leading space, which we strip). The slot sits between the attention
-// icon and the workspace name.
-func forgeBadgeColumn(badge string) string {
-	if strings.TrimSpace(badge) == "" {
-		return "  "
-	}
-	return strings.TrimPrefix(badge, " ") + " "
-}
-
 // The detached spawn recipe lives in the workspace primitive as
 // workspace.SpawnForgeRefresh — fired both here (picker open) and at every
 // workspace-land event so the status-line forge badge stays current.
@@ -192,31 +135,6 @@ func ForgeRefreshCommand() *cobra.Command {
 				return nil
 			}
 			return refreshForgeBadges(tmuxhost.New(socket), forge, time.Now(), forgeRefreshTTL)
-		},
-	}
-	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
-	return c
-}
-
-// OpenForgeCommand is the hidden `_open-forge <row>`: bound to M-o in the
-// picker. Resolves the selected row's worktree and hands off to the active
-// forge adapter's Open (e.g. `gh pr view --web`).
-func OpenForgeCommand() *cobra.Command {
-	var socket string
-	c := &cobra.Command{
-		Use:    "_open-forge <row>",
-		Short:  "internal: open the workspace's forge item (PR) in a browser (M-o)",
-		Hidden: true,
-		Args:   cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			forge := integration.Active().Forge
-			if forge == nil {
-				return nil
-			}
-			// Binds pass the plain identity fields as {1} {2}; rejoin with a
-			// tab so parseForgeRow (tab-delimited) sees session/window. A
-			// single legacy {} arg already contains the tab and is unchanged.
-			return openForge(tmuxhost.New(socket), forge, strings.Join(args, "\t"))
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")

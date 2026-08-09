@@ -10,7 +10,7 @@ import (
 var Manifest = &manifest.Manifest{
 	Tool:          true,
 	Name:          "workspaces",
-	Description:   "Workspace picker, session switcher, clone-from-URL (fzf-driven, bash-exact)",
+	Description:   "Workspace picker, session switcher, clone-from-URL",
 	PrimaryInvoke: "sessions",
 	Binding: &manifest.Binding{
 		Key:         "M-n",
@@ -29,7 +29,7 @@ var Manifest = &manifest.Manifest{
 		PopupTitle:  "Select Workspace",
 	},
 	Popup:    manifest.KindNone,
-	Requires: []string{"git", "fzf"},
+	Requires: []string{"git"},
 	PickerBindings: []manifest.PickerBinding{
 		// creator (repo picker) — M-m toggles a multi-repo (AI-named) session.
 		{Picker: "creator", Key: "Enter", Action: "Accept repo (or submit prompt in multi-repo mode)"},
@@ -70,8 +70,7 @@ var Manifest = &manifest.Manifest{
 	},
 }
 
-// AddCommands wires workspaces' subcommands (including the internal
-// fzf-transform helpers) onto the dispatch root.
+// AddCommands wires workspaces' subcommands onto the dispatch root.
 func AddCommands(root *cobra.Command) {
 	root.AddCommand(PickCommand())
 	root.AddCommand(SessionsCommand())
@@ -79,26 +78,14 @@ func AddCommands(root *cobra.Command) {
 	root.AddCommand(DeleteCommand())
 	root.AddCommand(RecoverCommand())
 	root.AddCommand(CloneCommand())
-	// Internal subcommands wired up by the fzf transforms in pickers.
-	root.AddCommand(DeletePromptCommand())
-	root.AddCommand(DeleteRowCommand())
-	root.AddCommand(SessionListCommand())
-	root.AddCommand(TagCommand())
-	root.AddCommand(TagPreviewCommand())
-	root.AddCommand(SetScopePinCommand())
-	root.AddCommand(RecoverRowsCommand())
-	root.AddCommand(RecoverDeletePromptCommand())
-	root.AddCommand(RecoverDeleteRowCommand())
+	// Internal subcommands invoked by the creator/build flows and tests.
 	root.AddCommand(AutoSessionCommand())
 	root.AddCommand(PromptCommand())
 	root.AddCommand(BuildCommand())
 	root.AddCommand(NameCommand())
 	root.AddCommand(BgPullCommand())
-	// Kernel forge-badge slot commands (fed by the active ForgeIntegration).
+	// Kernel forge-badge slot: the detached refresh spawner.
 	root.AddCommand(ForgeRefreshCommand())
-	root.AddCommand(OpenForgeCommand())
 	// Continuous background refresh daemon (freshness + forge + self-heal).
 	root.AddCommand(RefreshLoopCommand())
-	// Live-update M-s: records the picker's fzf --listen port for the loop.
-	root.AddCommand(MSListenCommand())
 }

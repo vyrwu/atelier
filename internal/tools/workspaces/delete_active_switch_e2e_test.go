@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vyrwu/atelier/internal/testtmux"
+	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
 // outerClientOn asserts (via Eventually) that the outer client
@@ -94,9 +95,8 @@ func TestDeleteRow_ActiveDefaultBranch_SwitchesInsteadOfDetaching(t *testing.T) 
 	clientName := registerOuterClient(t, srv, "vyrwu/demo")
 
 	// Delete the active workspace's default-branch row → kill-session path.
-	if _, err := srv.RunAtelier("tools", "workspaces", "_delete-row",
-		"vyrwu/demo\tmain\t<display>"); err != nil {
-		t.Fatalf("_delete-row: %v", err)
+	if err := workspaces.DeleteRow(srv.Client, "vyrwu/demo", "main"); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
 	}
 
 	testtmux.Eventually(t, 3*time.Second, func() error {
@@ -139,9 +139,8 @@ func TestDeleteRow_ActiveSoleWindow_SwitchesInsteadOfDetaching(t *testing.T) {
 	_ = srv.Attach(t, "vyrwu/demo")
 	clientName := registerOuterClient(t, srv, "vyrwu/demo")
 
-	if _, err := srv.RunAtelier("tools", "workspaces", "_delete-row",
-		"vyrwu/demo\tfeat\t<display>"); err != nil {
-		t.Fatalf("_delete-row: %v", err)
+	if err := workspaces.DeleteRow(srv.Client, "vyrwu/demo", "feat"); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
 	}
 
 	testtmux.Eventually(t, 3*time.Second, func() error {
@@ -181,9 +180,8 @@ func TestDeleteRow_InactiveWorkspace_DoesNotMoveOuter(t *testing.T) {
 	_ = srv.Attach(t, "vyrwu/keep")
 	clientName := registerOuterClient(t, srv, "vyrwu/keep")
 
-	if _, err := srv.RunAtelier("tools", "workspaces", "_delete-row",
-		"vyrwu/doomed\tmain\t<display>"); err != nil {
-		t.Fatalf("_delete-row: %v", err)
+	if err := workspaces.DeleteRow(srv.Client, "vyrwu/doomed", "main"); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
 	}
 
 	testtmux.Eventually(t, 3*time.Second, func() error {

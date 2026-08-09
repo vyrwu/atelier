@@ -25,17 +25,17 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
 	"github.com/vyrwu/atelier/internal/awsassume"
 	"github.com/vyrwu/atelier/internal/dispatch"
-	"github.com/vyrwu/atelier/internal/fzf"
-	"github.com/vyrwu/atelier/internal/fzfstyle"
 	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/popup"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/tui"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
@@ -121,7 +121,7 @@ func OpenCommand() *cobra.Command {
 
 			picked, err := pickContext(contexts)
 			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
+				if errors.Is(err, tui.ErrCancelled) {
 					return nil
 				}
 				return err
@@ -215,7 +215,7 @@ func SwitchCommand() *cobra.Command {
 			}
 			picked, err := pickContext(contexts)
 			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
+				if errors.Is(err, tui.ErrCancelled) {
 					return nil
 				}
 				return err
@@ -347,17 +347,29 @@ func LaunchCommand() *cobra.Command {
 	}
 }
 
-// pickContext is the bash-exact tmux_k8s_picker port (prompt 胡 blue, label
-// ` Contexts `, blue hl).
+// pickContext renders the configured k8s contexts in the shared tui list
+// picker and returns the chosen context name. Each row shows the context
+// name (bold) with the underlying kube-context as a subtle detail when it
+// differs. Cancellation surfaces as tui.ErrCancelled.
 func pickContext(contexts []Context) (string, error) {
-	names := make([]string, 0, len(contexts))
+	items := make([]list.Item, 0, len(contexts))
 	for _, c := range contexts {
-		names = append(names, c.Name)
+		desc := ""
+		if c.KubeContext != "" && c.KubeContext != c.Name {
+			desc = c.KubeContext
+		}
+		items = append(items, tui.SimpleItem{
+			IDStr:    c.Name,
+			TitleStr: c.Name,
+			DescStr:  desc,
+			Filter:   c.Name,
+		})
 	}
-	args := fzfstyle.Args("胡 ", "Contexts", "blue",
-		fzfstyle.WithCustomColor("prompt:blue:bold,pointer:blue,query:blue,hl:blue,hl+:blue:bold,label:103,border:103,footer:103"),
-	)
-	return fzf.Pick(names, args...)
+	outcome, err := tui.Run(tui.NewList(tui.NewTheme(tui.ColBlue), " Contexts ", items))
+	if err != nil {
+		return "", err
+	}
+	return outcome.Selection, nil
 }
 
 // setup is the bash-exact tmux_k8s_setup port:

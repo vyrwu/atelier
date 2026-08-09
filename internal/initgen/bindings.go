@@ -461,7 +461,10 @@ func popupOptions(style manifest.Style, title string, startCwd bool) string {
 	var parts []string
 	switch style {
 	case manifest.StylePicker:
-		parts = append(parts, "-B", "-w70%", "-h70%")
+		// Rounded border drawn by tmux — the bubbletea pickers render their
+		// content inline and don't draw their own frame. colour141 ≈ the
+		// dracula purple accent. Taller than before so more rows fit.
+		parts = append(parts, `-b rounded`, `-S "fg=colour141"`, "-w72%", "-h80%")
 	case manifest.StyleFull, "":
 		parts = append(parts, `-b rounded`, `-S "fg=colour103"`)
 		if title != "" {

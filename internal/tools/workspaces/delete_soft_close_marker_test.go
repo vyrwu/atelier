@@ -24,10 +24,12 @@ func TestDeleteRow_MarksSoftCloseBeforeKill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read source: %v", err)
 	}
+	// The ordering logic lives in the shared deleteRow helper (called by
+	// both the hidden _delete-row command and the bubbletea M-s picker).
 	s := string(src)
-	start := strings.Index(s, "func DeleteRowCommand")
+	start := strings.Index(s, "func deleteRow")
 	if start < 0 {
-		t.Fatal("DeleteRowCommand not found")
+		t.Fatal("deleteRow not found")
 	}
 	body := s[start:]
 	if end := strings.Index(body, "\nfunc "); end > 0 {

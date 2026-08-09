@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -100,13 +99,6 @@ func runDiagnostics() []diagnostic {
 		ds = append(ds, diagnostic{2, "tmux MISSING", err.Error()})
 	}
 
-	if path, err := exec.LookPath("fzf"); err == nil {
-		ver := fzfVersion(path)
-		ds = append(ds, diagnostic{0, "fzf " + ver, ""})
-	} else {
-		ds = append(ds, diagnostic{2, "fzf MISSING", "install via brew/nix"})
-	}
-
 	res, perr := plugin.Discover()
 	if perr != nil {
 		ds = append(ds, diagnostic{2, "plugin discovery failed", perr.Error()})
@@ -154,18 +146,6 @@ func integrationDiagnostics(set integration.Set) []diagnostic {
 		ds = append(ds, diagnostic{1, "forge integration: off", `set [forge] provider = "github" in config.toml for PR badges`})
 	}
 	return ds
-}
-
-func fzfVersion(path string) string {
-	out, err := exec.Command(path, "--version").Output()
-	if err != nil {
-		return "?"
-	}
-	fields := strings.Fields(string(out))
-	if len(fields) > 0 {
-		return fields[0]
-	}
-	return "?"
 }
 
 // readAnyKey puts stdin in raw mode and waits for a single keypress

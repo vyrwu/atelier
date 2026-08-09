@@ -16,8 +16,8 @@ import (
 	"golang.org/x/term"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
-	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/manifest"
+	"github.com/vyrwu/atelier/internal/tui"
 )
 
 // Dispatch builds a built-in tool's cobra root, runs it with args, and
@@ -54,7 +54,7 @@ func Dispatch(m *manifest.Manifest, addCmds func(root *cobra.Command), args []st
 // the message is readable before the popup closes → exit 1, success →
 // return so the caller's process exits 0.
 func Finish(name string, err error) {
-	if errors.Is(err, fzf.ErrCancelled) {
+	if errors.Is(err, tui.ErrCancelled) {
 		debuglog.Logf("toolmain: exit cancelled (130) %s", name)
 		os.Exit(130)
 	}

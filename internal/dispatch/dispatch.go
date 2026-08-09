@@ -28,8 +28,8 @@ const CoreBinary = "atelier"
 //	ToolCmd("workspaces", "sessions")
 //	    → "atelier tools workspaces sessions"
 //
-//	ToolCmd("workspaces", "_delete-row", "{}")
-//	    → "atelier tools workspaces _delete-row {}"
+//	ToolCmd("workspaces", "_bg-pull", repoPath)
+//	    → "atelier tools workspaces _bg-pull <repoPath>"
 //
 // Arguments are joined with single spaces; callers that need shell
 // quoting (e.g. paths with spaces) should pre-quote.

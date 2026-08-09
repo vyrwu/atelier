@@ -22,7 +22,7 @@ var Manifest = &manifest.Manifest{
 		AccentColor: "180",
 		PopupTitle:  "AWS Assume",
 	},
-	Requires: []string{"granted", "fzf"},
+	Requires: []string{"granted"},
 	PickerBindings: []manifest.PickerBinding{
 		{Key: "Enter", Action: "Assume `<profile>` in the outer pane's shell (granted `assume`)"},
 		{Key: "Esc", Action: "Dismiss"},

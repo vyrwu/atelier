@@ -8,11 +8,9 @@ import (
 )
 
 // TestRecoverPickerRows covers the M-r "Recover Workspace" row shape: every
-// worktree under WorktreeRoot becomes a tab-separated row of
-// `<repo>\t<branch>\t<display>` where the display column is what fzf
-// renders. Catches regressions in field order (the picker's bind
-// transforms split on \t and assume `repo` is column 1, `branch`
-// column 2).
+// worktree under WorktreeRoot becomes a recoverItem carrying repo + branch
+// (the switch identity) and a filterable value covering both. Catches
+// regressions in field mapping (repo vs branch) and in the search scope.
 func TestRecoverPickerRows(t *testing.T) {
 	tmp := t.TempDir()
 	mkWorktree := func(parts ...string) {
@@ -36,34 +34,32 @@ func TestRecoverPickerRows(t *testing.T) {
 
 	t.Setenv("ATELIER_WORKTREE_ROOT", tmp)
 
-	rows, err := recoverPickerRows()
+	items, err := recoverListItems()
 	if err != nil {
-		t.Fatalf("recoverPickerRows: %v", err)
+		t.Fatalf("recoverListItems: %v", err)
 	}
-	if len(rows) != 3 {
-		t.Fatalf("expected 3 rows, got %d: %v", len(rows), rows)
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d: %v", len(items), items)
 	}
 
-	wantPrefixes := []string{
-		"owner1/repoA\tfeat/add-foo\t",
-		"owner1/repoA\tmain\t",
-		"owner2\tstandalone-branch\t",
+	want := []struct{ repo, branch string }{
+		{"owner1/repoA", "feat/add-foo"},
+		{"owner1/repoA", "main"},
+		{"owner2", "standalone-branch"},
 	}
-	for i, want := range wantPrefixes {
-		if !strings.HasPrefix(rows[i], want) {
-			t.Errorf("row %d:\n  got:  %q\n  want prefix: %q", i, rows[i], want)
+	for i, w := range want {
+		it, ok := items[i].(recoverItem)
+		if !ok {
+			t.Fatalf("item %d is not a recoverItem: %T", i, items[i])
 		}
-		// Display column (after the second tab) must contain BOTH repo
-		// and branch — fzf --nth=3 searches only this field, so missing
-		// either breaks search.
-		fields := strings.SplitN(rows[i], "\t", 3)
-		if len(fields) != 3 {
-			t.Fatalf("row %d has %d fields, want 3: %q", i, len(fields), rows[i])
+		if it.repo != w.repo || it.branch != w.branch {
+			t.Errorf("item %d: got (%q,%q), want (%q,%q)", i, it.repo, it.branch, w.repo, w.branch)
 		}
-		display := fields[2]
-		if !strings.Contains(display, fields[0]) || !strings.Contains(display, fields[1]) {
-			t.Errorf("row %d display missing repo/branch: display=%q repo=%q branch=%q",
-				i, display, fields[0], fields[1])
+		// The filter value must cover BOTH repo and branch — the picker
+		// searches this field, so missing either breaks search.
+		fv := it.FilterValue()
+		if !strings.Contains(fv, w.repo) || !strings.Contains(fv, w.branch) {
+			t.Errorf("item %d FilterValue %q missing repo %q or branch %q", i, fv, w.repo, w.branch)
 		}
 	}
 }
@@ -100,11 +96,11 @@ func TestRecoverPickerRows_EmptyRoot(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("ATELIER_WORKTREE_ROOT", filepath.Join(tmp, "does-not-exist"))
 
-	rows, err := recoverPickerRows()
+	items, err := recoverListItems()
 	if err != nil {
 		t.Fatalf("expected nil err on missing root, got %v", err)
 	}
-	if len(rows) != 0 {
-		t.Errorf("expected empty rows, got %v", rows)
+	if len(items) != 0 {
+		t.Errorf("expected empty items, got %v", items)
 	}
 }

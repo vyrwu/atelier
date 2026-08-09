@@ -1,11 +1,9 @@
-// Package workspaces is the atelier workspaces tool — the bash-exact port
-// of tmux_session_picker, tmux_workspace_picker, tmux_workspace_name,
-// tmux_workspace_prompt, tmux_workspace_build, tmux_workspace_auto_session,
-// tmux_workspace_session_name, tmux_clone_workspace, tmux_delete_workspace,
-// tmux_workspace_delete_prompt.
+// Package workspaces is the atelier workspaces tool: the M-s sessions
+// picker, M-n creator (repo + multi-repo AI flows), M-r recover, clone,
+// tagging, and the background refresh loop.
 //
-// All fzf invocations use the atelier shared palette (internal/fzfstyle)
-// configured to match bash's exact accent colors per picker.
+// Every picker/prompt/loader renders via the shared bubbletea substrate in
+// internal/tui (see sessions_tui.go, recover_tui.go) — no fzf.
 package workspaces
 
 import (
@@ -13,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,21 +20,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
-
 	"github.com/vyrwu/atelier/internal/dispatch"
-	"github.com/vyrwu/atelier/internal/fzf"
-	"github.com/vyrwu/atelier/internal/fzfstyle"
 	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
 	"github.com/vyrwu/atelier/internal/initgen"
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/perf"
-	"github.com/vyrwu/atelier/internal/spinner"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/tui"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
@@ -49,151 +44,73 @@ func SessionsCommand() *cobra.Command {
 	var socket string
 	c := &cobra.Command{
 		Use:   "sessions",
-		Short: "Pick an existing workspace session (bash-exact tmux_session_picker)",
+		Short: "Pick an existing workspace session (bubbletea picker)",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			h := tmuxhost.New(socket)
-			// Show a centered loading box while the list is assembled
-			// (tmux list-windows + one git default-branch resolve per
-			// repo). Delay-gated so a fast build doesn't flash the box
-			// before fzf takes over the popup.
-			var rows []SessionRow
-			sp := spinner.NewBox("Loading workspaces...")
-			sp.Delay = 120 * time.Millisecond
-			err := sp.Run(func() error {
-				var e error
-				rows, e = BuildSessionList(h)
-				return e
-			})
-			if err != nil {
-				return err
-			}
-			// Empty state: still open the picker so the user sees a usable
-			// dismissable surface (Esc cancels) and a hint to use M-n.
-			// Erroring + pausing here causes the popup to stack on top of
-			// itself when the user reflexively retries.
-			lines := make([]string, 0, len(rows))
-			for _, r := range rows {
-				lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s", r.Session, r.Window, r.Display, r.Recap))
-			}
-			emptyHeader := ""
-			if len(rows) == 0 {
-				emptyHeader = "No workspaces yet — press M-n to create one, or Esc to dismiss"
-			}
 
-			// Bash uses red accent + extra `hl:red,hl+:red:bold` in --color.
-			// fzfstyle.Args sets the standard palette; override with WithCustomColor
-			// to add the red hl variants. Same prompt as bash: "栽 ".
-			//
-			// bg+ / fg+ are explicit so the highlighted row is clearly
-			// distinct from the rest of the list — fzf's default `bg+`
-			// is a subtle reverse that vanishes against the dracula
-			// popup chrome. `#44475a` is dracula's "current line"
-			// selection grey — dimmer than the purple it replaced, so
-			// `#f8f8f2:bold` text reads with more contrast on it.
-			// Kernel forge-badge slot: when a forge integration is active,
-			// poke its refresh once now (fire-and-forget; TTL-throttled) so
-			// the PR badge is current on the NEXT open, and advertise M-o.
-			// When no forge adapter is configured the slot is simply absent.
+			// Kernel forge-badge slot: poke a refresh once now (fire-and-
+			// forget, TTL-throttled) so the PR badge is current on the next
+			// live tick. Absent adapter → no-op.
 			workspace.SpawnForgeRefresh()
 
-			// Sticky scope (M-p): a pinned query pre-seeds the picker and
-			// lights the "Pinned" footer badge, so a focused context (one
-			// repo, one tag) survives across picker invocations for the
-			// rest of the tmux session. See workspace.GetScopePin.
+			// Sticky scope (M-p): a pinned query pre-seeds the picker filter
+			// so a focused context survives across picker opens.
 			pin := workspace.GetScopePin(h)
-			footer := sessionFooter(pin != "", forgeActive())
 
-			opts := []fzfstyle.Opt{
-				fzfstyle.WithCustomColor("prompt:red:bold,pointer:red,query:red,hl:red,hl+:red:bold,bg+:#44475a,fg+:#f8f8f2:bold,label:103,border:103,footer:103"),
-				fzfstyle.WithDelimiter("\t"),
-				// Display the name (field 3) plus the recap (field 4) on its own
-				// line beneath it. No --wrap, so a too-wide recap is truncated to
-				// the popup width by fzf and row height stays a predictable two
-				// lines. Records are NUL-framed in and out (multi-line items —
-				// see internal/fzf and SessionListCommand's reload output).
-				fzfstyle.WithNth("3,4"),
-				// Search the NAME only (projection field 1), never the recap —
-				// typing matches workspaces by name, not by summary.
-				fzfstyle.WithSearchNth("1"),
-				// Fill the current-row highlight to the window edge, across both
-				// lines of the item.
-				fzfstyle.WithHighlightLine(),
-				fzfstyle.WithReadZero(),
-				fzfstyle.WithPrintZero(),
-				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_delete-prompt", "\"$FZF_PROMPT\"", "{1}", "{2}")),
-				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{1}", "{2}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(y)\"; fi"),
-				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"put(n)\"; fi"),
-				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* || \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"abort\"; fi"),
-				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_delete-row", "{1}", "{2}")+")+reload("+dispatch.ToolCmd("workspaces", "_session-list")+")+change-prompt(栽 )\"; elif [[ \"$FZF_PROMPT\" == Cannot* ]]; then echo \"change-prompt(栽 )\"; else echo \"accept\"; fi"),
-				fzfstyle.WithBind("alt-s", "abort"),
-				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
-				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
-				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
-				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				// M-t: tag the current workspace via a nested tag picker,
-				// then reload so the colored pill renders in place.
-				fzfstyle.WithBind("alt-t", tagBind()),
-				// M-p: toggle the session scope pin. The sub-command reads
-				// the current pin state and echoes the fzf actions (pin +
-				// trailing space + badge, or unpin + clear-query) so the
-				// picker updates live without a full reload.
-				fzfstyle.WithBind("alt-p", "transform:"+dispatch.ToolCmd("workspaces", "_set-scope-pin", "{q}")),
-			}
-			if pin != "" {
-				// Trailing space: the pin reads as a prefix the user keeps
-				// typing after to narrow within the scope.
-				opts = append(opts, fzfstyle.WithQuery(pin+" "))
-			}
-			if forgeActive() {
-				opts = append(opts, fzfstyle.WithBind("alt-o",
-					"execute-silent("+dispatch.ToolCmd("workspaces", "_open-forge", "{1}", "{2}")+")"))
-			}
-			// Live update: with a new-enough fzf (and outside e2e), expose an
-			// fzf --listen control port so the background refresh loop can push a
-			// reload when it updates attention / recap / badges, and --track to
-			// keep the cursor on the focused workspace across those reloads. The
-			// port is stashed in a tmux global on start and cleared on close, so
-			// the loop only pushes while this picker is actually open.
-			liveReload := !agentAutoOpenSkipped() && fzf.SupportsLiveReload()
-			if liveReload {
-				opts = append(opts, fzfstyle.WithBind("start",
-					"execute-silent("+dispatch.ToolCmd("workspaces", "_ms-listen", "$FZF_PORT")+")"))
-				defer clearMSPickerPort(h)
-			}
-			opts = append(opts, fzfstyle.WithFooter(footer))
-			args := fzfstyle.Args("栽 ", "Select Workspace", "red", opts...)
-			if emptyHeader != "" {
-				args = append(args, "--header="+emptyHeader)
-			}
-			if liveReload {
-				args = append(args, "--listen", "127.0.0.1:0", "--track")
-			}
-
-			debuglog.Logf("workspaces.sessions: opening picker (%d rows)", len(lines))
-			picked, err := fzf.Pick(lines, args...)
-			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
-					debuglog.Logf("workspaces.sessions: cancelled")
+			// Picker loop. The native bubbletea picker's own tea.Tick diffs
+			// rows in place (see sessions_tui.go), so attention/recap changes
+			// appear live without the old fzf --listen HTTP push. Cross-jumps
+			// and M-q come back as outcome keys; M-t runs a nested tag prompt
+			// and reopens; everything else resolves to a picked workspace.
+			var row SessionRow
+			for {
+				var rows []SessionRow
+				// tui.Loader renders a spinner only if the list build is slow;
+				// fast builds show nothing (delay-gated).
+				if err := tui.Loader("Loading workspaces…", func(func(string)) error {
+					var e error
+					rows, e = BuildSessionList(h)
+					return e
+				}); err != nil {
 					return err
 				}
-				return err
+				outcome, runErr := tui.Run(newSessionsModel(h, rows, pin))
+				if runErr != nil {
+					if errors.Is(runErr, tui.ErrCancelled) {
+						debuglog.Logf("workspaces.sessions: cancelled")
+					}
+					return runErr
+				}
+				switch outcome.Key {
+				case "workspaces/pick":
+					return tui.ExecReplace("tools", "workspaces", "pick")
+				case "workspaces/recover":
+					return tui.ExecReplace("tools", "workspaces", "recover")
+				case "toolselector/select":
+					return tui.ExecReplace("tools", "toolselector", "select")
+				case "workspaces/clone":
+					return tui.ExecReplace("tools", "workspaces", "clone")
+				case "quit":
+					return nil
+				case "tag":
+					s, wnd, _ := strings.Cut(outcome.Selection, "\x00")
+					if err := runTagPrompt(h, s, wnd); err != nil && !errors.Is(err, tui.ErrCancelled) {
+						return err
+					}
+					continue // reopen the picker so the new tag pill renders
+				}
+				if outcome.Selection == "" {
+					debuglog.Logf("workspaces.sessions: empty pick — propagating cancel")
+					return tui.ErrCancelled
+				}
+				pickedSession, pickedWindow, ok := strings.Cut(outcome.Selection, "\x00")
+				if !ok {
+					return fmt.Errorf("could not parse picked entry: %q", outcome.Selection)
+				}
+				debuglog.Logf("workspaces.sessions: picked %s/%s", pickedSession, pickedWindow)
+				row = SessionRow{Session: pickedSession, Window: pickedWindow}
+				break
 			}
-			// fzf with --ansi strips escape codes from the returned line.
-			// Parse the first two tab-separated fields directly — those
-			// fields are plain text (Session\tWindow) by construction.
-			// Empty picked happens when fzf accepts on an empty list
-			// (e.g. after a delete+reload bind emptied the rows) — treat
-			// as a cancel.
-			if picked == "" {
-				debuglog.Logf("workspaces.sessions: empty pick — propagating cancel")
-				return fzf.ErrCancelled
-			}
-			debuglog.Logf("workspaces.sessions: picked %q", picked)
-			fields := strings.SplitN(picked, "\t", 3)
-			if len(fields) < 2 {
-				return fmt.Errorf("could not parse picked entry: %q", picked)
-			}
-			row := SessionRow{Session: fields[0], Window: fields[1]}
 
 			// Same UX as bash:
 			//  - on default branch of a repo session → run pull-default
@@ -308,57 +225,51 @@ func PickCommand() *cobra.Command {
 			}
 			sort.Strings(repos)
 
-			lines := make([]string, 0, len(repos))
+			_ = socket
+			items := make([]list.Item, 0, len(repos))
 			for _, r := range repos {
-				// Display: cyan owner/repo
-				parts := strings.SplitN(r, "/", 2)
-				if len(parts) == 2 {
-					lines = append(lines, fmt.Sprintf("%s\t\033[36m%s/%s\033[0m", r, parts[0], parts[1]))
-				} else {
-					lines = append(lines, fmt.Sprintf("%s\t\033[36m%s\033[0m", r, r))
-				}
+				items = append(items, tui.SimpleItem{IDStr: r, TitleStr: r, DescStr: "start a worktree here", Filter: r})
 			}
 
-			footerRepo := "M-m · multi-repo  |  M-? · help"
-			footerAuto := "M-m · pick repo  |  M-? · help"
-
-			args := fzfstyle.Args("製 ", "New Workspace", "green",
-				fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,footer:103"),
-				fzfstyle.WithDelimiter("\t"),
-				fzfstyle.WithNth("2"),
-				fzfstyle.WithBind("alt-n", "abort"),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
-				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
-				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
-				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithBind("alt-m", fmt.Sprintf(
-					`transform:if [[ "$FZF_PROMPT" == '製 ' ]]; then echo 'change-prompt(製? )+disable-search+change-footer(%s)'; else echo 'change-prompt(製 )+enable-search+change-footer(%s)'; fi`,
-					footerAuto, footerRepo)),
-				fzfstyle.WithBind("enter", fmt.Sprintf(`transform:if [[ "$FZF_PROMPT" == "製? " ]]; then echo "become(%s {q})"; else echo "accept"; fi`, dispatch.ToolCmd("workspaces", "_auto-session"))),
-				fzfstyle.WithFooter(footerRepo),
-			)
-			debuglog.Logf("workspaces.pick: opening repo picker (%d repos)", len(lines))
-			picked, err := fzf.Pick(lines, args...)
-			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
-					debuglog.Logf("workspaces.pick: cancelled")
+			// M-n has two ways to start a workspace, toggled with M-m: pick an
+			// existing repo (the list) or type a multi-repo task prompt (an
+			// AI-named session). Cross-jumps (M-s/M-r/M-;/M-u) hop to siblings.
+			for {
+				outcome, err := tui.Run(tui.NewList(tui.CreatorTheme(), " New Workspace ", items,
+					tui.Action("mode:auto", "alt+m", "M-m", "multi-repo"),
+					tui.Action("workspaces/sessions", "alt+s", "M-s", "sessions"),
+					tui.Action("workspaces/recover", "alt+r", "M-r", "recover"),
+					tui.Action("toolselector/select", "alt+;", "M-;", "tools"),
+					tui.Action("workspaces/clone", "alt+u", "M-u", "clone")))
+				if err != nil {
 					return err
 				}
-				return err
+				switch outcome.Key {
+				case "workspaces/sessions":
+					return tui.ExecReplace("tools", "workspaces", "sessions")
+				case "workspaces/recover":
+					return tui.ExecReplace("tools", "workspaces", "recover")
+				case "toolselector/select":
+					return tui.ExecReplace("tools", "toolselector", "select")
+				case "workspaces/clone":
+					return tui.ExecReplace("tools", "workspaces", "clone")
+				case "mode:auto":
+					toggledBack, err := runMultiRepoPrompt()
+					if toggledBack {
+						continue // M-m again → back to the repo list
+					}
+					return err
+				}
+				if outcome.Selection == "" {
+					debuglog.Logf("workspaces.pick: empty pick — propagating cancel")
+					return tui.ErrCancelled
+				}
+				repo := outcome.Selection
+				repoPath := filepath.Join(base, repo)
+				defaultBranch := DefaultBranch(repoPath)
+				debuglog.Logf("workspaces.pick: picked repo=%q → prompt flow", repo)
+				return runWorkspacePrompt(repo, repoPath, defaultBranch, "")
 			}
-			repo, cancelled := interpretPickedRepo(picked)
-			if cancelled {
-				debuglog.Logf("workspaces.pick: empty pick (become chain ended) — propagating cancel")
-				return fzf.ErrCancelled
-			}
-			repoPath := filepath.Join(base, repo)
-			defaultBranch := DefaultBranch(repoPath)
-			// AI branch-naming is the default; the prompt picker offers M-m to
-			// switch to a manual branch name.
-			debuglog.Logf("workspaces.pick: picked repo=%q → prompt flow", repo)
-
-			_ = socket
-			return runWorkspacePrompt(repo, repoPath, defaultBranch, "")
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
@@ -380,39 +291,40 @@ func CloneCommand() *cobra.Command {
 			query := ""
 			errMsg := ""
 			for {
-				header := "paste a github URL → clone + open default branch"
+				header := "paste a GitHub URL → clone + open default branch"
 				if errMsg != "" {
 					header = errMsg
 				}
-				args := fzfstyle.Args("複 ", "Clone Repo", "yellow",
-					fzfstyle.WithCustomColor("prompt:yellow:bold,pointer:yellow,query:yellow,hl:yellow,hl+:yellow:bold,label:103,border:103,header:yellow,footer:103"),
-					fzfstyle.WithNoClear(),
-					fzfstyle.WithPrintQuery(),
-					fzfstyle.WithExpect("enter"),
-					fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
-					fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
-					fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
-					fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
-					fzfstyle.WithHeader(header),
-					fzfstyle.WithFooter("M-? · help"),
-					fzfstyle.WithQuery(query),
-				)
-				res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
+				outcome, err := tui.Run(tui.NewPrompt(tui.CloneTheme(), tui.PromptConfig{
+					Title:       " Clone Repo ",
+					Glyph:       "複 ",
+					Placeholder: "https://github.com/owner/repo",
+					Initial:     query,
+					Header:      header,
+					HeaderError: errMsg != "",
+					Actions: []tui.KeyAction{
+						tui.Action("workspaces/sessions", "alt+s", "M-s", "sessions"),
+						tui.Action("workspaces/pick", "alt+n", "M-n", "new"),
+						tui.Action("workspaces/recover", "alt+r", "M-r", "recover"),
+						tui.Action("toolselector/select", "alt+;", "M-;", "tools"),
+					},
+				}))
 				if err != nil {
-					if errors.Is(err, fzf.ErrCancelled) {
-						return err
-					}
 					return err
 				}
-				// fzf become() short-circuit: see TestCreator_PromptFlow_*
-				// and the inline comment in runWorkspaceName.
-				if res.Key == "" && res.Query == "" && res.Selection == "" {
-					debuglog.Logf("CloneCommand: fzf returned empty (likely become()) — exit silently")
-					return nil
+				switch outcome.Key {
+				case "workspaces/sessions":
+					return tui.ExecReplace("tools", "workspaces", "sessions")
+				case "workspaces/pick":
+					return tui.ExecReplace("tools", "workspaces", "pick")
+				case "workspaces/recover":
+					return tui.ExecReplace("tools", "workspaces", "recover")
+				case "toolselector/select":
+					return tui.ExecReplace("tools", "toolselector", "select")
 				}
-				url := strings.TrimSpace(res.Query)
+				url := strings.TrimSpace(outcome.Query)
 				if url == "" {
-					errMsg = "✗ enter a github URL"
+					errMsg = "✗ enter a GitHub URL"
 					continue
 				}
 				m := cloneURLRe.FindStringSubmatch(url)
@@ -430,10 +342,10 @@ func CloneCommand() *cobra.Command {
 
 				if _, err := os.Stat(target); err != nil {
 					_ = os.MkdirAll(filepath.Dir(target), 0o755)
-					err := spinner.NewBox(fmt.Sprintf("Cloning %s/%s...", owner, repo)).Run(func() error {
+					cloneErr := tui.Loader(fmt.Sprintf("Cloning %s/%s…", owner, repo), func(func(string)) error {
 						return runGit("", "clone", url, target)
 					})
-					if err != nil {
+					if cloneErr != nil {
 						errMsg = fmt.Sprintf("✗ clone failed for %s/%s", owner, repo)
 						query = url
 						continue
@@ -488,150 +400,82 @@ func DeleteCommand() *cobra.Command {
 	return c
 }
 
-// parsePickedIdentity resolves the (session, window) — or (repo, branch)
-// — identity a picker fzf bind hands to a hidden delete/open subcommand.
-//
-// Binds MUST pass the two plain fields as `{1} {2}`, NEVER the whole
-// `{}` record. The full row carries the styled display column: ANSI SGR
-// escapes, an embedded recap newline, and free-form AI recap text laced
-// with `+`, `(`, `)`, `;`. When such a row is substituted into a
-// transform-emitted `execute-silent(... {})` action, fzf re-parses the
-// echoed string as an action list and those escapes/punctuation corrupt
-// the parse — the delete silently never fires, and the stuck "Confirm?"
-// prompt then also blocks plain Enter navigation (the exact "can't
-// delete / can't even enter" wedge). Fields 1-2 are plain text by
-// construction (session/window or repo/branch), so `{1} {2}` round-trips
-// safely. See picked_identity_test.go.
-//
-// A single tab-joined arg (a legacy `{}` invocation) is still split as a
-// fallback so a stray old bind can't wedge the picker.
-func parsePickedIdentity(args []string) (first, second string, ok bool) {
-	if len(args) >= 2 {
-		return args[0], args[1], args[0] != "" && args[1] != ""
+// deleteRow soft-closes (or fully removes, for the sole-window and
+// default-branch cases) the workspace identified by (session, window).
+// Called in-process by the bubbletea M-s picker's inline delete, with the
+// outer-client hop rules that keep the picker's popup-client alive across a
+// self-delete.
+func deleteRow(h *tmuxhost.Client, session, window string) error {
+	repoPath, _ := getSessionRepoPath(h, session)
+	defaultBranch := ""
+	if repoPath != "" {
+		defaultBranch = DefaultBranch(repoPath)
 	}
-	if len(args) == 1 {
-		f := strings.SplitN(args[0], "\t", 3)
-		if len(f) >= 2 {
-			return f[0], f[1], f[0] != "" && f[1] != ""
-		}
-	}
-	return "", "", false
-}
 
-// _delete-prompt and _delete-row are internal subcommands used by the
-// session-picker fzf binds. They mirror tmux_workspace_delete_prompt and
-// tmux_delete_workspace.
-func DeletePromptCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "_delete-prompt",
-		Short:  "internal: fzf ctrl-x action for the session picker",
-		Hidden: true,
-		Args:   cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			prompt := args[0]
-			out := cmd.OutOrStdout()
-			// Second M-x press while the confirm prompt is up: leave it as-is.
-			if strings.HasPrefix(prompt, "Confirm") {
-				return nil
-			}
-			// args[1:] carry the row identity fields ({1} {2}).
-			if _, _, ok := parsePickedIdentity(args[1:]); !ok {
-				return nil
-			}
-			// Every row confirms the same way now — the default-branch
-			// window is dismissable too (DeleteRowCommand removes just the
-			// window when siblings remain, kills the session when it's the
-			// last one).
-			fmt.Fprintln(out, "change-prompt(Confirm? y/n: )")
-			return nil
-		},
-	}
-}
-
-func DeleteRowCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "_delete-row",
-		Short:  "internal: delete a single workspace row (called from session picker)",
-		Hidden: true,
-		Args:   cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			session, window, ok := parsePickedIdentity(args)
-			if !ok {
-				return nil
-			}
-			h := tmuxhost.New("")
-			repoPath, _ := getSessionRepoPath(h, session)
-			defaultBranch := ""
-			if repoPath != "" {
-				defaultBranch = DefaultBranch(repoPath)
-			}
-
-			// M-s M-x is a SOFT close. It removes the workspace from the
-			// live picker (kill-window + statestore prune) but does NOT
-			// touch the on-disk worktree directory. M-r still sees it
-			// and the user can restore the workspace by picking it.
-			// Permanent worktree deletion (rm -rf the dir + branch) is
-			// reserved for the M-r picker's own M-x — that flow is
-			// explicit about "I really mean it".
-			if repoPath != "" && window != defaultBranch {
-				// Stamp the soft-close marker FIRST, before any tmux
-				// mutation. When the victim is the sole window in its
-				// session AND the outer client is parked on it, the
-				// kill-window below destroys the session and tears down
-				// the pane/client hosting THIS very process — so anything
-				// after the kill (RemoveWindow, the marker, cleanup) may
-				// never run. The marker only needs the (stable) worktree
-				// path, so writing it up front makes M-r's "closed X ago"
-				// badge survive a self-delete. (Bug: the badge silently
-				// vanished exactly when you deleted the workspace you were
-				// sitting on.)
-				touchSoftClosedMarker(filepath.Join(workspaceWorktreeRoot(), session, window))
-				// If the target window is the outer client's CURRENT
-				// window, killing it forces tmux to auto-switch which
-				// tears down the popup-client holding the sessions
-				// picker. Hop the outer to a safe spot before the kill
-				// so the picker survives. When a sibling window exists it
-				// absorbs the hop (default-branch preferred). When this is
-				// the SOLE window, kill-window empties — and destroys —
-				// the session, so the hop must go to another workspace
-				// entirely or tmux detaches the outer.
-				if soleWindowInSession(h, session, window) {
-					moveOuterToSiblingSession(h, session)
-				} else {
-					moveOuterAway(h, session, window, defaultBranch)
-				}
-				_ = statestore.RemoveWindow(session, window)
-				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
-				return hostpopup.CleanupOrphanedPopups(h)
-			}
-			// Default-branch window with siblings still open: DISMISS the
-			// window only, keeping the session (and its attached
-			// workspaces) alive. The default-branch window is ephemeral by
-			// design — the create flow kills it
-			// (CreateWorktreeWindow.KillDefaultBranch) and OpenDefaultBranch
-			// recreates it on demand — so removing it here is reversible,
-			// not destructive. No soft-close marker: the default branch
-			// lives at the repo root, not an atelier worktree under
-			// workspaceWorktreeRoot(), and reopening it is a single keypress
-			// (open the repo again). Hop the outer off it first so the
-			// picker's popup-client survives the kill.
-			if repoPath != "" && window == defaultBranch && !soleWindowInSession(h, session, window) {
-				moveOuterAway(h, session, window, defaultBranch)
-				_ = statestore.RemoveWindow(session, window)
-				_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
-				return hostpopup.CleanupOrphanedPopups(h)
-			}
-			// Sole window (default branch or non-git row): kill whole
-			// session. If the outer client is parked on this session, land
-			// it on another workspace first — otherwise kill-session
-			// detaches the outer (and tears down the M-s popup) instead of
-			// switching.
+	// M-s M-x is a SOFT close. It removes the workspace from the
+	// live picker (kill-window + statestore prune) but does NOT
+	// touch the on-disk worktree directory. M-r still sees it
+	// and the user can restore the workspace by picking it.
+	// Permanent worktree deletion (rm -rf the dir + branch) is
+	// reserved for the M-r picker's own M-x — that flow is
+	// explicit about "I really mean it".
+	if repoPath != "" && window != defaultBranch {
+		// Stamp the soft-close marker FIRST, before any tmux
+		// mutation. When the victim is the sole window in its
+		// session AND the outer client is parked on it, the
+		// kill-window below destroys the session and tears down
+		// the pane/client hosting THIS very process — so anything
+		// after the kill (RemoveWindow, the marker, cleanup) may
+		// never run. The marker only needs the (stable) worktree
+		// path, so writing it up front makes M-r's "closed X ago"
+		// badge survive a self-delete. (Bug: the badge silently
+		// vanished exactly when you deleted the workspace you were
+		// sitting on.)
+		touchSoftClosedMarker(filepath.Join(workspaceWorktreeRoot(), session, window))
+		// If the target window is the outer client's CURRENT
+		// window, killing it forces tmux to auto-switch which
+		// tears down the popup-client holding the sessions
+		// picker. Hop the outer to a safe spot before the kill
+		// so the picker survives. When a sibling window exists it
+		// absorbs the hop (default-branch preferred). When this is
+		// the SOLE window, kill-window empties — and destroys —
+		// the session, so the hop must go to another workspace
+		// entirely or tmux detaches the outer.
+		if soleWindowInSession(h, session, window) {
 			moveOuterToSiblingSession(h, session)
-			_, _ = h.Run("kill-session", "-t", "="+session)
-			_ = statestore.RemoveSession(session)
-			return hostpopup.CleanupOrphanedPopups(h)
-		},
+		} else {
+			moveOuterAway(h, session, window, defaultBranch)
+		}
+		_ = statestore.RemoveWindow(session, window)
+		_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
+		return hostpopup.CleanupOrphanedPopups(h)
 	}
+	// Default-branch window with siblings still open: DISMISS the
+	// window only, keeping the session (and its attached
+	// workspaces) alive. The default-branch window is ephemeral by
+	// design — the create flow kills it
+	// (CreateWorktreeWindow.KillDefaultBranch) and OpenDefaultBranch
+	// recreates it on demand — so removing it here is reversible,
+	// not destructive. No soft-close marker: the default branch
+	// lives at the repo root, not an atelier worktree under
+	// workspaceWorktreeRoot(), and reopening it is a single keypress
+	// (open the repo again). Hop the outer off it first so the
+	// picker's popup-client survives the kill.
+	if repoPath != "" && window == defaultBranch && !soleWindowInSession(h, session, window) {
+		moveOuterAway(h, session, window, defaultBranch)
+		_ = statestore.RemoveWindow(session, window)
+		_, _ = h.Run("kill-window", "-t", "="+session+":"+window)
+		return hostpopup.CleanupOrphanedPopups(h)
+	}
+	// Sole window (default branch or non-git row): kill whole
+	// session. If the outer client is parked on this session, land
+	// it on another workspace first — otherwise kill-session
+	// detaches the outer (and tears down the M-s popup) instead of
+	// switching.
+	moveOuterToSiblingSession(h, session)
+	_, _ = h.Run("kill-session", "-t", "="+session)
+	_ = statestore.RemoveSession(session)
+	return hostpopup.CleanupOrphanedPopups(h)
 }
 
 // moveOuterAway switches the outer client off `victimWindow` before it
@@ -795,55 +639,6 @@ func clearSoftClosedMarker(wtPath string) {
 	_ = os.Remove(filepath.Join(wtPath, softClosedMarker))
 }
 
-// SessionListCommand emits the workspace selector lines (for fzf --reload).
-func SessionListCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "_session-list",
-		Short:  "internal: emit session-picker lines (for fzf --reload)",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			h := tmuxhost.New("")
-			rows, err := BuildSessionList(h)
-			if err != nil {
-				return err
-			}
-			// NUL-terminate records: the session picker runs with --read0
-			// (multi-line items — recap on its own line), so reload() must
-			// frame its input the same way. Four fields:
-			// session, window, name-line, recap-line (matches the initial build).
-			for _, r := range rows {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s%s", r.Session, r.Window, r.Display, r.Recap, fzf.NUL)
-			}
-			return nil
-		},
-	}
-}
-
-// MSListenCommand is the hidden `_ms-listen <port>`: the M-s picker's fzf
-// `start` bind calls it with $FZF_PORT to record the live-update control port
-// in a tmux global, so the background refresh loop knows a picker is open and
-// where to POST reloads. Cleared by the picker on close (clearMSPickerPort).
-func MSListenCommand() *cobra.Command {
-	var socket string
-	c := &cobra.Command{
-		Use:    "_ms-listen <port>",
-		Short:  "internal: record the M-s picker's fzf --listen port for live reload",
-		Hidden: true,
-		Args:   cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return tmuxhost.New(socket).SetGlobalOption(optMSPickerPort, strings.TrimSpace(args[0]))
-		},
-	}
-	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
-	return c
-}
-
-// clearMSPickerPort removes the live-update port global so the refresh loop
-// stops pushing reloads once the picker has closed. Best-effort.
-func clearMSPickerPort(h *tmuxhost.Client) {
-	_ = h.UnsetGlobalOption(optMSPickerPort)
-}
-
 // AutoSessionCommand: port of tmux_workspace_auto_session
 func AutoSessionCommand() *cobra.Command {
 	return &cobra.Command{
@@ -895,92 +690,66 @@ func RecoverCommand() *cobra.Command {
 		Use:   "recover",
 		Short: "Pick or delete an existing worktree (M-r)",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			lines, err := recoverPickerRows()
+			h := tmuxhost.New(socket)
+			items, err := recoverListItems()
 			if err != nil {
 				return err
 			}
-			emptyHeader := ""
-			if len(lines) == 0 {
-				emptyHeader = "No worktrees on disk yet — press M-n to create one, or Esc to dismiss"
-			}
-
-			// Dracula-ish purple (256-color 141 ≈ #af87ff matches the
-			// theme's #bd93f9 closely). 復 = "history/record" — fits a
-			// crawl-the-filesystem-for-existing-worktrees picker.
-			args := fzfstyle.Args("復 ", "Recover Workspace", "141",
-				fzfstyle.WithCustomColor("prompt:141:bold,pointer:141,query:141,hl:141,hl+:141:bold,label:103,border:103,footer:103"),
-				fzfstyle.WithDelimiter("\t"),
-				fzfstyle.WithNth("3"),
-				fzfstyle.WithBind("alt-x", "transform:"+dispatch.ToolCmd("workspaces", "_recover-delete-prompt", "\"$FZF_PROMPT\"", "{1}", "{2}")),
-				fzfstyle.WithBind("y", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{1}", "{2}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"put(y)\"; fi"),
-				fzfstyle.WithBind("n", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(復 )\"; else echo \"put(n)\"; fi"),
-				fzfstyle.WithBind("esc", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"change-prompt(復 )\"; else echo \"abort\"; fi"),
-				fzfstyle.WithBind("enter", "transform:if [[ \"$FZF_PROMPT\" == Confirm* ]]; then echo \"execute-silent("+dispatch.ToolCmd("workspaces", "_recover-delete-row", "{1}", "{2}")+")+reload("+dispatch.ToolCmd("workspaces", "_recover-rows")+")+change-prompt(復 )\"; else echo \"accept\"; fi"),
-				fzfstyle.WithBind("alt-r", "abort"),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
-				fzfstyle.WithBind("alt-n", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
-				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
-				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithFooter("M-x · delete  |  M-? · help"),
-			)
-			if emptyHeader != "" {
-				args = append(args, "--header="+emptyHeader)
-			}
-
-			debuglog.Logf("workspaces.recover: opening picker (%d worktrees)", len(lines))
-			picked, err := fzf.Pick(lines, args...)
+			outcome, err := tui.Run(newRecoverModel(h, items))
 			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
+				if errors.Is(err, tui.ErrCancelled) {
 					debuglog.Logf("workspaces.recover: cancelled")
-					return err
 				}
 				return err
 			}
-			if picked == "" {
-				return fzf.ErrCancelled
+			switch outcome.Key {
+			case "workspaces/sessions":
+				return tui.ExecReplace("tools", "workspaces", "sessions")
+			case "workspaces/pick":
+				return tui.ExecReplace("tools", "workspaces", "pick")
+			case "toolselector/select":
+				return tui.ExecReplace("tools", "toolselector", "select")
+			case "workspaces/clone":
+				return tui.ExecReplace("tools", "workspaces", "clone")
 			}
-			fields := strings.SplitN(picked, "\t", 3)
-			if len(fields) < 2 {
-				return fmt.Errorf("could not parse picked entry: %q", picked)
+			if outcome.Selection == "" {
+				return tui.ErrCancelled
 			}
-			repo, branch := fields[0], fields[1]
-			return openWorktreeWorkspace(tmuxhost.New(socket), repo, branch)
+			repo, branch, ok := strings.Cut(outcome.Selection, "\x00")
+			if !ok {
+				return fmt.Errorf("could not parse picked entry: %q", outcome.Selection)
+			}
+			return openWorktreeWorkspace(h, repo, branch)
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	return c
 }
 
-// recoverPickerRows shapes the on-disk worktree list into tab-separated
-// rows the fzf picker consumes. Format: `<repo>\t<branch>\t<display>`.
-// Display column is human-readable: dim repo + bold branch, plus a
-// soft-close / live-workspace badge.
+// recoverListItems shapes the on-disk worktree list into rows for the M-r
+// bubbletea picker: repo/branch with a subtitle badge. Soft-closed worktrees
+// rank first (listWorktrees sort) so recovery is one Enter away.
 //
 // Badges:
-//   - yellow `⏎ closed Nm ago` — worktree was soft-closed in M-s
-//     recently. Ranks at the top (see listWorktrees sort) so it's
-//     one Enter-press away from recovery.
-//   - green `● live` — a tmux window for this worktree is already
-//     open in the M-s picker. Visual cue so the user doesn't try to
-//     "recover" something that's already active.
-func recoverPickerRows() ([]string, error) {
+//   - `⏎ closed Nm ago` — worktree was soft-closed in M-s recently.
+//   - `● live` — a tmux window for this worktree is already open.
+func recoverListItems() ([]list.Item, error) {
 	wts, err := listWorktrees(workspaceWorktreeRoot())
 	if err != nil {
 		return nil, err
 	}
 	live := liveWorktreeWindows(tmuxhost.New(""))
 	now := time.Now()
-	out := make([]string, 0, len(wts))
+	out := make([]list.Item, 0, len(wts))
 	for _, w := range wts {
-		var badge string
+		desc := "worktree on disk"
 		switch {
 		case !w.softClosedAt.IsZero():
-			badge = fmt.Sprintf("  \033[33m⏎ closed %s\033[0m", relativeAge(now.Sub(w.softClosedAt)))
+			desc = "⏎ closed " + relativeAge(now.Sub(w.softClosedAt))
 		case live[w.repo+"\t"+w.branch]:
-			badge = "  \033[32m● live\033[0m"
+			desc = "● live"
 		}
-		display := fmt.Sprintf("\033[2m%s\033[0m  \033[1m%s\033[0m%s", w.repo, w.branch, badge)
-		out = append(out, fmt.Sprintf("%s\t%s\t%s", w.repo, w.branch, display))
+		out = append(out, recoverItem{repo: w.repo, branch: w.branch, desc: desc})
 	}
 	return out, nil
 }
@@ -1020,92 +789,33 @@ func relativeAge(d time.Duration) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours())/24)
 }
 
-// RecoverRowsCommand emits text rows for the M-r picker's fzf --reload bind
-// (used after a delete to refresh the list).
-func RecoverRowsCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "_recover-rows",
-		Short:  "internal: emit M-r picker rows for fzf --reload",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			lines, err := recoverPickerRows()
-			if err != nil {
-				return err
-			}
-			for _, l := range lines {
-				fmt.Fprintln(cmd.OutOrStdout(), l)
-			}
-			return nil
-		},
-	}
-}
+// recoverDeleteRow removes a worktree and (if any) its backing tmux window,
+// plus the statestore window entry so restore doesn't resurrect it. Called
+// in-process by the M-r bubbletea picker's inline delete.
+func recoverDeleteRow(h *tmuxhost.Client, repo, branch string) error {
+	repoPath := filepath.Join(workspaceCodeRoot(), repo)
+	wtPath := filepath.Join(workspaceWorktreeRoot(), repo, branch)
+	// Paths keep the raw repo name; tmux/statestore identity is normalized.
+	session := workspace.SessionName(repo)
 
-// RecoverDeletePromptCommand is the M-r picker's M-x action. Mirrors the
-// sessions picker's _delete-prompt: flips the prompt to "Confirm? y/n"
-// so the user can press y/Enter to commit or n/Esc to cancel.
-func RecoverDeletePromptCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "_recover-delete-prompt",
-		Short:  "internal: M-r picker M-x action",
-		Hidden: true,
-		Args:   cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			prompt := args[0]
-			out := cmd.OutOrStdout()
-			if strings.HasPrefix(prompt, "Confirm") {
-				return nil
+	// Best-effort kill of any live tmux window for this worktree BEFORE
+	// removing the directory — otherwise the window's shell sits with a
+	// missing cwd.
+	if has, _ := h.HasSession(session); has {
+		out, _ := h.Run("list-windows", "-t", "="+session, "-F", "#{window_id}\t#W")
+		for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			parts := strings.SplitN(ln, "\t", 2)
+			if len(parts) == 2 && parts[1] == branch {
+				_, _ = h.Run("kill-window", "-t", parts[0])
+				break
 			}
-			// args[1:] carry the row identity fields ({1} {2}).
-			if _, _, ok := parsePickedIdentity(args[1:]); !ok {
-				return nil
-			}
-			fmt.Fprintln(out, "change-prompt(Confirm? y/n: )")
-			return nil
-		},
+		}
 	}
-}
-
-// RecoverDeleteRowCommand actually removes the worktree and (if any) its
-// backing tmux window. Mirrors _delete-row for the worktree-on-disk
-// case; deletes statestore window entries too so restore doesn't bring
-// a deleted worktree back.
-func RecoverDeleteRowCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "_recover-delete-row",
-		Short:  "internal: M-r picker delete (worktree removal + window kill)",
-		Hidden: true,
-		Args:   cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			repo, branch, ok := parsePickedIdentity(args)
-			if !ok {
-				return nil
-			}
-			repoPath := filepath.Join(workspaceCodeRoot(), repo)
-			wtPath := filepath.Join(workspaceWorktreeRoot(), repo, branch)
-			// Paths keep the raw repo name; tmux/statestore identity is normalized.
-			session := workspace.SessionName(repo)
-
-			h := tmuxhost.New("")
-			// Best-effort kill of any live tmux window for this worktree
-			// BEFORE removing the directory — otherwise the window's
-			// shell sits with a missing cwd.
-			if has, _ := h.HasSession(session); has {
-				out, _ := h.Run("list-windows", "-t", "="+session, "-F", "#{window_id}\t#W")
-				for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-					parts := strings.SplitN(ln, "\t", 2)
-					if len(parts) == 2 && parts[1] == branch {
-						_, _ = h.Run("kill-window", "-t", parts[0])
-						break
-					}
-				}
-			}
-			if err := removeWorktree(repoPath, wtPath); err != nil {
-				debuglog.LogErr(fmt.Sprintf("workspaces.recover: remove %s", wtPath), err)
-			}
-			_ = statestore.RemoveWindow(session, branch)
-			return hostpopup.CleanupOrphanedPopups(h)
-		},
+	if err := removeWorktree(repoPath, wtPath); err != nil {
+		debuglog.LogErr(fmt.Sprintf("workspaces.recover: remove %s", wtPath), err)
 	}
+	_ = statestore.RemoveWindow(session, branch)
+	return hostpopup.CleanupOrphanedPopups(h)
 }
 
 // openWorktreeWorkspace ensures the repo's tmux session exists, ensures
@@ -1280,48 +990,41 @@ func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
 
 	for {
 		if name == "" {
-			header := fmt.Sprintf("branch name → new worktree · empty → open %s", defaultBranch)
+			header := "branch name → new worktree · empty opens " + defaultBranch
 			if errMsg != "" {
 				header = errMsg
 			}
-			args := fzfstyle.Args("製! ", "Workspace in "+repo, "green",
-				fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,header:red,footer:103"),
-				fzfstyle.WithNoClear(),
-				fzfstyle.WithPrintQuery(),
-				fzfstyle.WithExpect("enter"),
-				fzfstyle.WithBind("alt-n", "abort"),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
-				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
-				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
-				fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-				fzfstyle.WithBind("alt-m", fmt.Sprintf("become(%s %q %q %q)", dispatch.ToolCmd("workspaces", "_prompt"),
-					repo, repoPath, defaultBranch)),
-				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-m · AI mode  |  M-? · help"),
-				fzfstyle.WithQuery(query),
-			)
-			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
+			outcome, err := tui.Run(tui.NewPrompt(tui.CreatorTheme(), tui.PromptConfig{
+				Title:       " Workspace in " + repo + " ",
+				Glyph:       "製 ",
+				Placeholder: "branch name",
+				Initial:     query,
+				Header:      header,
+				HeaderError: errMsg != "",
+				Actions: []tui.KeyAction{
+					tui.Action("mode:ai", "alt+m", "M-m", "AI name"),
+					tui.Action("workspaces/sessions", "alt+s", "M-s", "sessions"),
+					tui.Action("workspaces/recover", "alt+r", "M-r", "recover"),
+					tui.Action("toolselector/select", "alt+;", "M-;", "tools"),
+					tui.Action("workspaces/clone", "alt+u", "M-u", "clone"),
+				},
+			}))
 			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
-					return err
-				}
 				return err
 			}
-			// When the user hits Ctrl-A / Ctrl-S / Ctrl-U, fzf execs into
-			// the bound command via `become()` — replacing fzf entirely.
-			// That replacement's exit code becomes fzf's, and fzf produces
-			// NO output: no expect-key, no query, no selection. We must
-			// NOT confuse that with "user pressed Enter on empty query"
-			// (which sets Key="enter") — otherwise the empty-Enter
-			// default-branch path runs on top of the workspace the
-			// become()-spawned process just created and selected.
-			// Bash dodges this with `[[ -z "$result" ]] && exit 0`.
-			if res.Key == "" && res.Query == "" && res.Selection == "" {
-				debuglog.Logf("runWorkspaceName: fzf returned empty (likely become() replaced it) — exit silently")
-				return nil
+			switch outcome.Key {
+			case "mode:ai":
+				return tui.ExecReplace("tools", "workspaces", "_prompt", repo, repoPath, defaultBranch)
+			case "workspaces/sessions":
+				return tui.ExecReplace("tools", "workspaces", "sessions")
+			case "workspaces/recover":
+				return tui.ExecReplace("tools", "workspaces", "recover")
+			case "toolselector/select":
+				return tui.ExecReplace("tools", "toolselector", "select")
+			case "workspaces/clone":
+				return tui.ExecReplace("tools", "workspaces", "clone")
 			}
-			name = strings.TrimSpace(res.Query)
-
+			name = strings.TrimSpace(outcome.Query)
 			if name == "" {
 				// Canonical "open default branch" sequence: ensure
 				// session + default-branch window + LandOuter +
@@ -1353,22 +1056,21 @@ func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
 		wtPath := filepath.Join(workspaceWorktreeRoot(), repo, name)
 		_ = os.MkdirAll(filepath.Dir(wtPath), 0o755)
 		var newWid string
-		sp := spinner.NewBox(fmt.Sprintf("Building workspace '%s'...", name))
-		err := sp.Run(func() error {
-			sp.SetStatus(fmt.Sprintf("Fetching origin/%s...", defaultBranch))
+		buildErr := tui.Loader(fmt.Sprintf("Building workspace '%s'…", name), func(status func(string)) error {
+			status(fmt.Sprintf("Fetching origin/%s…", defaultBranch))
 			if err := runGit(repoPath, "fetch", "origin", defaultBranch); err != nil {
 				return err
 			}
 			base, tracking := resolveWorktreeBase(repoPath, name, defaultBranch)
 			if tracking {
-				sp.SetStatus(fmt.Sprintf("Tracking origin/%s...", name))
+				status(fmt.Sprintf("Tracking origin/%s…", name))
 			} else {
-				sp.SetStatus("Building worktree...")
+				status("Building worktree…")
 			}
 			if err := runGit(repoPath, "worktree", "add", wtPath, "-b", name, base); err != nil {
 				return err
 			}
-			sp.SetStatus("Stamping tmux options...")
+			status("Stamping tmux options…")
 			created, err := ensureSession()
 			if err != nil {
 				return err
@@ -1384,7 +1086,7 @@ func runWorkspaceName(repo, repoPath, defaultBranch, initialName string) error {
 			newWid, err = workspace.CreateWorktreeWindow(h, spec)
 			return err
 		})
-		if err != nil {
+		if buildErr != nil {
 			errMsg = fmt.Sprintf("✗ workspace '%s' build failed — try another name", name)
 			query = name
 			name = ""
@@ -1424,37 +1126,35 @@ func runWorkspacePrompt(repo, repoPath, defaultBranch, initialPrompt string) err
 	// prompt arg) already provided the prompt — the picker only exists
 	// to elicit the task description from the user.
 	if prompt == "" {
-		header := fmt.Sprintf("task description → auto branch · empty → open %s", defaultBranch)
-		args := fzfstyle.Args("製? ", "Workspace in "+repo, "green",
-			fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,header:red,footer:103"),
-			fzfstyle.WithNoClear(),
-			fzfstyle.WithPrintQuery(),
-			fzfstyle.WithExpect("enter"),
-			fzfstyle.WithBind("alt-n", "abort"),
-			fzfstyle.WithBind("alt-m", fmt.Sprintf("become(%s %q %q %q)", dispatch.ToolCmd("workspaces", "_name"),
-				repo, repoPath, defaultBranch)),
-			fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
-			fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
-			fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
-			fzfstyle.WithBind("alt-u", "become("+dispatch.ToolCmd("workspaces", "clone")+")"),
-			fzfstyle.WithHeader(header),
-			fzfstyle.WithFooter("M-m · manual mode  |  M-? · help"),
-			fzfstyle.WithQuery(initialPrompt),
-		)
-		res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
+		outcome, err := tui.Run(tui.NewPrompt(tui.CreatorTheme(), tui.PromptConfig{
+			Title:       " Workspace in " + repo + " ",
+			Glyph:       "製 ",
+			Placeholder: "task description — AI names the branch (empty opens " + defaultBranch + ")",
+			Header:      "AI branch-naming · M-m for a manual name",
+			Actions: []tui.KeyAction{
+				tui.Action("mode:name", "alt+m", "M-m", "manual name"),
+				tui.Action("workspaces/sessions", "alt+s", "M-s", "sessions"),
+				tui.Action("workspaces/recover", "alt+r", "M-r", "recover"),
+				tui.Action("toolselector/select", "alt+;", "M-;", "tools"),
+				tui.Action("workspaces/clone", "alt+u", "M-u", "clone"),
+			},
+		}))
 		if err != nil {
-			if errors.Is(err, fzf.ErrCancelled) {
-				return err
-			}
 			return err
 		}
-		// fzf become() short-circuit: see TestCreator_PromptFlow_*
-		// and the inline comment in runWorkspaceName.
-		if res.Key == "" && res.Query == "" && res.Selection == "" {
-			debuglog.Logf("runWorkspacePrompt: fzf returned empty (likely become()) — exit silently")
-			return nil
+		switch outcome.Key {
+		case "mode:name":
+			return tui.ExecReplace("tools", "workspaces", "_name", repo, repoPath, defaultBranch)
+		case "workspaces/sessions":
+			return tui.ExecReplace("tools", "workspaces", "sessions")
+		case "workspaces/recover":
+			return tui.ExecReplace("tools", "workspaces", "recover")
+		case "toolselector/select":
+			return tui.ExecReplace("tools", "toolselector", "select")
+		case "workspaces/clone":
+			return tui.ExecReplace("tools", "workspaces", "clone")
 		}
-		prompt = strings.TrimSpace(res.Query)
+		prompt = strings.TrimSpace(outcome.Query)
 		if prompt == "" {
 			// Empty → open default branch (canonical primitive).
 			return workspace.OpenDefaultBranch(
@@ -1556,19 +1256,18 @@ func runWorkspaceBuild(prompt, repo, repoPath, defaultBranch string) error {
 	}
 
 	var name, wtPath, tag, newWid string
-	sp := spinner.NewBox("Building workspace...")
-	err := sp.Run(func() error {
-		n, w, tg, e := buildClaudeNamedWorkspace(sp, prompt, repo, repoPath, defaultBranch, existingTags, autoTag)
+	err := tui.Loader("Building workspace…", func(status func(string)) error {
+		n, w, tg, e := buildClaudeNamedWorkspace(status, prompt, repo, repoPath, defaultBranch, existingTags, autoTag)
 		name, wtPath, tag = n, w, tg
 		if e != nil {
 			return e
 		}
 		// Stamping stage: ensureSession + new-window + set-option.
-		// Kept inside the spinner so the FR-2.1 four-stage sequence
-		// renders cleanly. Visible client moves (select-window /
-		// switch-client) happen AFTER the spinner closes so the
-		// user isn't shown a transient view.
-		sp.SetStatus("Stamping tmux options...")
+		// Kept inside the loader so the four-stage sequence renders
+		// cleanly. Visible client moves (select-window / switch-client)
+		// happen AFTER the loader closes so the user isn't shown a
+		// transient view.
+		status("Stamping tmux options…")
 		created, err := workspace.EnsureSession(h, session, repoPath, defaultBranch)
 		if err != nil {
 			return err
@@ -1901,21 +1600,15 @@ INTENT: ?????
 
 Now read the input on the next message and emit per the contract (line 1 branch, line 2 tag or empty). Do NOT print the "→" or "∅" markers — those only illustrate the examples.`
 
-// stageReporter is the minimal interface buildClaudeNamedWorkspace needs
-// from spinner.BoxSpinner. Defined here so tests can substitute a no-op.
-type stageReporter interface {
-	SetStatus(label string)
-}
+// noopStatus is the default progress callback (used by callers/tests that
+// don't render a loader).
+func noopStatus(string) {}
 
-type noopReporter struct{}
-
-func (noopReporter) SetStatus(string) {}
-
-func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, defaultBranch string, existingTags []string, autoTag bool) (name, wtPath, tag string, err error) {
-	if sp == nil {
-		sp = noopReporter{}
+func buildClaudeNamedWorkspace(status func(string), prompt, repo, repoPath, defaultBranch string, existingTags []string, autoTag bool) (name, wtPath, tag string, err error) {
+	if status == nil {
+		status = noopStatus
 	}
-	sp.SetStatus("Inferring branch name...")
+	status("Inferring branch name…")
 	// The kernel owns the naming CONTRACT (system prompt + conventional-
 	// commits validation below); the active AI integration only runs its
 	// model to satisfy it. Auto-mode requires an AI integration.
@@ -1959,15 +1652,15 @@ func buildClaudeNamedWorkspace(sp stageReporter, prompt, repo, repoPath, default
 	}
 	wtPath = filepath.Join(workspaceWorktreeRoot(), repo, name)
 	_ = os.MkdirAll(filepath.Dir(wtPath), 0o755)
-	sp.SetStatus(fmt.Sprintf("Fetching origin/%s...", defaultBranch))
+	status(fmt.Sprintf("Fetching origin/%s...", defaultBranch))
 	if err := runGit(repoPath, "fetch", "origin", defaultBranch); err != nil {
 		return name, "", tag, fmt.Errorf("fetch: %w", err)
 	}
 	base, tracking := resolveWorktreeBase(repoPath, name, defaultBranch)
 	if tracking {
-		sp.SetStatus(fmt.Sprintf("Tracking origin/%s...", name))
+		status(fmt.Sprintf("Tracking origin/%s...", name))
 	} else {
-		sp.SetStatus("Building worktree...")
+		status("Building worktree...")
 	}
 	if err := runGit(repoPath, "worktree", "add", wtPath, "-b", name, base); err != nil {
 		return name, "", tag, fmt.Errorf("worktree add: %w", err)
@@ -2050,170 +1743,144 @@ INTENT: ?????
 Now read the input on the next message and emit per the contract (line 1 session name, line 2 tag or empty). Do NOT print the "→" or "∅" markers — those only illustrate the examples.`
 
 func runAutoSession(initialPrompt string) error {
-	base := workspaceMultiRepoRoot()
-	_ = os.MkdirAll(base, 0o755)
-
-	query := initialPrompt
-	errMsg := ""
-	prompt := initialPrompt
-	autoTag := workspaceAutoTagEnabled()
-	for {
-		if prompt == "" {
-			header := "describe the multi-repo task → claude will name the session"
-			if errMsg != "" {
-				header = errMsg
-			}
-			args := fzfstyle.Args("製? ", "New Workspace", "green",
-				fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,header:red,footer:103"),
-				fzfstyle.WithNoClear(),
-				fzfstyle.WithPrintQuery(),
-				fzfstyle.WithExpect("enter"),
-				fzfstyle.WithBind("alt-n", "abort"),
-				fzfstyle.WithBind("alt-m", "become("+dispatch.ToolCmd("workspaces", "pick")+")"),
-				fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
-				fzfstyle.WithBind("alt-r", "become("+dispatch.ToolCmd("workspaces", "recover")+")"),
-				fzfstyle.WithBind("alt-;", "become("+dispatch.ToolCmd("toolselector", "select")+")"),
-				fzfstyle.WithHeader(header),
-				fzfstyle.WithFooter("M-m · pick repo  |  M-? · help"),
-				fzfstyle.WithQuery(query),
-			)
-			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
-			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
-					return err
-				}
-				return err
-			}
-			// fzf become() short-circuit: see TestCreator_PromptFlow_*
-			// and the inline comment in runWorkspaceName.
-			if res.Key == "" && res.Query == "" && res.Selection == "" {
-				debuglog.Logf("runAutoSession: fzf returned empty (likely become()) — exit silently")
-				return nil
-			}
-			prompt = strings.TrimSpace(res.Query)
-			if prompt == "" {
-				return nil
-			}
-		}
-
-		var name, tag string
-		var alreadyExists bool
-		h := tmuxhost.New("")
-		var existingTags []string
-		if autoTag {
-			existingTags = collectTags(h)
-		}
-		sp := spinner.NewBox("Building workspace...")
-		err := sp.Run(func() error {
-			sp.SetStatus("Asking the AI for a session name...")
-			// Kernel owns the naming contract (system prompt + validation);
-			// the active AI integration runs its model. Auto-mode needs one.
-			ai := integration.Active().AI
-			if ai == nil {
-				return fmt.Errorf("auto-mode requires an AI integration (set `[ai] provider` in config.toml)")
-			}
-			sysPrompt, intent := sessionNamingSysPrompt, truncateForBranchPrompt(prompt)
-			if autoTag {
-				sysPrompt, intent = sessionNamingWithTagSysPrompt, composeNamingIntent(prompt, existingTags)
-			}
-			raw, e := ai.GenerateName(context.Background(), sysPrompt, intent)
-			if e != nil {
-				return e
-			}
-			rawName, rawTag := parseNameAndTag(raw)
-			name = strings.ToLower(strings.TrimSpace(rawName))
-			if !autoSessionNameRe.MatchString(name) {
-				return fmt.Errorf("invalid name: %q", name)
-			}
-			if autoTag {
-				tag = sanitizeAutoTag(rawTag)
-			}
-			if has, _ := h.HasSession(name); has {
-				alreadyExists = true
-				return nil
-			}
-			sp.SetStatus("Stamping tmux options...")
-			if _, err := h.Run("new-session", "-d", "-s", name, "-c", base); err != nil {
-				return err
-			}
-			// TODO(plugins-refactor): same as the worktree creator path —
-			// AI plugin metadata stamping (`ai.prompt`, `ai.workspace_kind`)
-			// is hardcoded here. Moves to a plugin-contributed
-			// before-create hook in task #75.
-			_, _ = h.Run("set-option", "-w", "-t", "="+name+":1",
-				statestore.MetadataKeyToOptionName("ai.prompt"), prompt)
-			_, _ = h.Run("set-option", "-w", "-t", "="+name+":1",
-				statestore.MetadataKeyToOptionName("ai.workspace_kind"), "multi-repo")
-			// AI-suggested grouping tag (issue #56), same discipline as the
-			// ai.* options above: @workspace_tag is the source of truth,
-			// the RegisterCreatedWorkspace metadata below mirrors it to the
-			// statestore. Empty when auto-tag is off or no tag was proposed.
-			if tag != "" {
-				_, _ = h.Run("set-option", "-w", "-t", "="+name+":1",
-					statestore.MetadataKeyToOptionName(workspace.TagMetadataKey), tag)
-			}
-			// Default window 1 of an auto-session is unnamed (`bash` /
-			// `zsh`) — register it under its tmux-default name "1" so
-			// statestore restore can find it back. The persistent
-			// identity is (session_name, window_name).
-			defaultWinName, _ := h.DisplayMessageAt("="+name+":1", "#{window_name}")
-			defaultWinName = strings.TrimSpace(defaultWinName)
-			if defaultWinName == "" {
-				defaultWinName = "1"
-			}
-			meta := map[string]string{
-				"ai.prompt":         prompt,
-				"ai.workspace_kind": "multi-repo",
-			}
-			if tag != "" {
-				meta[workspace.TagMetadataKey] = tag
-			}
-			workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
-				Session:    name,
-				Kind:       "multi-repo",
-				WindowName: defaultWinName,
-				Cwd:        base,
-				Metadata:   meta,
-			})
-			return nil
-		})
+	prompt := strings.TrimSpace(initialPrompt)
+	if prompt == "" {
+		outcome, err := tui.Run(tui.NewPrompt(tui.CreatorTheme(), tui.PromptConfig{
+			Title:       " New Multi-Repo Workspace ",
+			Glyph:       "製 ",
+			Placeholder: "describe the task — the AI names the session",
+			Header:      "multi-repo (AI-named) session",
+		}))
 		if err != nil {
-			errMsg = fmt.Sprintf("✗ %v — retry", err)
-			query = prompt
-			prompt = ""
-			continue
-		}
-
-		if alreadyExists {
-			return workspace.LandOuter(h, "="+name, "="+name+":1")
-		}
-
-		// Queue Claude popup BEFORE LandOuter — see runWorkspacePrompt
-		// for the race rationale. Pin TMUX_PARENT_* so claude.Open
-		// resolves to the NEW session/window and starts in `base` —
-		// not in whatever pane the user pressed M-; on before this
-		// flow ran (which is what @atelier_outer_pane still points to).
-		newSid, _ := h.DisplayMessageAt("="+name+":1", "#{session_id}")
-		newWid, _ := h.DisplayMessageAt("="+name+":1", "#{window_id}")
-		sidNum := strings.TrimPrefix(strings.TrimSpace(newSid), "$")
-		widNum := strings.TrimPrefix(strings.TrimSpace(newWid), "@")
-		popupCmd := fmt.Sprintf(
-			"sleep 0.15 && tmux display-popup %s -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'",
-			initgen.PopupOptions(manifest.StyleFull, "Claude Code", false),
-			sidNum, widNum, base,
-			dispatch.CoreCmd("ai", "open"))
-		// Skip deferred auto-open on test sockets — see the runWorkspaceBuild
-		// guard: `ai open` → clearLaunchPrompt persists ai.prompt="" and
-		// races the e2e statestore read.
-		if !agentAutoOpenSkipped() {
-			_, _ = h.Run("run-shell", "-b", popupCmd)
-		}
-
-		if err := workspace.LandOuter(h, "="+name, "="+name+":1"); err != nil {
 			return err
 		}
-		return nil
+		prompt = strings.TrimSpace(outcome.Query)
+		if prompt == "" {
+			return nil
+		}
 	}
+	return buildAutoSession(prompt)
+}
+
+// runMultiRepoPrompt is the M-n auto-mode prompt: like runAutoSession's
+// prompt, but with an M-m toggle back to the repo list. Returns toggledBack
+// when the user pressed M-m (so the caller reopens the list); otherwise it
+// builds the session and returns the build error (or ErrCancelled on Esc).
+func runMultiRepoPrompt() (toggledBack bool, err error) {
+	outcome, err := tui.Run(tui.NewPrompt(tui.CreatorTheme(), tui.PromptConfig{
+		Title:       " New Multi-Repo Workspace ",
+		Glyph:       "製 ",
+		Placeholder: "describe the task — the AI names the session",
+		Header:      "multi-repo (AI-named) session · M-m to pick a single repo",
+		Actions:     []tui.KeyAction{tui.Action("mode:repo", "alt+m", "M-m", "pick repo")},
+	}))
+	if err != nil {
+		return false, err
+	}
+	if outcome.Key == "mode:repo" {
+		return true, nil
+	}
+	p := strings.TrimSpace(outcome.Query)
+	if p == "" {
+		return false, tui.ErrCancelled
+	}
+	return false, buildAutoSession(p)
+}
+
+// buildAutoSession creates an AI-named multi-repo session for the given task
+// prompt: ask the AI for a session name (+ optional tag), create the session,
+// stamp its metadata, then land the outer client (queuing the agent popup).
+func buildAutoSession(prompt string) error {
+	base := workspaceMultiRepoRoot()
+	_ = os.MkdirAll(base, 0o755)
+	autoTag := workspaceAutoTagEnabled()
+	h := tmuxhost.New("")
+	var existingTags []string
+	if autoTag {
+		existingTags = collectTags(h)
+	}
+
+	var name, tag string
+	var alreadyExists bool
+	if err := tui.Loader("Building workspace…", func(status func(string)) error {
+		status("Asking the AI for a session name…")
+		// Kernel owns the naming contract (system prompt + validation); the
+		// active AI integration runs its model. Auto-mode needs one.
+		ai := integration.Active().AI
+		if ai == nil {
+			return fmt.Errorf("auto-mode requires an AI integration (set `[ai] provider` in config.toml)")
+		}
+		sysPrompt, intent := sessionNamingSysPrompt, truncateForBranchPrompt(prompt)
+		if autoTag {
+			sysPrompt, intent = sessionNamingWithTagSysPrompt, composeNamingIntent(prompt, existingTags)
+		}
+		raw, e := ai.GenerateName(context.Background(), sysPrompt, intent)
+		if e != nil {
+			return e
+		}
+		rawName, rawTag := parseNameAndTag(raw)
+		name = strings.ToLower(strings.TrimSpace(rawName))
+		if !autoSessionNameRe.MatchString(name) {
+			return fmt.Errorf("invalid name: %q", name)
+		}
+		if autoTag {
+			tag = sanitizeAutoTag(rawTag)
+		}
+		if has, _ := h.HasSession(name); has {
+			alreadyExists = true
+			return nil
+		}
+		status("Stamping tmux options…")
+		if _, err := h.Run("new-session", "-d", "-s", name, "-c", base); err != nil {
+			return err
+		}
+		_, _ = h.Run("set-option", "-w", "-t", "="+name+":1",
+			statestore.MetadataKeyToOptionName("ai.prompt"), prompt)
+		_, _ = h.Run("set-option", "-w", "-t", "="+name+":1",
+			statestore.MetadataKeyToOptionName("ai.workspace_kind"), "multi-repo")
+		if tag != "" {
+			_, _ = h.Run("set-option", "-w", "-t", "="+name+":1",
+				statestore.MetadataKeyToOptionName(workspace.TagMetadataKey), tag)
+		}
+		// Default window 1 of an auto-session is unnamed — register it under
+		// its tmux-default name "1" so statestore restore can find it back.
+		defaultWinName, _ := h.DisplayMessageAt("="+name+":1", "#{window_name}")
+		defaultWinName = strings.TrimSpace(defaultWinName)
+		if defaultWinName == "" {
+			defaultWinName = "1"
+		}
+		meta := map[string]string{"ai.prompt": prompt, "ai.workspace_kind": "multi-repo"}
+		if tag != "" {
+			meta[workspace.TagMetadataKey] = tag
+		}
+		workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
+			Session: name, Kind: "multi-repo", WindowName: defaultWinName, Cwd: base, Metadata: meta,
+		})
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if alreadyExists {
+		return workspace.LandOuter(h, "="+name, "="+name+":1")
+	}
+
+	// Queue the agent popup BEFORE LandOuter (see runWorkspacePrompt for the
+	// race rationale). Pin TMUX_PARENT_* so the agent resolves to the NEW
+	// session/window and starts in base.
+	newSid, _ := h.DisplayMessageAt("="+name+":1", "#{session_id}")
+	newWid, _ := h.DisplayMessageAt("="+name+":1", "#{window_id}")
+	sidNum := strings.TrimPrefix(strings.TrimSpace(newSid), "$")
+	widNum := strings.TrimPrefix(strings.TrimSpace(newWid), "@")
+	popupCmd := fmt.Sprintf(
+		"sleep 0.15 && tmux display-popup %s -e TMUX_PARENT_SESSION_ID=%s -e TMUX_PARENT_WINDOW_ID=%s -e TMUX_PARENT_PANE_PWD=%q -E '%s'",
+		initgen.PopupOptions(manifest.StyleFull, "Claude Code", false),
+		sidNum, widNum, base,
+		dispatch.CoreCmd("ai", "open"))
+	if !agentAutoOpenSkipped() {
+		_, _ = h.Run("run-shell", "-b", popupCmd)
+	}
+	return workspace.LandOuter(h, "="+name, "="+name+":1")
 }
 
 // ============================================================================
@@ -2601,40 +2268,4 @@ func lastWindowIndex(session string) int {
 func getSessionRepoPath(h *tmuxhost.Client, session string) (string, error) {
 	out, _ := h.Run("show-option", "-t", session, "-qv", workspace.OptRepoPath)
 	return strings.TrimSpace(string(out)), nil
-}
-
-// dropPrompts removes fzfstyle's --prompt= arg when we want to use a
-// caller-supplied prompt via WithCustomColor or WithQuery. fzf accepts
-// repeated flags but the last wins; this is a defensive cleanup so the
-// output is canonical.
-func dropPrompts(args []string) []string {
-	// Currently fzfstyle.Args only emits one --prompt=; just return.
-	return args
-}
-
-// ============================================================================
-// Time-based unique session fallback (unused vestige; keep for compat)
-// ============================================================================
-
-var _ = time.Now
-var _ = url.Parse
-
-// switchOuterTo was the old in-tool implementation of outer-client
-// landing. Lifted to internal/workspace.LandOuter (workspace primitive
-// owns workspace-lifecycle tmux operations per DESIGN.md). All call
-// sites use workspace.LandOuter directly now.
-
-// interpretPickedRepo extracts the repo name from fzf's picked line.
-//
-// Empty / whitespace-only picked = fzf become() chain that terminated
-// upstream with no output. PickCommand previously fell through to
-// runWorkspaceName("", ...) in that case, opening the name picker on
-// an empty repo (the "Repo selected popup that needs another M-n to
-// close" bug). This helper makes the cancel signal explicit so callers
-// can return fzf.ErrCancelled instead of proceeding.
-func interpretPickedRepo(picked string) (repo string, cancelled bool) {
-	if strings.TrimSpace(picked) == "" {
-		return "", true
-	}
-	return strings.SplitN(picked, "\t", 2)[0], false
 }
