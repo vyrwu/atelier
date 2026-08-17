@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git reset *)",
+      "Bash(golangci-lint run *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
+    ]
+  }
+}

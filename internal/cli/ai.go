@@ -28,7 +28,7 @@ config.toml (claude | mock | …). Subcommands delegate to the active
 adapter through the kernel's AIIntegration port; with none configured they
 error rather than silently no-op.`,
 	}
-	c.AddCommand(aiOpenCmd(), aiSetPromptCmd(), aiRecapCmd())
+	c.AddCommand(aiOpenCmd(), aiSetPromptCmd(), aiRecapCmd(), aiUsageCmd())
 	return c
 }
 

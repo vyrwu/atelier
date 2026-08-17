@@ -6,6 +6,7 @@ package claudegen
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,10 +24,27 @@ const DefaultModel = "haiku"
 // spinner, so users are accustomed to a multi-second wait here.
 const DefaultTimeout = 90 * time.Second
 
+// Usage is the token accounting for a single claude CLI call, read from the
+// `--output-format json` envelope. Zero-value when the CLI emitted no JSON
+// (older builds / stubbed binaries) — callers treat that as "unknown".
+type Usage struct {
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
+	CostUSD             float64
+}
+
 // Generator wraps the claude CLI for short structured output.
 type Generator struct {
 	Model   string
 	Timeout time.Duration
+
+	// LastUsage holds the token accounting reported by the most recent
+	// Run/RunWithSystemPrompt call. Each call site constructs a fresh
+	// Generator (New()), so this is effectively per-call. Zero when the CLI
+	// returned no usage metadata.
+	LastUsage Usage
 }
 
 // New returns a Generator with the default model + timeout.
@@ -65,28 +83,39 @@ func (g *Generator) RunWithSystemPrompt(systemPrompt, prompt string) (string, er
 	// call into a 30+ second cold-start that consistently times out.
 	// Bash's tmux_workspace_build uses the same flags.
 	//
+	// `--output-format json` gives us the `usage` envelope (input/output/cache
+	// tokens + cost) alongside the text, so every background call can be
+	// metered — see `atelier ai usage`. The text lands in the `result` field;
+	// parseCLIResult extracts it (and falls back to raw stdout for a
+	// non-JSON/stubbed claude).
+	//
 	// `--tools ""` disables every tool in the built-in set. claudegen's
 	// purpose is "ask Claude for a short structured string" — names and
 	// recaps. None of those need WebFetch / Bash / Read / Edit / etc.
 	// Without this, a prompt containing a URL would invite Claude to
 	// WebFetch it, which (a) leaks data, (b) slows generation by tens of
 	// seconds, (c) sometimes causes Claude to bounce with a clarifying
-	// question instead of the requested name. Hard-disable across the
-	// board.
+	// question instead of the requested name. Hard-disable across the board.
 	args := []string{
-		"-p", "--output-format", "text",
+		"-p", "--output-format", "json",
 		"--model", model,
 		"--setting-sources", "project,local",
-		"--tools", "",
 	}
 	if systemPrompt != "" {
 		args = append(args, "--system-prompt", systemPrompt)
 	}
-	args = append(args, prompt)
+	// `--tools` became variadic (`--tools <tools...>`) in recent claude CLIs,
+	// so a trailing `--tools "" <prompt>` greedily swallows the prompt as a
+	// tool name and the call fails with "Input must be provided". Keep it LAST
+	// (nothing after it to eat) and feed the prompt on stdin instead of as a
+	// positional arg — stdin can't be captured by any flag.
+	args = append(args, "--tools", "")
+
 	cmd := exec.CommandContext(ctx, "claude", args...)
-	// Bash uses `< /dev/null`. Without this, claude can inherit the parent
-	// popup's pty as stdin and block trying to read interactive input.
-	cmd.Stdin = nil
+	// Prompt via stdin (see above). A bounded reader EOFs immediately after the
+	// prompt, so claude never blocks reading interactive input the way it would
+	// if it inherited the parent popup's pty.
+	cmd.Stdin = strings.NewReader(prompt)
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
@@ -96,12 +125,42 @@ func (g *Generator) RunWithSystemPrompt(systemPrompt, prompt string) (string, er
 		}
 		return "", fmt.Errorf("claude: %w (%s)", err, strings.TrimSpace(errBuf.String()))
 	}
+	text, usage := parseCLIResult(out.String())
+	g.LastUsage = usage
 	if systemPrompt != "" {
-		// Return raw output for system-prompt callers; they typically need
-		// the full text to apply their own validation.
-		return out.String(), nil
+		// Return raw text for system-prompt callers; they typically need the
+		// full output to apply their own validation.
+		return text, nil
 	}
-	return firstLine(out.String()), nil
+	return firstLine(text), nil
+}
+
+// parseCLIResult extracts the model's text output + token usage from a
+// `claude --output-format json` envelope. When the output isn't that JSON
+// shape (an older/non-JSON claude, or a stubbed binary in tests) it falls
+// back to treating the whole string as the text with zero usage — so the
+// call still works, just unmetered.
+func parseCLIResult(raw string) (string, Usage) {
+	var r struct {
+		Result string  `json:"result"`
+		Cost   float64 `json:"total_cost_usd"`
+		Usage  struct {
+			InputTokens              int64 `json:"input_tokens"`
+			OutputTokens             int64 `json:"output_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &r); err != nil {
+		return raw, Usage{}
+	}
+	return r.Result, Usage{
+		InputTokens:         r.Usage.InputTokens,
+		OutputTokens:        r.Usage.OutputTokens,
+		CacheCreationTokens: r.Usage.CacheCreationInputTokens,
+		CacheReadTokens:     r.Usage.CacheReadInputTokens,
+		CostUSD:             r.Cost,
+	}
 }
 
 // recapFallbackMaxRunes is the ceiling for the fallback recap path. Mirrors
