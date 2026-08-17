@@ -168,7 +168,26 @@ func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (str
 	if err != nil {
 		return "", err
 	}
+	recordUsage("naming", gen.LastUsage)
 	return strings.TrimRight(raw, "\r\n"), nil
+}
+
+// recordUsage folds a claudegen call's token accounting into the persistent
+// cumulative counters (surfaced by `atelier ai usage`). Best-effort: a
+// zero-value usage (a claude build that reported none) or a write error is
+// silently ignored — metering must never break the recap/naming it measures.
+func recordUsage(task string, u claudegen.Usage) {
+	if (u == claudegen.Usage{}) {
+		return
+	}
+	_ = statestore.AddAIUsage(task, statestore.AIUsageCounts{
+		Calls:               1,
+		InputTokens:         u.InputTokens,
+		OutputTokens:        u.OutputTokens,
+		CacheCreationTokens: u.CacheCreationTokens,
+		CacheReadTokens:     u.CacheReadTokens,
+		CostUSD:             u.CostUSD,
+	}, time.Now().Unix())
 }
 
 // RefreshRecap re-derives the workspace's recap AND attention verdict for
@@ -255,6 +274,7 @@ func (Adapter) RefreshRecap(h *tmuxhost.Client, windowID, cwd string) error {
 	if err != nil {
 		return err
 	}
+	recordUsage("recap", gen.LastUsage)
 	recap, verdict := parseRecapVerdict(out)
 	if recap != "" {
 		// Stamp keyed on the transcript mtime so the throttle above sees "already

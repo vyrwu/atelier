@@ -129,6 +129,44 @@ type State struct {
 	// Empty = no last-active known yet (first launch); launcher
 	// falls back to "default".
 	LastActiveSession string `json:"last_active_session,omitempty"`
+
+	// AIUsage is the cumulative token accounting for background AI calls
+	// (recaps, naming). Written by the claude adapter after each metered call
+	// and surfaced by `atelier ai usage`. Nil until the first call is
+	// recorded. A top-level field (not a per-workspace one) because it
+	// measures the tool, not any single workspace.
+	AIUsage *AIUsage `json:"ai_usage,omitempty"`
+}
+
+// AIUsageCounts is a running tally of token spend. Same shape at the total
+// and per-task levels.
+type AIUsageCounts struct {
+	Calls               int64   `json:"calls,omitempty"`
+	InputTokens         int64   `json:"input_tokens,omitempty"`
+	OutputTokens        int64   `json:"output_tokens,omitempty"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens,omitempty"`
+	CacheReadTokens     int64   `json:"cache_read_tokens,omitempty"`
+	CostUSD             float64 `json:"cost_usd,omitempty"`
+}
+
+func (c *AIUsageCounts) add(d AIUsageCounts) {
+	c.Calls += d.Calls
+	c.InputTokens += d.InputTokens
+	c.OutputTokens += d.OutputTokens
+	c.CacheCreationTokens += d.CacheCreationTokens
+	c.CacheReadTokens += d.CacheReadTokens
+	c.CostUSD += d.CostUSD
+}
+
+// AIUsage is cumulative background-AI token spend since SinceTS, broken down
+// by task ("recap", "naming"). ResetAIUsage restarts the measurement window.
+type AIUsage struct {
+	// SinceTS is the unix epoch (seconds) counting started — set on the first
+	// recorded call and on every reset, so `atelier ai usage` can derive a
+	// per-hour burn rate.
+	SinceTS int64                    `json:"since_ts,omitempty"`
+	Total   AIUsageCounts            `json:"total"`
+	ByTask  map[string]AIUsageCounts `json:"by_task,omitempty"`
 }
 
 // Workspace is one atelier-managed tmux session — either a single-repo
@@ -432,6 +470,58 @@ func SetLastActiveSession(session string) error {
 			s = &State{}
 		}
 		s.LastActiveSession = session
+		return Save(s)
+	})
+}
+
+// AddAIUsage folds one metered AI call into the cumulative counters, under
+// the write lock like every other mutator. task ("recap" | "naming" | …) is
+// tallied separately so `atelier ai usage` can attribute burn; nowTS stamps
+// SinceTS on the first-ever call. A zero-value delta no-ops.
+func AddAIUsage(task string, d AIUsageCounts, nowTS int64) error {
+	if (d == AIUsageCounts{}) {
+		return nil
+	}
+	return withWriteLock(Path(), func() error {
+		s, err := Load()
+		if err != nil {
+			return err
+		}
+		if s == nil {
+			s = &State{}
+		}
+		if s.AIUsage == nil {
+			s.AIUsage = &AIUsage{SinceTS: nowTS}
+		}
+		if s.AIUsage.SinceTS == 0 {
+			s.AIUsage.SinceTS = nowTS
+		}
+		s.AIUsage.Total.add(d)
+		if task != "" {
+			if s.AIUsage.ByTask == nil {
+				s.AIUsage.ByTask = map[string]AIUsageCounts{}
+			}
+			c := s.AIUsage.ByTask[task]
+			c.add(d)
+			s.AIUsage.ByTask[task] = c
+		}
+		return Save(s)
+	})
+}
+
+// ResetAIUsage zeroes the AI usage counters and restarts the measurement
+// window at nowTS. Used by `atelier ai usage --reset` to measure burn over a
+// fresh interval.
+func ResetAIUsage(nowTS int64) error {
+	return withWriteLock(Path(), func() error {
+		s, err := Load()
+		if err != nil {
+			return err
+		}
+		if s == nil {
+			s = &State{}
+		}
+		s.AIUsage = &AIUsage{SinceTS: nowTS}
 		return Save(s)
 	})
 }
