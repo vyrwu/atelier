@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0](https://github.com/vyrwu/atelier/compare/v0.8.0...v0.9.0) (2026-08-17)
+
+
+### Features
+
+* **ai:** track token usage for background Claude calls, fix --tools flag regression ([#95](https://github.com/vyrwu/atelier/issues/95)) ([906ea92](https://github.com/vyrwu/atelier/commit/906ea92200d0a678e2392a0163b5b71a46a72b91))
+
 ## [0.8.0](https://github.com/vyrwu/atelier/compare/v0.7.0...v0.8.0) (2026-08-08)
 
 
