@@ -39,9 +39,9 @@ func (k SessionKind) String() string {
 }
 
 // LauncherSessionName is the bundled launcher's bootstrap session name
-// (`tmux new-session -A -s default`). It carries no @repo_path /
-// @ai_workspace_kind, so it is never a workspace. Hardcoded because atelier
-// never creates a workspace session literally named "default".
+// (`tmux new-session -A -s default`). It carries no @workspace_id, so it is
+// never a workspace. Hardcoded because atelier never creates a workspace
+// session literally named "default".
 const LauncherSessionName = "default"
 
 // BashPopupPrefixes are the legacy bash popup session-name prefixes atelier

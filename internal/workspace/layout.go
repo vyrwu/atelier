@@ -38,6 +38,80 @@ func WorkspaceRootFor(slug string) string {
 	return filepath.Join(WorkspaceRootBase(), slug)
 }
 
+// CodeRootBase returns the directory owner/repo checkouts live under (the repo
+// index scanned at M-n). Honors $ATELIER_CODE_ROOT then [workspaces] code_root,
+// default ~/code/github. Single source of truth — the workspaces tool and the
+// agent CLI verbs both resolve through here.
+func CodeRootBase() string {
+	if v := os.Getenv("ATELIER_CODE_ROOT"); v != "" {
+		return v
+	}
+	var cfg struct {
+		CodeRoot string `toml:"code_root"`
+	}
+	_ = config.LoadSection("workspaces", &cfg)
+	if cfg.CodeRoot != "" {
+		return config.ExpandPath(cfg.CodeRoot)
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "code", "github")
+}
+
+// WorktreeRootBase returns the directory git worktrees are materialized under
+// (<root>/<owner>/<repo>/<branch>). Honors $ATELIER_WORKTREE_ROOT then
+// [workspaces] worktree_root, default ~/code/.worktrees/github. Single source of
+// truth alongside CodeRootBase / WorkspaceRootBase.
+func WorktreeRootBase() string {
+	if v := os.Getenv("ATELIER_WORKTREE_ROOT"); v != "" {
+		return v
+	}
+	var cfg struct {
+		WorktreeRoot string `toml:"worktree_root"`
+	}
+	_ = config.LoadSection("workspaces", &cfg)
+	if cfg.WorktreeRoot != "" {
+		return config.ExpandPath(cfg.WorktreeRoot)
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "code", ".worktrees", "github")
+}
+
+// DeleteWorkspace tears a workspace down: remove each of its git worktrees +
+// their symlinks, delete the (now link-only) workspace root, kill the tmux
+// session, and drop the statestore record. The workspace-lifecycle verbs
+// (kill-session, worktree removal, the link tree) all belong to the primitive —
+// a tool must not inline them (CLAUDE.md). The caller (the M-s picker) is
+// responsible only for the tool-specific concerns around it: moving the outer
+// client to a sibling first (so the picker survives) and cleaning orphaned
+// popups after. Best-effort per step; a single failure is logged, not fatal.
+func DeleteWorkspace(h *tmuxhost.Client, session string) error {
+	if session == "" {
+		return fmt.Errorf("workspace.DeleteWorkspace: empty session")
+	}
+	if st, err := statestore.Load(); err == nil && st != nil {
+		if ws := st.FindWorkspace(session); ws != nil {
+			for _, wt := range ws.Worktrees {
+				repoPath := filepath.Join(CodeRootBase(), wt.Repo)
+				if err := RemoveWorktreeDir(repoPath, wt.Path); err != nil {
+					debuglog.LogErr("workspace.DeleteWorkspace: remove worktree "+wt.Path, err)
+				}
+				UnlinkWorktree(wt.Link)
+			}
+			if ws.Root != "" {
+				if err := os.RemoveAll(ws.Root); err != nil {
+					debuglog.LogErr("workspace.DeleteWorkspace: remove root "+ws.Root, err)
+				}
+			}
+		}
+	}
+	if has, _ := h.HasSession(session); has {
+		if err := h.KillSession(session); err != nil {
+			debuglog.LogErr("workspace.DeleteWorkspace: kill-session "+session, err)
+		}
+	}
+	return statestore.RemoveSession(session)
+}
+
 // This file owns the workspace's on-disk layout: the dedicated root directory
 // (~/ateliers/<slug>), the git worktrees the agent produces, and the symlink
 // tree that projects those worktrees into the root as <repo>/<branch> — exactly
@@ -210,10 +284,13 @@ func ReconcileLayout(root string, worktrees []statestore.Worktree) []LayoutFix {
 	}
 	valid := map[string]bool{}
 	for _, wt := range worktrees {
-		link := wt.Link
-		if link == "" {
-			link = WorktreeLinkPath(root, wt.Repo, wt.Branch)
-		}
+		// Key `valid` on the CANONICAL link path — the same path LinkWorktree
+		// writes — not the possibly-stale persisted wt.Link. Otherwise, when a
+		// record's Link diverges from the canonical path (a changed root, a
+		// migrated record), the relink below would write the canonical path
+		// while `valid` held the old one, and the GC sweep would delete the
+		// symlink we just created.
+		link := WorktreeLinkPath(root, wt.Repo, wt.Branch)
 		valid[link] = true
 		if wt.Path == "" || !pathExists(wt.Path) {
 			fixes = append(fixes, LayoutFix{"dangling", wt.Path, "worktree directory no longer exists"})

@@ -153,6 +153,18 @@ the calls that surfaced during implementation.
 - **k9s M-c → M-k.** Forced by the drawing's M-c = List Changes. History (old
   M-r) is gone (see §7.5), so M-r is free for rename.
 
+- **M-n is a free-text INPUT field, not an fzf picker.** The intent prompt is
+  text entry ("what are we doing today?"), not selection — fzf is the wrong
+  tool (its query line is a filter, not a paragraph input). M-n opens a
+  bordered popup (StyleFull) hosting a purpose-built terminal text field
+  (`internal/textprompt`): a rectangular prompt box with the title, a `> `
+  caret, soft-wrapped multi-line text, and basic line editing (arrows, Home/End,
+  Backspace, ⌃W delete-word, ⌃U clear, Enter submit, Esc cancel). Built on
+  `golang.org/x/term` (already a dep) with a pure, unit-tested editor core — no
+  bubbletea, consistent with the "stick to fzf for pickers" decision (this
+  isn't a picker). This corrects the first pass, which reused fzf's
+  `--print-query` as the input.
+
 - **Launcher default screen via a `client-attached` hook.** `atelier internal
   welcome` opens M-n when zero workspaces exist; guarded (no-op once one
   exists) + debounced. Bundled/full mode only — an embedded `--bare` user

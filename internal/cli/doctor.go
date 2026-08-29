@@ -220,12 +220,12 @@ func checkEscapeTime(h *tmuxhost.Client) CheckResult {
 		Detail: fmt.Sprintf("%dms", ms)}
 }
 
-// checkStatuslineFormat verifies atelier's freshness + attention
-// segments survive in `window-status-current-format` — the ONLY format
-// they're injected into (inactive windows render nothing). The bundled
-// launcher stamps these on every startup, but a host-config statusline
-// (in plugin mode) can overwrite them. This catches the silent breakage
-// where the icons just stop rendering.
+// checkStatuslineFormat verifies atelier's attention segment survives
+// in `window-status-current-format` — the ONLY format it's injected into
+// (inactive windows render nothing). The bundled launcher stamps this on
+// every startup, but a host-config statusline (in plugin mode) can
+// overwrite it. This catches the silent breakage where the rollup just
+// stops rendering.
 func checkStatuslineFormat(h *tmuxhost.Client) CheckResult {
 	v, err := h.Run("show-options", "-gv", "window-status-current-format")
 	if err != nil {
@@ -233,34 +233,14 @@ func checkStatuslineFormat(h *tmuxhost.Client) CheckResult {
 			Detail: "no tmux server running on this socket"}
 	}
 	out := string(v)
-	hasFresh := strings.Contains(out, "atelier status freshness")
 	hasAttn := strings.Contains(out, "atelier status attention")
-	hasW := strings.Contains(out, "#W")
-	// FR-2.4: the current format containing atelier's freshness but no
-	// #W produces a bare floating icon with no window name (the "phantom
-	// second checkmark" bug). Catch this regardless of other segments.
-	if hasFresh && !hasW {
+	if !hasAttn {
 		return CheckResult{Name: "statusline segments", Status: StatusFail,
-			Detail:      "window-status-current-format has freshness segment but no #W (bare icon, no window name)",
-			Remediation: "set window-status-current-format to include `#W` (e.g. \" #W \") and re-source so stamp-statusline can inject at the anchor"}
-	}
-	switch {
-	case hasFresh && hasAttn:
-		return CheckResult{Name: "statusline segments", Status: StatusPass,
-			Detail: "freshness + attention segments present"}
-	case !hasFresh && !hasAttn:
-		return CheckResult{Name: "statusline segments", Status: StatusFail,
-			Detail:      "neither freshness nor attention segment present",
+			Detail:      "attention segment not present",
 			Remediation: "in bundled mode this auto-injects on startup; in plugin mode add `run-shell 'atelier internal stamp-statusline'` to your tmux.conf"}
-	default:
-		missing := "freshness"
-		if hasFresh {
-			missing = "attention"
-		}
-		return CheckResult{Name: "statusline segments", Status: StatusWarn,
-			Detail:      fmt.Sprintf("missing: %s segment", missing),
-			Remediation: "re-source atelier init so stamp-statusline re-injects (run-shell 'atelier internal stamp-statusline')"}
 	}
+	return CheckResult{Name: "statusline segments", Status: StatusPass,
+		Detail: "attention segment present"}
 }
 
 // checkStatestoreParseable surfaces a corrupt cache before the user

@@ -15,9 +15,11 @@ var Manifest = &manifest.Manifest{
 	Description:   "Intent-first workspaces: create (M-n), switch (M-s), review changes (M-c)",
 	PrimaryInvoke: "sessions",
 	Binding: &manifest.Binding{
-		Key:         "M-n",
-		Title:       "New workspace",
-		Style:       manifest.StylePicker,
+		Key:   "M-n",
+		Title: "New workspace",
+		// StyleFull → a bordered popup framing the free-text intent INPUT
+		// (M-n is text entry, not a picker; see internal/textprompt).
+		Style:       manifest.StyleFull,
 		Invoke:      "new",
 		AlsoInPopup: true,
 	},
@@ -33,10 +35,9 @@ var Manifest = &manifest.Manifest{
 	Popup:    manifest.KindNone,
 	Requires: []string{"git", "fzf"},
 	PickerBindings: []manifest.PickerBinding{
-		// new (intent prompt — M-n)
-		{Picker: "new", Key: "Enter", Action: "Create workspace from the intent (empty → cancel)"},
-		{Picker: "new", Key: "M-s", Action: "Jump to active workspaces"},
-		{Picker: "new", Key: "M-c", Action: "Jump to changes"},
+		// new (free-text intent INPUT — M-n; not a picker)
+		{Picker: "new", Key: "Enter", Action: "Create workspace from the intent"},
+		{Picker: "new", Key: "Esc", Action: "Cancel"},
 		// sessions (Active Workspaces — M-s)
 		{Picker: "sessions", Key: "Enter", Action: "Switch to workspace / confirm action"},
 		{Picker: "sessions", Key: "M-x", Action: "Delete workspace (confirm enumerates worktrees + PRs)"},

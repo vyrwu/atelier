@@ -64,8 +64,7 @@ func essentialShortcuts() []shortcut {
 	return []shortcut{
 		{"M-n", "New workspace"},
 		{"M-s", "Active workspaces"},
-		{"M-r", "Workspace history"},
-		{"M-u", "Clone repo from URL"},
+		{"M-c", "List changes (PRs)"},
 		{"M-;", "Tools"},
 		{"M-q", "Detach (server stays running)"},
 		{"M-?", "This cheatsheet"},

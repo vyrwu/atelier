@@ -56,8 +56,9 @@ type RenderOptions struct {
 //  6. Core bindings (M-?, M-q).
 //  7. Hooks (cleanup, attention, last-seen).
 //  8. Statusline (stamp-statusline injection).
-//  9. Background refresh loop (continuous freshness/forge + self-heal).
+//  9. Background refresh loop (continuous PR sweep + summaries + self-heal).
 //  10. Restore (workspace rehydration from cache).
+//  11. Welcome (launcher default screen — M-n when no workspaces; bundled only).
 //
 // Adding new emission steps means adding them here ONCE — both the
 // bundled launcher and plugin mode pick them up automatically.

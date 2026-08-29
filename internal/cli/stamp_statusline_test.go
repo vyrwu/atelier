@@ -8,7 +8,7 @@ import (
 // TestAtelierStatuslineRe_StripsPriorInjections locks in the
 // idempotency contract: re-running `atelier init` must not duplicate
 // atelier's status-line segments. We strip prior injections by
-// matching `#(atelier status (freshness|attention)...)` and removing
+// matching `#(atelier status (attention|forge)...)` and removing
 // the leading whitespace too.
 //
 // Failure here would mean every dev iteration re-sources init and
@@ -20,11 +20,6 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 		in   string
 		want string
 	}{
-		{
-			name: "single freshness injection stripped",
-			in:   `#W #(atelier status freshness 'a' 'b' 'c' 'd' 'e')`,
-			want: `#W`,
-		},
 		{
 			name: "single attention injection stripped (legacy --count form)",
 			in:   `#W #(atelier status attention --count)`,
@@ -41,8 +36,8 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 			want: `#W`,
 		},
 		{
-			name: "all three injections stripped",
-			in:   `#W #(atelier status freshness 'a' 'b' 'c' 'd' 'e')#(atelier status attention count)#(atelier status forge '#{@forge_state}')`,
+			name: "both injections stripped",
+			in:   `#W #(atelier status attention count)#(atelier status forge '#{@forge_state}')`,
 			want: `#W`,
 		},
 		{
@@ -50,9 +45,9 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 			in: `#W` +
 				`#(atelier status attention --count)` +
 				`#(atelier status attention --count)` +
-				`#(atelier status freshness 'a' 'b' 'c' 'd' 'e')` +
+				`#(atelier status forge '#{@forge_state}')` +
 				`#(atelier status attention --count)` +
-				`#(atelier status freshness 'a' 'b' 'c' 'd' 'e')`,
+				`#(atelier status forge '#{@forge_state}')`,
 			want: `#W`,
 		},
 		{
@@ -62,7 +57,7 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 		},
 		{
 			name: "foreign #(...) calls NOT stripped",
-			in:   `#W #(some_other_helper) #(atelier status freshness 'a' 'b' 'c' 'd' 'e')`,
+			in:   `#W #(some_other_helper) #(atelier status forge '#{@forge_state}')`,
 			want: `#W #(some_other_helper)`,
 		},
 		{
@@ -82,21 +77,19 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 }
 
 // TestSegmentOrder_CurrentFormat pins the visual order the user
-// explicitly requested for window-status-current-format: freshness
-// icon, THEN attention rollup, THEN forge PR badge. The bug where
-// attention rendered first was caused by duplicate-append accumulation;
-// the forge badge must land AFTER attention (spec: "after the
-// attention icon").
+// explicitly requested for window-status-current-format: attention
+// rollup, THEN forge PR badge. The bug where attention rendered first
+// was caused by duplicate-append accumulation; the forge badge must land
+// AFTER attention (spec: "after the attention icon").
 func TestSegmentOrder_CurrentFormat(t *testing.T) {
-	got := "" + freshnessSegment() + attentionSegment() + forgeSegment()
-	fIdx := strings.Index(got, freshnessEmitter)
+	got := "" + attentionSegment() + forgeSegment()
 	aIdx := strings.Index(got, attentionEmitter)
 	gIdx := strings.Index(got, forgeEmitter)
-	if fIdx < 0 || aIdx < 0 || gIdx < 0 {
-		t.Fatalf("segments missing: freshness=%d attention=%d forge=%d in %q", fIdx, aIdx, gIdx, got)
+	if aIdx < 0 || gIdx < 0 {
+		t.Fatalf("segments missing: attention=%d forge=%d in %q", aIdx, gIdx, got)
 	}
-	if fIdx >= aIdx || aIdx >= gIdx {
-		t.Errorf("order must be freshness < attention < forge. got %q", got)
+	if aIdx >= gIdx {
+		t.Errorf("order must be attention < forge. got %q", got)
 	}
 }
 
@@ -145,9 +138,9 @@ func TestInjectAfterWindowName(t *testing.T) {
 		},
 		{
 			// FR-2.4: no #W → no inject. Prior behavior was to append,
-			// which produced a free-floating freshness icon per inactive
-			// window (the "phantom second checkmark" bug). Skipping the
-			// inject leaves the user's format intact; doctor flags it.
+			// which produced a free-floating icon per inactive window
+			// (the "phantom second checkmark" bug). Skipping the inject
+			// leaves the user's format intact; doctor flags it.
 			name:      "no inject when #W absent",
 			format:    `just #I:status`,
 			injection: `<X>`,
@@ -160,7 +153,7 @@ func TestInjectAfterWindowName(t *testing.T) {
 			want:      ``,
 		},
 		{
-			name: "the user's actual format: freshness lands after the powerline arrow",
+			name: "the user's actual format: injection lands after the powerline arrow",
 			format: `#[fg=#44475a]#[bg=#6272a4]#[fg=#f8f8f2]#[bg=#6272a4] #W #[fg=#6272a4]` +
 				`#[bg=#44475a]#(tmux_count_attention)`,
 			injection: `<X>`,

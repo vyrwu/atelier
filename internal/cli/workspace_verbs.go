@@ -60,36 +60,16 @@ func resolveCurrentWorkspace(h *tmuxhost.Client) (resolvedWorkspace, error) {
 	return resolvedWorkspace{Session: session, ID: id, Root: root}, nil
 }
 
-// verbCodeRoot resolves the code root repos are found under (mirrors the
-// workspaces tool's resolution so `worktree add owner/repo` locates the repo).
-func verbCodeRoot() string {
-	if v := os.Getenv("ATELIER_CODE_ROOT"); v != "" {
-		return v
-	}
+// forgeWritesAllowed reports whether mutating forge ops (pr close) are
+// permitted — the [forge] allow_write gate (default true), so a user can make
+// atelier's forge read-only. Mirrors the workspaces tool's helper; kept as a
+// tiny local read to avoid a cli→tool import.
+func forgeWritesAllowed() bool {
 	var cfg struct {
-		CodeRoot string `toml:"code_root"`
+		AllowWrite *bool `toml:"allow_write"`
 	}
-	_ = config.LoadSection("workspaces", &cfg)
-	if cfg.CodeRoot != "" {
-		return config.ExpandPath(cfg.CodeRoot)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "code", "github")
-}
-
-func verbWorktreeRoot() string {
-	if v := os.Getenv("ATELIER_WORKTREE_ROOT"); v != "" {
-		return v
-	}
-	var cfg struct {
-		WorktreeRoot string `toml:"worktree_root"`
-	}
-	_ = config.LoadSection("workspaces", &cfg)
-	if cfg.WorktreeRoot != "" {
-		return config.ExpandPath(cfg.WorktreeRoot)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "code", ".worktrees", "github")
+	_ = config.LoadSection("forge", &cfg)
+	return cfg.AllowWrite == nil || *cfg.AllowWrite
 }
 
 // worktreeAddCmd: `atelier workspace worktree add <owner/repo> <branch>`.
@@ -106,11 +86,11 @@ func worktreeAddCmd() *cobra.Command {
 				return err
 			}
 			repo, branch := args[0], args[1]
-			repoPath := filepath.Join(verbCodeRoot(), repo)
+			repoPath := filepath.Join(workspace.CodeRootBase(), repo)
 			if _, err := os.Stat(repoPath); err != nil {
 				return fmt.Errorf("repo %q not found at %s", repo, repoPath)
 			}
-			wtPath := filepath.Join(verbWorktreeRoot(), repo, branch)
+			wtPath := filepath.Join(workspace.WorktreeRootBase(), repo, branch)
 			wt, err := workspace.AddWorktree(h, ws.Session, ws.Root, repoPath, repo, branch, wtPath)
 			if err != nil {
 				return err
@@ -171,37 +151,78 @@ func workspaceContextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, _ := statestore.Load()
-			rec := &statestore.Workspace{SessionName: ws.Session}
-			if st != nil {
-				if r := st.FindWorkspace(ws.Session); r != nil {
-					rec = r
-				}
-			}
+			rec := loadWorkspaceRecord(ws.Session)
 			out := cmd.OutOrStdout()
 			if format == "json" {
 				return json.NewEncoder(out).Encode(rec)
 			}
-			fmt.Fprintf(out, "Workspace: %s\n", coalesce(rec.Title, ws.ID))
-			if rec.Intent != "" {
-				fmt.Fprintf(out, "Intent: %s\n", rec.Intent)
-			}
-			fmt.Fprintf(out, "Root: %s\n", ws.Root)
-			fmt.Fprintf(out, "Worktrees (%d):\n", len(rec.Worktrees))
-			for _, wt := range rec.Worktrees {
-				fmt.Fprintf(out, "  %s @ %s → %s\n", wt.Repo, wt.Branch, wt.Link)
-			}
-			fmt.Fprintf(out, "Pull requests (%d):\n", len(rec.PRs))
-			for _, pr := range rec.PRs {
-				fmt.Fprintf(out, "  %s #%d [%s] ci=%s review=%s — %s\n",
-					pr.Repo, pr.Number, pr.State, pr.CI, pr.ReviewDecision, pr.Title)
-			}
+			fmt.Fprintln(out, workspaceContextText(rec, ws.ID, ws.Root))
 			return nil
 		},
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	c.Flags().StringVar(&format, "format", "text", "text | json")
 	return c
+}
+
+// workspaceContextText renders a workspace's intent + worktrees + PRs as the
+// text the agent reads (WS-7 context feed). Shared by the `workspace context`
+// CLI verb and the MCP workspace_context tool so the two never drift. Pure.
+func workspaceContextText(rec *statestore.Workspace, id, root string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Workspace: %s\n", coalesce(rec.Title, id))
+	if rec.Intent != "" {
+		fmt.Fprintf(&b, "Intent: %s\n", rec.Intent)
+	}
+	fmt.Fprintf(&b, "Root: %s\n", root)
+	fmt.Fprintf(&b, "Worktrees (%d):\n", len(rec.Worktrees))
+	for _, wt := range rec.Worktrees {
+		fmt.Fprintf(&b, "  %s @ %s → %s\n", wt.Repo, wt.Branch, wt.Link)
+	}
+	fmt.Fprintf(&b, "Pull requests (%d):\n", len(rec.PRs))
+	for _, pr := range rec.PRs {
+		fmt.Fprintf(&b, "  %s #%d [%s] ci=%s review=%s — %s\n",
+			pr.Repo, pr.Number, pr.State, pr.CI, pr.ReviewDecision, pr.Title)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// loadWorkspaceRecord returns the statestore record for a session, or a bare
+// record with just the session name when none is persisted yet.
+func loadWorkspaceRecord(session string) *statestore.Workspace {
+	rec := &statestore.Workspace{SessionName: session}
+	if st, _ := statestore.Load(); st != nil {
+		if r := st.FindWorkspace(session); r != nil {
+			rec = r
+		}
+	}
+	return rec
+}
+
+// registerPR records a PR (by URL) on a workspace as a registered PR, refreshing
+// it in place if already present. Shared by the `pr register` CLI verb and the
+// MCP pr_register tool. Returns the parsed repo + number.
+func registerPR(session, url string) (repo string, number int, err error) {
+	repo, number, ok := parsePRURL(url)
+	if !ok {
+		return "", 0, fmt.Errorf("could not parse PR URL %q (want github.com/owner/repo/pull/N)", url)
+	}
+	err = statestore.UpdateWorkspace(session, func(w *statestore.Workspace) {
+		for i := range w.PRs {
+			if w.PRs[i].Repo == repo && w.PRs[i].Number == number {
+				w.PRs[i].Registered = true
+				w.PRs[i].URL = url
+				return
+			}
+		}
+		w.PRs = append(w.PRs, statestore.PR{Number: number, Repo: repo, URL: url, State: string(integration.ForgeOpen), Registered: true})
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	// Refresh from the forge so the fields fill in immediately.
+	workspace.SpawnForgeRefresh()
+	return repo, number, nil
 }
 
 // PRCommand is the top-level `atelier pr` — register/list/close for the current
@@ -229,25 +250,10 @@ func prRegisterCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			repo, number, ok := parsePRURL(args[0])
-			if !ok {
-				return fmt.Errorf("could not parse PR URL %q (want github.com/owner/repo/pull/N)", args[0])
-			}
-			pr := statestore.PR{Number: number, Repo: repo, URL: args[0], State: string(integration.ForgeOpen), Registered: true}
-			if err := statestore.UpdateWorkspace(ws.Session, func(w *statestore.Workspace) {
-				for i := range w.PRs {
-					if w.PRs[i].Repo == repo && w.PRs[i].Number == number {
-						w.PRs[i].Registered = true
-						w.PRs[i].URL = args[0]
-						return
-					}
-				}
-				w.PRs = append(w.PRs, pr)
-			}); err != nil {
+			repo, number, err := registerPR(ws.Session, args[0])
+			if err != nil {
 				return err
 			}
-			// Refresh from the forge so the fields fill in immediately.
-			workspace.SpawnForgeRefresh()
 			fmt.Fprintf(cmd.OutOrStdout(), "registered %s #%d\n", repo, number)
 			return nil
 		},
@@ -294,6 +300,9 @@ func prCloseCmd() *cobra.Command {
 			ws, err := resolveCurrentWorkspace(h)
 			if err != nil {
 				return err
+			}
+			if !forgeWritesAllowed() {
+				return fmt.Errorf("forge writes are disabled ([forge] allow_write = false)")
 			}
 			forge := integration.Active().Forge
 			if forge == nil {

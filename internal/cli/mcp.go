@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
-	"github.com/vyrwu/atelier/internal/integration"
-	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
@@ -190,11 +188,11 @@ func runMCPTool(h *tmuxhost.Client, name string, args map[string]string) (string
 		if repo == "" || branch == "" {
 			return "", fmt.Errorf("repo and branch are required")
 		}
-		repoPath := filepath.Join(verbCodeRoot(), repo)
+		repoPath := filepath.Join(workspace.CodeRootBase(), repo)
 		if _, err := os.Stat(repoPath); err != nil {
 			return "", fmt.Errorf("repo %q not found at %s", repo, repoPath)
 		}
-		wtPath := filepath.Join(verbWorktreeRoot(), repo, branch)
+		wtPath := filepath.Join(workspace.WorktreeRootBase(), repo, branch)
 		wt, err := workspace.AddWorktree(h, ws.Session, ws.Root, repoPath, repo, branch, wtPath)
 		if err != nil {
 			return "", err
@@ -210,26 +208,12 @@ func runMCPTool(h *tmuxhost.Client, name string, args map[string]string) (string
 		}
 		return strings.TrimRight(b.String(), "\n"), nil
 	case "workspace_context":
-		return mcpWorkspaceContext(ws.Session, ws.ID, ws.Root), nil
+		return workspaceContextText(loadWorkspaceRecord(ws.Session), ws.ID, ws.Root), nil
 	case "pr_register":
-		url := args["url"]
-		repo, number, ok := parsePRURL(url)
-		if !ok {
-			return "", fmt.Errorf("could not parse PR URL %q", url)
-		}
-		if err := statestore.UpdateWorkspace(ws.Session, func(w *statestore.Workspace) {
-			for i := range w.PRs {
-				if w.PRs[i].Repo == repo && w.PRs[i].Number == number {
-					w.PRs[i].Registered = true
-					w.PRs[i].URL = url
-					return
-				}
-			}
-			w.PRs = append(w.PRs, statestore.PR{Number: number, Repo: repo, URL: url, State: string(integration.ForgeOpen), Registered: true})
-		}); err != nil {
+		repo, number, err := registerPR(ws.Session, args["url"])
+		if err != nil {
 			return "", err
 		}
-		workspace.SpawnForgeRefresh()
 		return fmt.Sprintf("Registered %s #%d", repo, number), nil
 	case "pr_list":
 		var b strings.Builder
@@ -243,34 +227,6 @@ func runMCPTool(h *tmuxhost.Client, name string, args map[string]string) (string
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
-}
-
-// mcpWorkspaceContext renders the workspace context as text (shared shape with
-// the CLI `workspace context` verb).
-func mcpWorkspaceContext(session, id, root string) string {
-	st, _ := statestore.Load()
-	rec := &statestore.Workspace{SessionName: session}
-	if st != nil {
-		if r := st.FindWorkspace(session); r != nil {
-			rec = r
-		}
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Workspace: %s\n", coalesce(rec.Title, id))
-	if rec.Intent != "" {
-		fmt.Fprintf(&b, "Intent: %s\n", rec.Intent)
-	}
-	fmt.Fprintf(&b, "Root: %s\n", root)
-	fmt.Fprintf(&b, "Worktrees (%d):\n", len(rec.Worktrees))
-	for _, wt := range rec.Worktrees {
-		fmt.Fprintf(&b, "  %s @ %s → %s\n", wt.Repo, wt.Branch, wt.Link)
-	}
-	fmt.Fprintf(&b, "Pull requests (%d):\n", len(rec.PRs))
-	for _, pr := range rec.PRs {
-		fmt.Fprintf(&b, "  %s #%d [%s] ci=%s review=%s — %s\n",
-			pr.Repo, pr.Number, pr.State, pr.CI, pr.ReviewDecision, pr.Title)
-	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 // mcpText wraps a string as an MCP tool-call content result.

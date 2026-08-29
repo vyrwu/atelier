@@ -177,7 +177,7 @@ func TestLocalOverride_AbsentIsSilentNoOp(t *testing.T) {
 // sets a custom window-status-current-format in their override
 // file, stamp-statusline (which runs in StatuslineBlock, emitted
 // AFTER ThemeBlock that sources the override) must re-inject
-// atelier's freshness + attention segments into the user's
+// atelier's attention + forge segments into the user's
 // custom format.
 //
 // Locks the contract: user overrides win on style, atelier
@@ -227,8 +227,8 @@ func TestLocalOverride_PreservesAtelierStatuslineSegments(t *testing.T) {
 			return false
 		}
 		gotStr = strings.TrimRight(string(out), "\n")
-		return strings.Contains(gotStr, "atelier status freshness") &&
-			strings.Contains(gotStr, "atelier status attention")
+		return strings.Contains(gotStr, "atelier status attention") &&
+			strings.Contains(gotStr, "atelier status forge")
 	})
 	if !ok {
 		t.Errorf("timed out waiting for stamp-statusline to inject atelier segments; final value: %q", gotStr)

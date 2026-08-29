@@ -3,7 +3,6 @@
 package cli
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/vyrwu/atelier/internal/testtmux"
@@ -53,8 +52,7 @@ func TestCheckEscapeTime_Low(t *testing.T) {
 func TestCheckStatuslineFormat_NoAtelier(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("seed")
-	// Default tmux window-status-current-format has neither freshness
-	// nor attention segments.
+	// Default tmux window-status-current-format has no attention segment.
 
 	r := checkStatuslineFormat(srv.Client)
 	if r.Status != StatusFail {
@@ -62,41 +60,18 @@ func TestCheckStatuslineFormat_NoAtelier(t *testing.T) {
 	}
 }
 
-// TestCheckStatuslineFormat_BothPresent: when both segments are
-// injected (the post-stamp-statusline state), PASS.
-func TestCheckStatuslineFormat_BothPresent(t *testing.T) {
+// TestCheckStatuslineFormat_AttentionPresent: when the attention
+// segment is injected (the post-stamp-statusline state), PASS.
+func TestCheckStatuslineFormat_AttentionPresent(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("seed")
-	fmt := "#W " +
-		"#(atelier status freshness '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')" +
-		"#(atelier status attention count)"
+	fmt := "#W #(atelier status attention count)"
 	if _, err := srv.Client.Run("set-option", "-g", "window-status-current-format", fmt); err != nil {
 		t.Fatalf("set window-status-current-format: %v", err)
 	}
 
 	r := checkStatuslineFormat(srv.Client)
 	if r.Status != StatusPass {
-		t.Errorf("both segments present should PASS, got %s (%q)", r.Status, r.Detail)
-	}
-}
-
-// TestCheckStatuslineFormat_PartialInjection: only one of the two
-// segments survived (e.g. user's tmux.conf overwrote half). Doctor
-// must WARN with a hint about which side is missing.
-func TestCheckStatuslineFormat_PartialInjection(t *testing.T) {
-	srv := testtmux.New(t)
-	srv.NewSession("seed")
-	// Only freshness, no attention.
-	if _, err := srv.Client.Run("set-option", "-g", "window-status-current-format",
-		"#W #(atelier status freshness 'a' 'b' 'c' 'd' 'e')"); err != nil {
-		t.Fatalf("set window-status-current-format: %v", err)
-	}
-
-	r := checkStatuslineFormat(srv.Client)
-	if r.Status != StatusWarn {
-		t.Errorf("partial statusline should WARN, got %s (%q)", r.Status, r.Detail)
-	}
-	if !strings.Contains(r.Detail, "attention") {
-		t.Errorf("WARN must name the missing segment; got %q", r.Detail)
+		t.Errorf("attention segment present should PASS, got %s (%q)", r.Status, r.Detail)
 	}
 }

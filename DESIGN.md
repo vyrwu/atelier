@@ -249,6 +249,7 @@ atelier/
 │   ├── config/              # TOML loader + path expansion
 │   ├── dispatch/            # shell-string builders for `atelier tools …` dispatch
 │   ├── fzf/ + fzfstyle/     # fzf invocation/parsing + shared picker styling
+│   ├── textprompt/          # terminal free-text input field (M-n intent box; not fzf)
 │   ├── spinner/             # progress-indicator popup UI
 │   ├── seed/scenarios/      # scenario YAML → real repos/worktrees/state (sandbox + e2e)
 │   ├── perf/ + debuglog/    # perf instrumentation + ~/.cache/atelier/debug.log

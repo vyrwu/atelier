@@ -70,8 +70,11 @@ func internalWelcomeCmd() *cobra.Command {
 				}
 			}
 			_ = h.SetGlobalOption("@atelier_welcome_ts", strconv.FormatInt(time.Now().Unix(), 10))
-			// Same picker geometry as the M-n binding.
-			_, err := h.Run("display-popup", "-B", "-w70%", "-h70%", "-E", "atelier tools workspaces new")
+			// Bordered popup framing the M-n intent input (matches the M-n
+			// binding's StyleFull geometry).
+			_, err := h.Run("display-popup", "-b", "rounded", "-S", "fg=colour103",
+				"-T", "#[align=centre] New Workspace ", "-w100%", "-h99%", "-y", "S",
+				"-E", "atelier tools workspaces new")
 			return err
 		},
 	}
@@ -209,9 +212,8 @@ func internalStampLastActiveCmd() *cobra.Command {
 }
 
 // internalStampStatuslineCmd idempotently injects atelier's
-// status-line segments (freshness icon + attention rollup + forge PR
-// badge) into the user's window-status formats. Fired once at init
-// time via run-shell.
+// status-line segments (attention rollup + forge PR badge) into the
+// user's window-status formats. Fired once at init time via run-shell.
 //
 // Why this exists: the prior approach used `set -ag window-status-...`
 // (append) every init. tmux's set-ag accumulates, so each re-source of
@@ -229,7 +231,7 @@ func internalStampStatuslineCmd() *cobra.Command {
 	var socket string
 	c := &cobra.Command{
 		Use:   "stamp-statusline",
-		Short: "Idempotently inject atelier's status-line segments (freshness, attention, forge)",
+		Short: "Idempotently inject atelier's status-line segments (attention, forge)",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			h := tmuxhost.New(socket)
 			return stampStatusline(h)
@@ -245,13 +247,12 @@ func internalStampStatuslineCmd() *cobra.Command {
 //
 // Referenced by:
 //   - atelierStatuslineRe (regex stripping prior injections)
-//   - freshnessSegment / attentionSegment (canonical segment builders)
+//   - attentionSegment / forgeSegment (canonical segment builders)
 //   - status.go (cobra subcommand `Use` fields)
 //
 // Adding/renaming an emitter here also updates atelierStatuslineRe (which
 // strips prior injections) since the regex is built from these consts.
 const (
-	freshnessEmitter = "freshness"
 	attentionEmitter = "attention"
 	forgeEmitter     = "forge"
 )
@@ -261,16 +262,11 @@ const (
 // we can strip prior copies before re-adding. Built from the emitter
 // const block so adding/renaming an emitter touches one location.
 var atelierStatuslineRe = regexp.MustCompile(
-	`\s*#\(atelier status (` + freshnessEmitter + `|` + attentionEmitter + `|` + forgeEmitter + `)[^)]*\)`)
+	`\s*#\(atelier status (` + attentionEmitter + `|` + forgeEmitter + `)[^)]*\)`)
 
-// freshnessSegment / attentionSegment are the canonical atelier
-// additions. Built from the emitter consts so the regex above and
-// the cobra subcommand `Use` fields can't drift apart.
-func freshnessSegment() string {
-	return `#(atelier status ` + freshnessEmitter +
-		` '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')`
-}
-
+// attentionSegment / forgeSegment are the canonical atelier additions.
+// Built from the emitter consts so the regex above and the cobra
+// subcommand `Use` fields can't drift apart.
 func attentionSegment() string {
 	return `#(atelier status ` + attentionEmitter + ` count)`
 }
@@ -292,7 +288,7 @@ func stampStatusline(h *tmuxhost.Client) error {
 	}{
 		{
 			name:     "window-status-current-format",
-			segments: []string{freshnessSegment(), attentionSegment(), forgeSegment()},
+			segments: []string{attentionSegment(), forgeSegment()},
 		},
 	} {
 		curBytes, err := h.Run("show-options", "-gv", opt.name)
@@ -324,9 +320,9 @@ func stampStatusline(h *tmuxhost.Client) error {
 //
 // If the format has no `#W` placeholder, RETURN THE FORMAT UNCHANGED.
 // The prior behavior was to append the segment, but that produces a
-// free-floating freshness icon — for every inactive window — when the
-// user's window-status-format is empty or doesn't include the window
-// name. Skipping injection lets the user / atelier theme fix the
+// free-floating icon — for every inactive window — when the user's
+// window-status-format is empty or doesn't include the window name.
+// Skipping injection lets the user / atelier theme fix the
 // format (add #W) and re-source; doctor flags the no-anchor case.
 //
 // Examples (atelier segments simplified to <X>):

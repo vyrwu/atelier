@@ -2,7 +2,6 @@ package workspaces
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -185,25 +184,25 @@ func deleteEnumeration(session string) (title string, worktrees, prs int) {
 	if err != nil || st == nil {
 		return title, 0, 0
 	}
-	for i := range st.Workspaces {
-		ws := &st.Workspaces[i]
-		if ws.SessionName != statestore.CanonicalSessionName(session) {
-			continue
-		}
-		if ws.Title != "" {
-			title = ws.Title
-		}
-		return title, len(ws.Worktrees), len(ws.PRs)
+	ws := st.FindWorkspace(session)
+	if ws == nil {
+		return title, 0, 0
 	}
-	return title, 0, 0
+	if ws.Title != "" {
+		title = ws.Title
+	}
+	return title, len(ws.Worktrees), len(ws.PRs)
 }
 
-// DeleteRowCommand destroys a workspace: kill the session, remove every
-// worktree, tear down the link tree + root dir, drop the statestore record.
+// DeleteRowCommand destroys a workspace. The teardown itself (kill session,
+// remove worktrees + link tree + root, drop the cache record) is the workspace
+// primitive's job — the tool only handles the picker-survival concerns around
+// it: land the outer client on a sibling FIRST (so killing the session doesn't
+// detach the M-s popup's client), then clean orphaned popups after.
 func DeleteRowCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:    "_delete-row <session>",
-		Short:  "internal: delete a workspace (session + worktrees + links + cache)",
+		Short:  "internal: delete a workspace (delegates teardown to the primitive)",
 		Hidden: true,
 		Args:   cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -212,47 +211,13 @@ func DeleteRowCommand() *cobra.Command {
 				return nil
 			}
 			h := tmuxhost.New("")
-			// Land the outer off this workspace first so killing the session
-			// doesn't detach the M-s popup's client.
 			moveOuterToSiblingWorkspace(h, session)
-
-			st, _ := statestore.Load()
-			var ws *statestore.Workspace
-			if st != nil {
-				ws = st.FindWorkspace(session)
+			if err := workspace.DeleteWorkspace(h, session); err != nil {
+				debuglog.LogErr("workspaces._delete-row: DeleteWorkspace", err)
 			}
-			// Remove worktrees + their symlinks.
-			if ws != nil {
-				for _, wt := range ws.Worktrees {
-					repoPath := repoPathForWorktree(wt)
-					if err := workspace.RemoveWorktreeDir(repoPath, wt.Path); err != nil {
-						debuglog.LogErr("workspaces._delete-row: remove worktree "+wt.Path, err)
-					}
-					workspace.UnlinkWorktree(wt.Link)
-				}
-				// Tear down the (now link-only) workspace root.
-				if ws.Root != "" {
-					if err := os.RemoveAll(ws.Root); err != nil {
-						debuglog.LogErr("workspaces._delete-row: remove root "+ws.Root, err)
-					}
-				}
-			}
-			if has, _ := h.HasSession(session); has {
-				_, _ = h.Run("kill-session", "-t", "="+session)
-			}
-			_ = statestore.RemoveSession(session)
 			return hostpopup.CleanupOrphanedPopups(h)
 		},
 	}
-}
-
-// repoPathForWorktree resolves the main repo checkout for a worktree so
-// `git worktree remove` can run there. Falls back to the code root + slug.
-func repoPathForWorktree(wt statestore.Worktree) string {
-	if wt.Repo == "" {
-		return ""
-	}
-	return workspaceCodeRoot() + string(os.PathSeparator) + wt.Repo
 }
 
 // moveOuterToSiblingWorkspace lands the outer client on another workspace before
@@ -325,7 +290,7 @@ func RenameCommand() *cobra.Command {
 				fzfstyle.WithFooter("Enter · rename  |  Esc · cancel"),
 				fzfstyle.WithQuery(cur),
 			)
-			res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(pickerArgs)...)
+			res, err := fzf.PickWithExpect(nil, []string{"enter"}, pickerArgs...)
 			if err != nil {
 				return nil // Esc → keep current
 			}

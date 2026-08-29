@@ -60,7 +60,12 @@ func (Adapter) List(repoPath string) ([]integration.PullRequest, error) {
 	if repoPath == "" {
 		return nil, nil
 	}
-	out, err := ghOutput(repoPath, "pr", "list", "--json",
+	// --state all: `gh pr list` defaults to open-only, but the M-c Changes view
+	// and the workspace PR set render merged/closed too — and a registered PR
+	// must be able to transition to merged/closed on refresh. Without this the
+	// adapter can never report anything but open, so a merged PR silently
+	// vanishes and a registered PR freezes at "open".
+	out, err := ghOutput(repoPath, "pr", "list", "--state", "all", "--json",
 		"number,title,state,isDraft,statusCheckRollup,reviewDecision,comments,url,headRefName,updatedAt,headRepositoryOwner,headRepository",
 		"--limit", "50")
 	if err != nil {

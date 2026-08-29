@@ -2,12 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
@@ -22,7 +20,6 @@ func StatusCommand() *cobra.Command {
 		Short: "Status-line data emitters + hook entry points",
 	}
 	c.AddCommand(attentionStatusCmd())
-	c.AddCommand(freshnessStatusCmd())
 	c.AddCommand(forgeStatusCmd())
 	return c
 }
@@ -76,130 +73,6 @@ func formatForgeIcon(state string) string {
 		return ""
 	}
 	return fmt.Sprintf(" #[fg=colour%s]%s#[default]", color, glyph)
-}
-
-// freshnessStatusCmd is the per-window sync-state emitter (FR-7).
-// Invoked from window-status-format with the window's pull-state options
-// (and the session's @repo_path) inlined via tmux's #{...} expansion:
-//
-//	set -ag window-status-current-format \
-//	  "#(atelier status freshness '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')"
-//
-// Args (positional):
-//  1. behind        — count of commits in origin/<default> not in branch
-//  2. ahead         — count of commits in branch not in origin/<default>
-//  3. pull_error    — short error message from the last failed _bg-pull
-//  4. freshness_ts  — unix epoch of last successful fetch
-//  5. repo_path     — session's @repo_path (empty for non-git sessions)
-//
-// Outputs the icon + counts wrapped in tmux color codes, or empty
-// string when the workspace isn't a git repo or no pull has run yet.
-func freshnessStatusCmd() *cobra.Command {
-	c := &cobra.Command{
-		Use:    freshnessEmitter + " <behind> <ahead> <pull_error> <freshness_ts> <repo_path>",
-		Short:  "Per-window freshness icon for window-status-format (FR-7)",
-		Hidden: true,
-		Args:   cobra.ExactArgs(5),
-		Run: func(cmd *cobra.Command, args []string) {
-			out := formatFreshnessIcon(args[0], args[1], args[2], args[3], args[4])
-			// Tmux invokes this on every status redraw — 20+ times/min
-			// per window. Two logging modes:
-			//
-			//   1. ATELIER_STATUSLINE_TRACE=1: log every call (noisy,
-			//      for active debugging only).
-			//   2. Default: log only the "expected to render but
-			//      couldn't" case — repo is set but freshness_ts empty
-			//      and no pull-error. That's the silent-failure case
-			//      (bg-pull never ran for this window) which is
-			//      otherwise invisible to the user.
-			repoSet := strings.TrimSpace(args[4]) != ""
-			tsEmpty := strings.TrimSpace(args[3]) == ""
-			errEmpty := strings.TrimSpace(args[2]) == ""
-			silentMiss := repoSet && tsEmpty && errEmpty
-			if os.Getenv("ATELIER_STATUSLINE_TRACE") != "" || silentMiss {
-				debuglog.Logf("status.freshness: behind=%q ahead=%q err=%q ts=%q repo=%q → %q",
-					args[0], args[1], args[2], args[3], args[4], out)
-			}
-			if out != "" {
-				fmt.Fprint(cmd.OutOrStdout(), out)
-			}
-		},
-	}
-	return c
-}
-
-// formatFreshnessIcon renders the status-line freshness segment.
-// Pure helper for unit testing.
-//
-//	Empty       — non-git session OR pull never ran (freshnessTs="")
-//	✔           — in-sync (green, U+2714 heavy check) — uses stock tmux 'green' which
-//	               picks up whatever shade the user's theme defines
-//	↓N          — behind by N (red) — needs `git pull`
-//	↑N          — ahead by N (yellow) — needs `git push`
-//	↓N↑M        — diverged (red, worst case)
-//	⚠ <msg>     — pull error (red) with short message ("fetch failed",
-//	               "rebase failed", etc.) so the user can tell error
-//	               classes apart without opening the debug log
-//
-// Per the user's spec — between window name and the global attention
-// rollup. Padded with a leading space so it doesn't kiss the window
-// name. Uses stock tmux color names (green, red, yellow) so the user's
-// theme palette resolves them naturally.
-func formatFreshnessIcon(behind, ahead, pullError, freshnessTs, repoPath string) string {
-	if strings.TrimSpace(repoPath) == "" {
-		return ""
-	}
-	if msg := strings.TrimSpace(pullError); msg != "" {
-		return fmt.Sprintf(" #[fg=red]⚠ %s#[default]", truncateErr(msg))
-	}
-	if strings.TrimSpace(freshnessTs) == "" {
-		// Pull pending — show nothing rather than a noisy "…". The
-		// pull only takes a second or two; the icon will appear on
-		// the next status redraw (status-interval = 3s).
-		return ""
-	}
-	b := atoi(behind)
-	a := atoi(ahead)
-	switch {
-	case b == 0 && a == 0:
-		return " #[fg=green]✔#[default]"
-	case b > 0 && a == 0:
-		return fmt.Sprintf(" #[fg=red]↓%d#[default]", b)
-	case b == 0 && a > 0:
-		return fmt.Sprintf(" #[fg=yellow]↑%d#[default]", a)
-	default:
-		return fmt.Sprintf(" #[fg=red]↓%d↑%d#[default]", b, a)
-	}
-}
-
-// truncateErr clamps a `_bg-pull` error message to a length that's
-// reasonable for an inline status-bar segment. The bg-pull subcommand
-// stamps short canonical messages today ("fetch failed", "rebase
-// failed"), but if a future change lets raw git stderr through we
-// don't want it blowing out the status line across every window.
-const freshnessErrMax = 30
-
-func truncateErr(s string) string {
-	r := []rune(s)
-	if len(r) <= freshnessErrMax {
-		return s
-	}
-	return string(r[:freshnessErrMax-1]) + "…"
-}
-
-func atoi(s string) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0
-		}
-		n = n*10 + int(r-'0')
-	}
-	return n
 }
 
 func attentionStatusCmd() *cobra.Command {

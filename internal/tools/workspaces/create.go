@@ -12,12 +12,12 @@ import (
 	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/dispatch"
 	"github.com/vyrwu/atelier/internal/fzf"
-	"github.com/vyrwu/atelier/internal/fzfstyle"
 	"github.com/vyrwu/atelier/internal/initgen"
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/repoindex"
 	"github.com/vyrwu/atelier/internal/spinner"
+	"github.com/vyrwu/atelier/internal/textprompt"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
@@ -62,30 +62,20 @@ func NewCommand() *cobra.Command {
 	return c
 }
 
-// promptIntent shows the single free-text field ("what are we doing today?").
-// Returns (intent, cancelled). A become()-short-circuit (M-s/M-c jump) returns
-// ("", true) so the caller exits silently.
+// promptIntent shows the single free-text INPUT field ("what are we doing
+// today?") — a rectangular prompt box, not a fuzzy picker: this is text entry,
+// not selection. Returns (intent, cancelled); Esc / Ctrl-C cancel.
 func promptIntent() (string, bool) {
-	args := fzfstyle.Args("製 ", "New Workspace", "green",
-		fzfstyle.WithCustomColor("prompt:green:bold,pointer:green,query:green,hl:green,hl+:green:bold,label:103,border:103,header:green,footer:103"),
-		fzfstyle.WithNoClear(),
-		fzfstyle.WithPrintQuery(),
-		fzfstyle.WithExpect("enter"),
-		fzfstyle.WithBind("alt-n", "abort"),
-		fzfstyle.WithBind("alt-s", "become("+dispatch.ToolCmd("workspaces", "sessions")+")"),
-		fzfstyle.WithBind("alt-c", "become("+dispatch.ToolCmd("workspaces", "changes")+")"),
-		fzfstyle.WithHeader("what are we doing today? → atelier names it, picks the repos, opens the agent"),
-		fzfstyle.WithFooter("M-s · workspaces  |  M-c · changes  |  M-? · help"),
-	)
-	res, err := fzf.PickWithExpect(nil, []string{"enter"}, dropPrompts(args)...)
+	intent, err := textprompt.Read(textprompt.Options{
+		Title:  "What are we doing today?",
+		Prompt: "> ",
+		Accent: "35", // green
+		Footer: "Enter · create   Esc · cancel   ⌃W · del word   ⌃U · clear",
+	})
 	if err != nil {
 		return "", true
 	}
-	// become() short-circuit: fzf exec'd into another picker, produced no output.
-	if res.Key == "" && res.Query == "" && res.Selection == "" {
-		return "", true
-	}
-	return strings.TrimSpace(res.Query), false
+	return strings.TrimSpace(intent), false
 }
 
 // runCreate is the full intent→workspace build. Runs inside a spinner box.

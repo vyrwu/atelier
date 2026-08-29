@@ -192,10 +192,11 @@ set-hook -ag client-attached 'run-shell -b "atelier internal welcome"'
 // (validated with a signal-0 probe, so a crashed loop's stale pid never blocks
 // a fresh one) makes the re-launch a no-op while the loop is alive.
 //
-// What it does each tick: TTL-throttled freshness + forge badge refresh (so
-// the status line stays current without the user navigating in) plus a
-// level-triggered kernel reconcile (so misrouted/phantom attention and orphan
-// popups self-heal continuously). Rendering was already continuous; this makes
+// What it does each tick: TTL-throttled forge (PR) sweep + per-workspace AI
+// summary + driver recap/attention (so the pickers stay current without the
+// user navigating in) plus a level-triggered kernel + layout reconcile (so
+// misrouted/phantom attention, orphan popups, and stale worktree symlinks
+// self-heal continuously). Rendering was already continuous; this makes
 // the DATA continuous too.
 func RefreshLoopBlock() string {
 	return `# --- background refresh loop ---
@@ -214,27 +215,23 @@ set-hook -g client-attached 'run-shell -b "atelier tools workspaces _refresh-loo
 // Segments are injected into window-status-current-format ONLY — the bar
 // reflects the focused workspace, never background windows:
 //
-//  1. Freshness icon (FR-7) — shows ✓ / ↓N / ↑N / ↓N↑M / ⚠ for git
-//     workspaces. Empty for foreign (non-git) sessions.
-//
-//  2. Attention rollup — global ⏺ count of windows flagged for
+//  1. Attention rollup — global ⏺ count of windows flagged for
 //     attention (Claude Stop hook fires on a non-attached popup).
 //
-//  3. Forge PR badge — the current window's cached @forge_state as a
+//  2. Forge PR badge — the current window's cached @forge_state as a
 //     colored PR glyph (open/draft/merged/closed). Empty when the
 //     workspace has no PR or no forge integration is configured.
 //
-// Order matters: the layout reads `<window-name> <freshness> ⏺<n> <PR>`
-// — local sync state next to the window, then global attention, then
-// the current workspace's forge status. All three decorate only the
-// current window; window-status-format is empty so inactive windows
-// render nothing (the ⏺<n> rollup is global and covers background
-// attention).
+// Order matters: the layout reads `<window-name> ⏺<n> <PR>` — the
+// window, then global attention, then the current workspace's forge
+// status. Both decorate only the current window; window-status-format is
+// empty so inactive windows render nothing (the ⏺<n> rollup is global
+// and covers background attention).
 func StatuslineBlock() string {
 	return `# --- statusline ---
 set -g status-interval 3
 # Idempotent stamp: strips any prior atelier additions and re-injects
-# the canonical freshness + attention segments. Safe to re-source
+# the canonical attention + forge segments. Safe to re-source
 # the config any number of times — no accumulation. See
 # internalStampStatuslineCmd for the strip-and-re-add details.
 run-shell -b 'atelier internal stamp-statusline'
@@ -279,9 +276,9 @@ bind -T popup F12 display-message ""
 //   - A minimal statusline (session left, time right, bold current
 //     window). NO powerline glyphs / Nerd Font dependency — the
 //     default must render on stock fonts.
-//   - Atelier's stamp-statusline still injects the freshness +
-//     attention emitters into window-status-current-format. Those
-//     are the value-adds; the bar's chrome stays out of the way.
+//   - Atelier's stamp-statusline still injects the attention rollup +
+//     forge (PR) badge into window-status-current-format. Those are the
+//     value-adds; the bar's chrome stays out of the way.
 //   - User-override hook: ~/.config/atelier/tmux.conf.local is
 //     sourced LAST when present, so any user customization wins
 //     over atelier's defaults without forking the bundled config.
@@ -376,14 +373,13 @@ set -g status-right-length 50
 set -g status-left " #S "
 set -g status-right " %H:%M "
 # Inactive windows render NOTHING. The status bar reflects only the
-# workspace you're focused on: repo (status-left #S), workspace name,
-# freshness, the GLOBAL attention count, and forge badge. A repo session
-# holds one window per worktree, so rendering background branch names
-# floods the bar — and the ⏺N attention rollup (injected into the current
-# format below) already surfaces how many workspaces are waiting, with M-s
-# listing them. The CURRENT workspace renders via window-status-current-
-# format; stamp-statusline injects freshness + attention + forge after its
-# #W anchor.
+# workspace you're focused on: the workspace name (status-left #S), the
+# GLOBAL attention count, and the forge (PR) badge. Rendering background
+# windows floods the bar — and the ⏺N attention rollup (injected into the
+# current format below) already surfaces how many workspaces are waiting,
+# with M-s listing them. The CURRENT workspace renders via
+# window-status-current-format; stamp-statusline injects the attention
+# rollup + forge badge after its #W anchor.
 set -g window-status-format ""
 set -g window-status-separator ""
 set -g window-status-current-format "#[bold] #W #[nobold]"

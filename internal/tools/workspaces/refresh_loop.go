@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -200,19 +202,19 @@ func driverRecaps(h *tmuxhost.Client) map[string]string {
 }
 
 // summaryInputHash is the change-detection key: a hash of the driver recap +
-// each PR's identity/state. Pure.
+// each PR's identity/state. Order-independent — the PRs are sorted by repo+number
+// first, because the two writers of ws.PRs persist different orders for the same
+// set (the forge sweep sorts by state-rank+number; `atelier pr register` just
+// appends), and an order flip must NOT spuriously trigger the metered summary
+// call. Pure.
 func summaryInputHash(recap string, prs []statestore.PR) string {
-	var b strings.Builder
-	b.WriteString(recap)
+	keys := make([]string, 0, len(prs))
 	for _, p := range prs {
-		b.WriteString("\x1f")
-		b.WriteString(p.Repo)
-		b.WriteString(strconv.Itoa(p.Number))
-		b.WriteString(p.State)
-		b.WriteString(p.CI)
-		b.WriteString(p.ReviewDecision)
+		keys = append(keys, fmt.Sprintf("%s\x1e%d\x1e%s\x1e%s\x1e%s",
+			p.Repo, p.Number, p.State, p.CI, p.ReviewDecision))
 	}
-	sum := sha256.Sum256([]byte(b.String()))
+	sort.Strings(keys)
+	sum := sha256.Sum256([]byte(recap + "\x1f" + strings.Join(keys, "\x1f")))
 	return hex.EncodeToString(sum[:8])
 }
 

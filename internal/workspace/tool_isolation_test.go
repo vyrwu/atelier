@@ -49,10 +49,6 @@ func TestTools_DoNotReimplementWindowManagement(t *testing.T) {
 		"internal/tools/pg/pg.go:new-session":    "TODO: same as k8s",
 		"internal/tools/aws/aws.go:respawn-pane": "TODO: aws respawns the CALLER pane under granted assume; tool-specific, candidate for popup.RespawnCallerPane(target, cmd)",
 
-		// Workspaces-tool remaining site — the delete flow kills the whole
-		// workspace session. Candidate for workspace.DeleteSession(h, session).
-		"internal/tools/workspaces/sessions.go:kill-session": "TODO: DeleteRowCommand should call workspace.DeleteSession(h, session)",
-
 		// toolselector's "Shell" dispatch navigates to window :1.
 		"internal/tools/toolselector/selector.go:select-window": "TODO: lift to workspace.LandOnWindow(\":1\") or similar; the special case is invocable as navigation",
 	}
