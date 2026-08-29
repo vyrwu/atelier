@@ -69,8 +69,10 @@ func TestSeed_HydrateThenRestore(t *testing.T) {
 		t.Errorf("@attention_recap = %q, want it to mention 1.30", got)
 	}
 
-	// 3. Workspace tag re-stamped from the seeded record.
-	if got := opt(t, srv, wid, "@workspace_tag"); got != "infra" {
+	// 3. Workspace tag re-stamped from the seeded record. @workspace_tag is
+	// SESSION-scoped now, so it resolves at window scope only via inheritance
+	// (display-message), not show-window-options.
+	if got := inheritedOpt(t, srv, wid, "@workspace_tag"); got != "infra" {
 		t.Errorf("@workspace_tag = %q, want infra", got)
 	}
 
@@ -147,4 +149,13 @@ func opt(t *testing.T, srv *testtmux.Server, wid, name string) string {
 	t.Helper()
 	out, _ := srv.Client.Run("show-options", "-w", "-v", "-t", wid, name)
 	return strings.TrimSpace(string(out))
+}
+
+// inheritedOpt reads an option at a window target with tmux inheritance
+// (window→session→global) via display-message, so a SESSION-scoped @option
+// resolves — which show-window-options cannot do.
+func inheritedOpt(t *testing.T, srv *testtmux.Server, wid, name string) string {
+	t.Helper()
+	out, _ := srv.Client.DisplayMessageAt(wid, "#{"+name+"}")
+	return strings.TrimSpace(out)
 }
