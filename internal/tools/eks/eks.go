@@ -81,11 +81,12 @@ func LoadContexts(path string) ([]Context, error) {
 	return cf.Contexts, nil
 }
 
-// OpenCommand: pick a context (small picker popup) → respawn the shell if the
-// context changed → open the full-size shell popup. Unlike k9s there is no
-// fast-path/skip-picker: the picker always shows, so re-choosing is the way to
-// switch clusters (respawn-per-context). Re-picking the SAME context is a
-// no-op respawn, so the existing shell + its scrollback survive.
+// OpenCommand (M-; entry): picker → setup → attach. Mirrors k9s.
+//
+// Fast-path: when a shell is already running on a context, skip the picker and
+// just (re)open the full popup — you return to the SAME shell with its
+// scrollback intact. To switch clusters, use M-e (SwitchCommand), which always
+// re-picks and respawns on change.
 func OpenCommand() *cobra.Command {
 	var socket string
 	c := &cobra.Command{
@@ -93,38 +94,30 @@ func OpenCommand() *cobra.Command {
 		Short: "Pick an EKS context (small popup); an authed kubectl shell opens after",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			h := tmuxhost.New(socket)
-			cfg, err := LoadConfig()
+			contexts, _, err := loadContexts()
 			if err != nil {
 				return err
-			}
-			contexts, err := LoadContexts(cfg.Contexts)
-			if err != nil {
-				return err
-			}
-			if len(contexts) == 0 {
-				return fmt.Errorf("no contexts in %s", cfg.Contexts)
-			}
-
-			picked, err := pickContext(contexts)
-			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
-					return nil
-				}
-				return err
-			}
-			ctx := findContext(contexts, picked)
-			if ctx == nil {
-				return fmt.Errorf("picked context %q not found", picked)
 			}
 
 			active, _ := h.ShowGlobalOption(OptActiveContext)
-			if active != ctx.Name {
-				if err := setup(h, *ctx); err != nil {
-					return err
-				}
-				if err := workspace.SetPersistedGlobal(h, OptActiveContext, ctx.Name); err != nil {
-					return err
-				}
+			has, _ := h.HasSession(Spec.SessionName())
+			// Fast-path: a live shell already exists → attach, don't re-pick.
+			// The `has` guard also covers a stale @atelier_eks_active pointing at
+			// a session that died (tmux restart): we fall through and rebuild.
+			if has && active != "" {
+				queueFullShellPopup(h)
+				return nil
+			}
+
+			ctx, err := pickAndResolve(contexts)
+			if err != nil || ctx == nil {
+				return err
+			}
+			if err := setup(h, *ctx); err != nil {
+				return err
+			}
+			if err := workspace.SetPersistedGlobal(h, OptActiveContext, ctx.Name); err != nil {
+				return err
 			}
 			queueFullShellPopup(h)
 			return nil
@@ -132,6 +125,82 @@ func OpenCommand() *cobra.Command {
 	}
 	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	return c
+}
+
+// SwitchCommand (M-e, also inside the popup): always re-pick a context, respawn
+// the shell when it changed OR when the session died, then attach. Mirrors
+// k9s's M-k. When fired from inside the EKS shell popup, setup's respawn-pane
+// has already swapped the pane in place, so it just returns.
+func SwitchCommand() *cobra.Command {
+	var socket string
+	c := &cobra.Command{
+		Use:   "switch",
+		Short: "Re-pick an EKS context (respawn the authed shell if changed)",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			h := tmuxhost.New(socket)
+			contexts, _, err := loadContexts()
+			if err != nil {
+				return err
+			}
+			ctx, err := pickAndResolve(contexts)
+			if err != nil || ctx == nil {
+				return err
+			}
+			active, _ := h.ShowGlobalOption(OptActiveContext)
+			has, _ := h.HasSession(Spec.SessionName())
+			if active != ctx.Name || !has {
+				if err := setup(h, *ctx); err != nil {
+					return err
+				}
+				if err := workspace.SetPersistedGlobal(h, OptActiveContext, ctx.Name); err != nil {
+					return err
+				}
+			}
+			// Fired from INSIDE the EKS shell popup: respawn-pane already swapped
+			// the pane, nothing more to do.
+			curSession, _ := h.DisplayMessage("#{session_name}")
+			if strings.TrimSpace(curSession) == Spec.SessionName() {
+				return nil
+			}
+			queueFullShellPopup(h)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
+	return c
+}
+
+// loadContexts loads the EKS config + its non-empty context list.
+func loadContexts() ([]Context, Config, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, cfg, err
+	}
+	contexts, err := LoadContexts(cfg.Contexts)
+	if err != nil {
+		return nil, cfg, err
+	}
+	if len(contexts) == 0 {
+		return nil, cfg, fmt.Errorf("no contexts in %s", cfg.Contexts)
+	}
+	return contexts, cfg, nil
+}
+
+// pickAndResolve shows the picker and resolves the choice to a Context. Returns
+// (nil, nil) on cancel.
+func pickAndResolve(contexts []Context) (*Context, error) {
+	picked, err := pickContext(contexts)
+	if err != nil {
+		if errors.Is(err, fzf.ErrCancelled) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	ctx := findContext(contexts, picked)
+	if ctx == nil {
+		return nil, fmt.Errorf("picked context %q not found", picked)
+	}
+	return ctx, nil
 }
 
 // AttachCommand is the deferred full-size entry queued by OpenCommand — context
@@ -225,13 +294,17 @@ func LaunchCommand() *cobra.Command {
 					}
 				}
 			}
-			// Point kubectl at the matching cluster (best-effort — the kubeconfig
-			// initCmd usually already sets current-context).
-			_ = exec.Command("kubectl", "config", "use-context", kubeContext).Run()
+			// Point kubectl at the matching cluster. Best-effort (the kubeconfig
+			// initCmd usually already sets current-context), but warn on failure
+			// so the user knows their kubectl may target the wrong cluster.
+			if err := exec.Command("kubectl", "config", "use-context", kubeContext).Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: kubectl config use-context %q failed: %v (cluster may not be selected)\n", kubeContext, err)
+			} else {
+				fmt.Printf("EKS context %q ready — kubectl is pointed at %s\n", name, kubeContext)
+			}
 
 			// Drop into an interactive shell WITH the assumed creds + KUBECONFIG.
 			shell := awsassume.DefaultShell()
-			fmt.Printf("EKS context %q ready — kubectl is pointed at %s\n", name, kubeContext)
 			return syscall.Exec(shell, []string{shell, "-i"}, os.Environ())
 		},
 	}

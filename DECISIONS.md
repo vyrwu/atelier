@@ -259,9 +259,14 @@ the calls that surfaced during implementation.
   respawn-on-change singleton, but keyed under `atelier/eks` and env-prefixed
   `EKS_CONTEXT_NAME`. Bound to `M-e` and in the M-; menu.
   - **Own `contexts.yaml`, respawn-per-context** (user's calls): EKS reads its
-    own `$XDG_CONFIG_HOME/atelier/eks/contexts.yaml`; `open` always shows the
-    picker and respawns the shell only when the chosen context differs (same
-    context → attach, shell + scrollback preserved).
+    own `$XDG_CONFIG_HOME/atelier/eks/contexts.yaml`. It's a faithful k9s clone:
+    `open` (M-; entry) fast-paths to a live shell (attach, scrollback preserved),
+    and **M-e** is the switch chord (also inside the popup) that re-picks and
+    respawns the shell when the context changed OR the session died. The
+    dead-session guard (`|| !has`) is what stops a stale `@atelier_eks_active`
+    from attaching a bare, unauthed shell (adversarial-review finding).
+  - **Doctor requires only `kubectl`** — granted's `assume` is a sourced shell
+    function, not a PATH binary, so requiring it would false-report missing.
   - **Cloned, not extracted.** EKS mirrors the k8s tool rather than sharing a
     `kubectx` primitive — extracting one would refactor the load-bearing k8s
     tool (and move its tested unexported helpers) mid-iteration. The duplication

@@ -52,8 +52,8 @@ func TestInitAggregator_EmitsAllToolBlocks(t *testing.T) {
 		t.Fatalf("atelier init: %v\nstderr: %s", err, errBuf.String())
 	}
 	// After the binding-simplification, only switchers and tools with
-	// in-popup hotkeys emit bindings. Tools reached only via the selector
-	// (popupshell, lazygit, claude, aws) declare no bindings.
+	// in-popup hotkeys emit bindings (k8s M-k, eks M-e). Tools reached only
+	// via the selector (popupshell, lazygit, claude) declare no bindings.
 	for _, want := range []string{
 		"# --- toolselector ---",
 		"# --- workspaces ---",
