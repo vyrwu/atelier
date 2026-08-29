@@ -23,13 +23,30 @@ Six panels, one model change and four surfaces.
 | Select Workspace (M-s) | Rows: `<TIME> <N-ATTENTION> <N-FORGES> <WORKSPACE_NAME>` + summary line. One row **per workspace**, not per worktree. Footer `M-x delete · M-r rename`. |
 | Background Daemon | Three feeds: keeps PR statuses updated, updates workspace summaries, gathers workspace context *into* the agent. |
 
+### Scope: one agent per workspace
+
+The canvas's first panel draws three agents per workspace (Claude 1,
+Claude 2, Codex). **That layer is out of scope for v1.** A workspace has
+exactly one driver agent; everything else in the drawing is built on that
+assumption and works fine under it.
+
+Two consequences, both good:
+
+- The `ai.*` metadata namespace — which issue #18 identified as the
+  blocker, because it encodes one agent per window — is now exactly the
+  right shape. It stays untouched.
+- The "window = agent or window = worktree?" question collapses: a
+  workspace is **one driver window** plus whatever inspection shells the
+  user opens. See WS-8 for what stays forward-compatible so this is a door
+  rather than a wall.
+
 ### The single load-bearing change
 
 > **Today the unit of work is a branch. After this, the unit of work is an intent.**
 
 `session = repo, window = worktree/branch` becomes
-`session = workspace/intent, window = agent`, with worktrees demoted from
-first-class UI objects to **filesystem artifacts** the agents produce.
+`session = workspace/intent, window = driver agent`, with worktrees demoted
+from first-class UI objects to **filesystem artifacts** the agent produces.
 
 Everything else in the drawing is downstream of that sentence.
 
@@ -49,26 +66,30 @@ Grounded, so estimates are honest rather than optimistic.
 | PR tracking | One state per window (`open`/`draft`/`merged`/`closed`) from `gh pr view --json state,isDraft`, cached in `@forge_state`. No number, CI, approval, comments, or title. `M-o` opens in browser. No write actions | `internal/adapters/github/github.go`, `forge_badge.go` |
 | Persistence | statestore **schema v2**: `Workspace(session) → Window(worktree) → Metadata["ai.*"]` | `internal/statestore/statestore.go` |
 | Daemon | One loop: git freshness, forge badge, per-window recap + 3-state agent status, loop-safe reconcile | `refresh_loop.go` |
-| Agent agency | **None.** Claude is launched into a popup and reads/writes files. It cannot create worktrees, spawn siblings, or tell atelier about a PR it opened. No MCP server exists | — |
+| Agent agency | **None.** Claude is launched into a popup and reads/writes files. It cannot create worktrees or tell atelier about a PR it opened. No MCP server exists | — |
 | Invariants | `internal/state` — topology, 9 violation codes, `reconcile --fix` | `state/validate.go` |
 
-Two things worth flagging up front: the `ai.*` metadata namespace **encodes
-one agent per window** (called out in issue #18), and the statestore's own
-doc says *"Schema v2 wipes v1 cache. Migration plumbing added when v2
-ships"* — that plumbing was never written, so v3 has to build it.
+One thing worth flagging up front: the statestore's own doc says *"Schema
+v2 wipes v1 cache. Migration plumbing added when v2 ships"* — that plumbing
+was never written, so v3 has to build it rather than wipe live workspaces.
+
+The other historical worry, that `ai.*` **encodes one agent per window**,
+is retired by the single-agent scope. It is no longer a cost.
 
 ---
 
 ## 3. Workstreams
 
-Nine. WS-1 gates most of the rest.
+Nine, of which eight are built. WS-1 gates most of them; WS-6 is the one
+substantial parallel track; WS-8 is a not-doing, recorded so the other eight
+don't foreclose it.
 
 ### WS-1 — Workspace entity: the intent container ⟵ *keystone*
 
 **Change.** Promote the workspace from "a tmux session that happens to be a
 repo" to a first-class entity with its own identity, title, intent text,
-root directory, and owned sets (agents, worktrees, PRs). Windows become
-**agents**, not worktrees.
+root directory, and owned sets (agent, worktrees, PRs). A window becomes the
+**driver agent**, not a worktree.
 
 **Work.**
 - New option keys in `internal/workspace`: `@workspace_id` (stable slug),
@@ -80,8 +101,13 @@ root directory, and owned sets (agents, worktrees, PRs). Windows become
   string, which is why rename doesn't exist yet.
 - statestore **schema v3** + a real migration path (see WS-9). Shape:
   `Workspace{ID, Title, Intent, Root, CreatedAt, Agents[], Worktrees[], PRs[]}`.
-- `internal/state`: window taxonomy grows agent-vs-shell; new invariants
-  (`workspace_root_missing`, `dangling_worktree_link`, `orphan_pr`).
+  `Agents` is a **list holding exactly one entry**, enforced by an invariant
+  rather than by the type. Single-agent is the v1 scope, but a one-to-one
+  field would force a schema v4 the day that changes; the list costs nothing
+  now and keeps the door open.
+- `internal/state`: window taxonomy grows driver-vs-shell; new invariants
+  (`workspace_root_missing`, `dangling_worktree_link`, `orphan_pr`,
+  `multiple_drivers`).
 - **Delete** the `worktree | multi-repo` kind split (`@ai_workspace_kind`,
   `workspace.Listable`). Per issue #83, multi-repo is the only mode; a
   one-repo workspace is just a workspace whose agent needed one worktree.
@@ -91,7 +117,7 @@ lines of tests under `internal/tools/workspaces` assert the current model.
 Budget the test rewrite at roughly the size of the feature work — CLAUDE.md's
 testing rule makes it non-optional.
 
-**Blocks.** WS-2, WS-3, WS-4, WS-7, WS-8.
+**Blocks.** WS-2, WS-3, WS-4, WS-7.
 
 ---
 
@@ -169,9 +195,14 @@ branch leave the row entirely.
 ```
 
 **Work.**
-- Rollups: attention count = agents blocked in this workspace; PR count =
-  registered PRs (WS-6). `BuildSessionList` currently walks
-  `list-windows -a` and emits one row per window — becomes a group-by.
+- Rollups: PR count = registered PRs (WS-6). `BuildSessionList` currently
+  walks `list-windows -a` and emits one row per window — becomes a group-by.
+- **`<N-ATTENTION>` needs a new definition.** With one agent per workspace
+  its attention is a boolean, so a *count* has to mean something else: the
+  number of things in this workspace wanting your eyes — the blocked agent
+  (0 or 1) plus PRs with changes-requested or failing CI. That keeps the
+  column earning its width, and it is a better signal than an agent tally
+  would have been. Depends on WS-6 for the PR half.
 - Search moves to title (`--nth=1` on the title field).
 - Footer: `M-x delete`, `M-r rename`, `M-? help`. **`M-r` currently means
   workspace history** — that binding has to move (see §5).
@@ -196,8 +227,8 @@ issue #83's "Claude is passive" and the precondition for the drawing's
 - **Kernel first, protocol second.** Expose the capabilities as CLI verbs
   the kernel owns — `atelier workspace worktree add <repo> <branch>`,
   `atelier workspace worktree list`, `atelier workspace context`,
-  `atelier pr register <url>`, `atelier workspace agent spawn`. These are
-  the contract.
+  `atelier pr register <url>`. These are the contract. **No `agent spawn`** —
+  sibling agents are out of scope (WS-8).
 - Then `atelier mcp serve` (stdio MCP server) as a **thin wrapper** over
   those verbs, registered into the interactive agent's generated settings.
   MCP is Claude's transport; a Codex adapter exposes the same verbs its own
@@ -254,9 +285,10 @@ under today's badge before the workspace model changes. Good parallel track.
    into "PRs completed, work pending your action". That is a **second AI
    call shape**, and it only needs to re-run when an input changed.
 3. **Context into the agent** — the vaguest arrow. Concretely: make
-   `atelier workspace context` (WS-5) emit worktrees + PR states + sibling
-   agent recaps, and feed it via the agent's session-start hook or as an
-   MCP resource.
+   `atelier workspace context` (WS-5) emit the workspace's worktrees and PR
+   states, fed via the agent's session-start hook or as an MCP resource.
+   (With one agent there are no sibling recaps to fold in — the feed is
+   worktrees + forge state only.)
 
 **Watch the spend.** Background token cost is already metered (`atelier ai
 usage`). Workspace summaries add a recurring second call per workspace —
@@ -266,22 +298,31 @@ gate it on change-detection and give it a budget guard.
 
 ---
 
-### WS-8 — Multiple agents per workspace (issue #18)
+### WS-8 — Multiple agents per workspace ~~(issue #18)~~ — **OUT OF SCOPE**
 
-**Change.** The drawing's Claude 1 / Claude 2 / Codex.
+**Decision: not built.** One agent per workspace, indefinitely. The drawing's
+Claude 1 / Claude 2 / Codex layer is deferred with no scheduled phase.
 
-**Work.**
-- The `ai.*` metadata namespace encodes one agent per window. Note that
-  *Claude 1* and *Claude 2* are two **instances of the same adapter**, so
-  namespacing by adapter name (`claude.active_session_id`) is not enough —
-  agents need instance ids.
-- Composition root: `Active().AI` (one) → a registered set with per-window
-  resolution.
-- Agent list/switch UI within a workspace.
+Kept here as a workstream entry for one reason only: **what the other eight
+must not foreclose.** Three cheap constraints, all of which cost nothing to
+honour now and are expensive to retrofit:
 
-**Cost.** High. **Recommend deferring past v1.0** — M-n, M-s and M-c are
-all coherent with a single driver agent, and this is the piece with the
-gnarliest state-isolation testing burden (see #18's own checklist).
+- `Workspace.Agents` is a **list** in schema v3, held at length one by
+  invariant (WS-1). A one-to-one field means a schema v4 later.
+- Anything that reads "the agent" for a workspace goes through **one
+  resolver** rather than assuming the workspace's single window. A grep for
+  callers is the migration later; scattered assumptions are a rewrite.
+- Per-workspace state that is really per-*agent* (`ai.active_session_id`,
+  agent status, recap) stays addressed by **window**, not by workspace. It
+  already is — just don't collapse it while building WS-4's rollups.
+
+Nothing else. No instance ids, no adapter set, no switching UI, no
+per-adapter namespacing. `Active().AI` stays a single adapter.
+
+Note for whenever this thaws: *Claude 1* and *Claude 2* are two instances of
+the **same** adapter, so namespacing by adapter name would not have been
+enough — agents would have needed instance ids. That, plus the state-isolation
+checklist in #18, is the cost that is being avoided.
 
 ---
 
@@ -338,7 +379,7 @@ in Phase 0 so no one learns a binding twice.
 
 ## 6. Sequencing
 
-Five phases. Each ends somewhere shippable.
+Four phases. Each ends somewhere shippable.
 
 ### Phase 0 — Foundations *(no user-visible change)*
 - statestore v3 + migration (WS-9)
@@ -373,8 +414,7 @@ Five phases. Each ends somewhere shippable.
 - `atelier mcp serve` + interactive-agent wiring (WS-5)
 - Context feed into the agent (WS-7)
 
-### Phase 4 — Multi-agent → **v1.2**
-- Per-agent metadata namespacing, adapter set, switching UI (WS-8, issue #18)
+*(No Phase 4. Multi-agent is out of scope — see WS-8.)*
 
 **Alternative cut:** hold v1.0 until Phase 3 if "Atelier does the rest"
 should mean *the agent* creates the worktrees rather than a creation-time
@@ -384,10 +424,10 @@ heuristic. That is the main strategic call in this plan — see §7.
 
 ## 7. Decisions needed before Phase 1
 
-1. **Window = agent, or window = worktree + a driver window?** This plan
-   assumes **window = agent** (worktrees are filesystem artifacts). It is
-   the cleanest read of the drawing and of issue #83, and it is what makes
-   M-s a workspace rollup — but it is a one-way door.
+1. ~~**Window = agent, or window = worktree + a driver window?**~~
+   **Resolved** by the single-agent scope: a workspace is one driver window
+   whose cwd is the workspace root, plus whatever inspection shells the user
+   opens. Worktrees are filesystem artifacts, never windows.
 2. **Who creates the first worktrees** — creation-time AI repo-selection
    (ship Phase 1 standalone) or the agent via MCP (Phase 3 gates v1.0)?
 3. **Workspace root location** and whether symlinks or real in-place
@@ -403,8 +443,8 @@ heuristic. That is the main strategic call in this plan — see §7.
 
 | Existing issue | Relationship |
 |---|---|
-| #83 — no task/intent layer; Claude is passive | **The written form of this drawing's left half.** WS-1, WS-3, WS-5 |
-| #18 — multi-agent primary/switching (M-a) | WS-8 |
+| #83 — no task/intent layer; Claude is passive | **The written form of this drawing's left half.** WS-1, WS-3, WS-5 — minus its "spawn sibling agents" clause |
+| #18 — multi-agent primary/switching (M-a) | **Out of scope.** WS-8 records only the forward-compat constraints |
 | #61 — manager harness / repo index | Its repo index is the input to WS-3 option (a) |
 | #86 — adopt bubbletea | Risk 4; decide at Phase 2 |
 | #69 — mute repo/branch in M-s | **Absorbed** — those columns disappear in WS-4 |
