@@ -18,6 +18,7 @@ import (
 	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/workspace"
 )
 
 // InternalCommand groups host services that external tools can call back
@@ -82,22 +83,18 @@ func internalWelcomeCmd() *cobra.Command {
 	return c
 }
 
-// workspaceCount returns how many listable workspaces (windows carrying a
-// @workspace_id, excluding popup sessions) currently exist. Pure over tmux.
+// workspaceCount returns how many atelier-managed workspaces (sessions carrying
+// a @workspace_id, excluding popup sessions) currently exist. Reads from
+// list-SESSIONS via workspace.ListableSessions — @workspace_id is session-scoped
+// and reading it per-window is version-fragile.
 func workspaceCount(h *tmuxhost.Client) int {
-	out, err := h.Run("list-windows", "-a", "-F", "#{session_name}|#{@workspace_id}")
-	if err != nil {
-		return 0
-	}
-	seen := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) != 2 || parts[1] == "" || strings.HasPrefix(parts[0], "_") {
-			continue
+	n := 0
+	for session := range workspace.ListableSessions(h) {
+		if !strings.HasPrefix(session, "_") {
+			n++
 		}
-		seen[parts[0]] = true
 	}
-	return len(seen)
+	return n
 }
 
 // internalClipboardCopyCmd is the copy-mode-vi yank target. tmux's

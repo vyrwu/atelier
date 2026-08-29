@@ -181,31 +181,29 @@ func findWindowIDByDigits(h *tmuxhost.Client, sidDigits, widDigits string) (stri
 // popup window instead of the parent workspace — so without this filter
 // a single Claude Stop hook can inflate the rollup to 2.
 func countAttentionWindows(h *tmuxhost.Client) int {
-	// session_name is placed LAST so a stray '|' in it can't shift the fixed
-	// fields; @workspace_id is a controlled slug and contains no '|'.
+	// Which sessions are workspaces (carry @workspace_id) — read from
+	// list-SESSIONS, not per-window: @workspace_id is session-scoped and
+	// window-context inheritance is version-fragile (would empty the rollup).
+	listable := workspace.ListableSessions(h)
+	// session_name LAST so a stray '|' in it can't shift the fixed field.
 	out, err := h.Run("list-windows", "-a",
-		"-F", "#{?#{==:#{E:"+attentionOption+"},1},1,0}|#{"+workspace.OptWorkspaceID+"}|#{session_name}")
+		"-F", "#{?#{==:#{E:"+attentionOption+"},1},1,0}|#{session_name}")
 	if err != nil {
 		return 0
 	}
 	count := 0
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		f := strings.SplitN(line, "|", 3)
-		if len(f) < 3 {
-			continue
-		}
-		attn, wsID, session := f[0], f[1], f[2]
-		if attn != "1" {
+		attn, session, ok := strings.Cut(line, "|")
+		if !ok || attn != "1" {
 			continue
 		}
 		if state.IsPopupSession(session) {
 			continue
 		}
-		// Same inclusion predicate as the M-s picker (sessionlist.go): a window
-		// with attention but no @workspace_id — a raw tmux window, a spent
-		// popup, or a workspace that lost its metadata — has no picker row to
-		// land on, so it must not inflate the rollup into a phantom notification.
-		if !workspace.Listable(wsID) {
+		// Same inclusion predicate as the M-s picker: a window with attention
+		// but whose session isn't a workspace (no @workspace_id) has no picker
+		// row to land on, so it must not inflate the rollup into a phantom.
+		if !listable[session] {
 			continue
 		}
 		count++

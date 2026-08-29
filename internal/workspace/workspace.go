@@ -305,6 +305,29 @@ func SetRecapTS(h *tmuxhost.Client, windowID, recap string, ts int64) error {
 	return nil
 }
 
+// ListableSessions returns the set of session names that carry a @workspace_id
+// (i.e. are atelier-managed workspaces), read from list-SESSIONS. Callers that
+// enumerate windows (the picker, the attention rollup, the recap sweep) must
+// resolve listability through this rather than reading `#{@workspace_id}` in a
+// list-windows format: @workspace_id is SESSION-scoped, and window-context
+// user-option inheritance is version-dependent in tmux — reading it per-window
+// silently returns empty on some versions, emptying the picker/rollup. Reading
+// it in its own session context is robust everywhere.
+func ListableSessions(h *tmuxhost.Client) map[string]bool {
+	out, err := h.Run("list-sessions", "-F", "#{session_name}\x1f#{"+OptWorkspaceID+"}")
+	if err != nil {
+		return map[string]bool{}
+	}
+	set := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name, id, ok := strings.Cut(line, "\x1f")
+		if ok && strings.TrimSpace(id) != "" {
+			set[name] = true
+		}
+	}
+	return set
+}
+
 // Listable reports whether a window belongs to an atelier-managed workspace:
 // its session carries a @workspace_id. Windows without it are raw tmux windows
 // or spent popups.

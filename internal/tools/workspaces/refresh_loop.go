@@ -119,7 +119,10 @@ func refreshTick(h *tmuxhost.Client, forge integration.ForgeIntegration, ai inte
 // active AI adapter, passing the driver's cwd (the workspace root) so it can
 // locate the agent transcript. RefreshRecap self-throttles on transcript mtime.
 func refreshRecapsAll(h *tmuxhost.Client, ai integration.AIIntegration) {
-	format := "#{window_id}\x1f#{" + workspace.OptWorkspaceID + "}\x1f#{" + workspace.OptWorkspaceDriver + "}\x1f#{pane_current_path}"
+	// @workspace_id is session-scoped; resolve listability from list-SESSIONS
+	// (window-context inheritance is version-fragile — see workspace.ListableSessions).
+	listable := workspace.ListableSessions(h)
+	format := "#{window_id}\x1f#{session_name}\x1f#{" + workspace.OptWorkspaceDriver + "}\x1f#{pane_current_path}"
 	out, err := h.Run("list-windows", "-a", "-F", format)
 	if err != nil {
 		debuglog.LogErr("workspaces._refresh-loop: list-windows (recap)", err)
@@ -133,8 +136,8 @@ func refreshRecapsAll(h *tmuxhost.Client, ai integration.AIIntegration) {
 		if len(f) < 4 {
 			continue
 		}
-		windowID, wsID, driver, cwd := f[0], f[1], f[2], f[3]
-		if cwd == "" || !workspace.Listable(wsID) || strings.TrimSpace(driver) != "1" {
+		windowID, session, driver, cwd := f[0], f[1], f[2], f[3]
+		if cwd == "" || !listable[session] || strings.TrimSpace(driver) != "1" {
 			continue
 		}
 		if err := ai.RefreshRecap(h, windowID, cwd); err != nil {
@@ -289,13 +292,14 @@ func maybeReloadPicker(h *tmuxhost.Client, last string) string {
 	return sig
 }
 
-// pickerSigFields are the window options the M-s picker renders. Excludes recap
-// TS so a mere age tick doesn't disturb the cursor.
+// pickerSigFields are the window-scoped options the M-s picker renders, used for
+// change-detection. Excludes recap TS (a mere age tick shouldn't disturb the
+// cursor) and the session-scoped identity options (id/title/tag) — those rarely
+// change and reading them per-window is unreliable across tmux versions.
 var pickerSigFields = strings.Join([]string{
-	"#{window_id}", "#{session_name}", "#{" + workspace.OptWorkspaceTitle + "}",
+	"#{window_id}", "#{session_name}",
 	"#{" + workspace.OptAttention + "}", "#{" + workspace.OptAgentStatus + "}",
-	"#{" + workspace.OptRecap + "}", "#{" + workspace.OptWorkspaceTag + "}",
-	"#{" + workspace.OptWorkspaceID + "}",
+	"#{" + workspace.OptRecap + "}",
 }, "\x1f")
 
 func pickerSignature(h *tmuxhost.Client) string {

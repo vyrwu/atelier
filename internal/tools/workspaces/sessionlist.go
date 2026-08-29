@@ -80,10 +80,18 @@ func BuildWorkspaceList(h *tmuxhost.Client) ([]WorkspaceRow, error) {
 	}
 	st, _ := statestore.Load()
 
+	// The workspace-identity options (@workspace_id/@workspace_title/
+	// @workspace_tag) are SESSION-scoped. Read them from list-SESSIONS, not
+	// per-window — `list-windows -F #{@workspace_id}` does NOT resolve a session
+	// option on every tmux (window-context user-option inheritance is version-
+	// dependent), which would silently empty the picker. list-sessions reads the
+	// option in its own session context, so it's robust everywhere.
+	ident := sessionIdentities(h)
+
+	// Per-window state (these ARE window-scoped and read reliably per window).
 	format := strings.Join([]string{
 		"#{session_id}", "#{session_name}", "#{window_index}",
-		"#{" + workspace.OptWorkspaceID + "}", "#{" + workspace.OptWorkspaceTitle + "}",
-		"#{" + workspace.OptWorkspaceDriver + "}", "#{" + workspace.OptWorkspaceTag + "}",
+		"#{" + workspace.OptWorkspaceDriver + "}",
 		"#{" + workspace.OptAttention + "}", "#{" + workspace.OptAgentStatus + "}",
 		"#{" + workspace.OptRecap + "}", "#{" + workspace.OptRecapTs + "}",
 		"#{" + workspace.OptWorkspaceCreatedTs + "}", "#{window_id}",
@@ -100,12 +108,14 @@ func BuildWorkspaceList(h *tmuxhost.Client) ([]WorkspaceRow, error) {
 			continue
 		}
 		f := strings.Split(line, "\x1f")
-		if len(f) < 13 {
+		if len(f) < 10 {
 			continue
 		}
 		sid, session, idxStr := f[0], f[1], f[2]
-		wsID, title, driver, tag := f[3], f[4], f[5], f[6]
-		attention, status, recap, recapTs, createdTs, wid := f[7], f[8], f[9], f[10], f[11], f[12]
+		driver := f[3]
+		attention, status, recap, recapTs, createdTs, wid := f[4], f[5], f[6], f[7], f[8], f[9]
+		id := ident[session]
+		wsID, title, tag := id.id, id.title, id.tag
 		if strings.HasPrefix(session, "_") || !workspace.Listable(wsID) {
 			continue
 		}
@@ -300,6 +310,31 @@ func formatAge(now time.Time, tsStr string) string {
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
+}
+
+// wsIdentity is a workspace's session-scoped identity (id/title/tag).
+type wsIdentity struct{ id, title, tag string }
+
+// sessionIdentities reads the session-scoped workspace-identity options from
+// list-SESSIONS (their own context — no window-inheritance dependency, which is
+// version-fragile), keyed by session name. The picker joins these to windows.
+func sessionIdentities(h *tmuxhost.Client) map[string]wsIdentity {
+	out, err := h.Run("list-sessions", "-F", strings.Join([]string{
+		"#{session_name}", "#{" + workspace.OptWorkspaceID + "}",
+		"#{" + workspace.OptWorkspaceTitle + "}", "#{" + workspace.OptWorkspaceTag + "}",
+	}, "\x1f"))
+	if err != nil {
+		return map[string]wsIdentity{}
+	}
+	m := map[string]wsIdentity{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(line, "\x1f")
+		if len(f) < 4 {
+			continue
+		}
+		m[f[0]] = wsIdentity{id: f[1], title: f[2], tag: strings.TrimSpace(f[3])}
+	}
+	return m
 }
 
 // outerCurrent returns the (session_id, window_id) the outer workspace client is
