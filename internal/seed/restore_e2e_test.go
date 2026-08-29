@@ -15,19 +15,25 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
+// driverWindow is the driver window name the seed hydrator uses: the last
+// segment of the workspace slug.
+func driverWindow(slug string) string { return filepath.Base(slug) }
+
 // TestSeed_HydrateThenRestore is the load-bearing integration test for the
 // sandbox: hydrate the built-in scenario into an isolated root (real git
 // repos + worktrees + a real statestore cache), then run atelier's own
-// Restore against a fresh tmux server and assert the workspaces come back
-// exactly as seeded — sessions recreated, attention/recap re-stamped, the
-// forge PR state re-stamped, the picker rendering every recap with no live
-// agent, and the soft-closed worktree left on disk for M-r.
+// Restore against a fresh tmux server and assert the intent-workspaces come
+// back exactly as seeded — sessions recreated, the driver window's
+// attention/recap re-stamped, the workspace tag re-stamped, the picker
+// rendering every recap with no live agent, and the soft-closed worktree
+// left on disk for M-r.
 func TestSeed_HydrateThenRestore(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("ATELIER_WORKSPACE_ROOT", filepath.Join(root, "ateliers"))
 
 	sc, err := seed.Builtin("acme-platform")
 	if err != nil {
@@ -46,7 +52,7 @@ func TestSeed_HydrateThenRestore(t *testing.T) {
 	// 1. Every seeded workspace restored, no stray adoption.
 	var want []string
 	for _, ws := range sc.Workspaces {
-		want = append(want, ws.Session)
+		want = append(want, ws.Slug)
 	}
 	sort.Strings(want)
 	got := atelierSessions(t, srv)
@@ -54,65 +60,44 @@ func TestSeed_HydrateThenRestore(t *testing.T) {
 		t.Errorf("sessions = %v, want %v", got, want)
 	}
 
-	// 2. @repo_path stamped per session.
-	for _, ws := range sc.Workspaces {
-		want := filepath.Join(layout.CodeRoot, ws.RepoSlug) + "\n"
-		if v, _ := srv.Client.Run("show-option", "-v", "-t", ws.Session, "@repo_path"); string(v) != want {
-			t.Errorf("%s @repo_path = %q, want %q", ws.Session, string(v), want)
-		}
-	}
-
-	// 3. Attention + recap re-stamped on the helm ingress window.
-	wid := windowID(t, srv, "acme-platform/helm-charts", "feat/bump-ingress-nginx")
+	// 2. Attention + recap re-stamped on the eks upgrade driver window.
+	wid := windowID(t, srv, "eks-1-30-upgrade", driverWindow("eks-1-30-upgrade"))
 	if got := opt(t, srv, wid, "@needs_attention"); got != "1" {
 		t.Errorf("@needs_attention = %q, want 1", got)
 	}
-	if got := opt(t, srv, wid, "@attention_recap"); !strings.Contains(got, "ingress-nginx") {
-		t.Errorf("@attention_recap = %q, want it to mention ingress-nginx", got)
+	if got := opt(t, srv, wid, "@attention_recap"); !strings.Contains(got, "1.30") {
+		t.Errorf("@attention_recap = %q, want it to mention 1.30", got)
 	}
 
-	// 4. Forge PR state + workspace tag re-stamped from seeded metadata.
-	if got := opt(t, srv, wid, "@forge_state"); got != "open" {
-		t.Errorf("@forge_state = %q, want open", got)
-	}
-	if got := opt(t, srv, wid, "@workspace_tag"); got != "platform" {
-		t.Errorf("@workspace_tag = %q, want platform", got)
+	// 3. Workspace tag re-stamped from the seeded record.
+	if got := opt(t, srv, wid, "@workspace_tag"); got != "infra" {
+		t.Errorf("@workspace_tag = %q, want infra", got)
 	}
 
-	// 4b. Per-window age: BOTH windows of the multi-worktree helm session
-	// get a distinct @workspace_created_ts (regression — the second window
-	// used to come back blank, so the picker showed no age on it).
-	redisWid := windowID(t, srv, "acme-platform/helm-charts", "feat/redis-pdb")
-	firstTs := opt(t, srv, wid, workspace.OptWorkspaceCreatedTs)
-	secondTs := opt(t, srv, redisWid, workspace.OptWorkspaceCreatedTs)
-	if firstTs == "" || secondTs == "" {
-		t.Errorf("both helm windows want @workspace_created_ts; got first=%q second=%q", firstTs, secondTs)
-	}
-	if firstTs == secondTs {
-		t.Errorf("helm windows share @workspace_created_ts %q; want distinct per-window ages", firstTs)
+	// 4. Driver window age stamped.
+	if ts := opt(t, srv, wid, workspace.OptWorkspaceCreatedTs); ts == "" {
+		t.Error("eks driver window missing @workspace_created_ts")
 	}
 
-	// 5. Picker renders recaps from persisted state — no live agent popup.
-	// The recap is its own SessionRow field (the picker renders it as a
-	// second line under the workspace name), not part of Display.
-	rows, err := workspaces.BuildSessionList(srv.Client)
+	// 5. Picker builds one row per restored workspace with its title, from
+	// persisted state — no live agent. (The driver recap folds into the
+	// workspace summary line; the seeded Summary drives the second row.)
+	rows, err := workspaces.BuildWorkspaceList(srv.Client)
 	if err != nil {
-		t.Fatalf("BuildSessionList: %v", err)
+		t.Fatalf("BuildWorkspaceList: %v", err)
 	}
-	byWindow := map[string]workspaces.SessionRow{}
+	bySession := map[string]workspaces.WorkspaceRow{}
 	for _, r := range rows {
-		byWindow[r.Session+":"+r.Window] = r
+		bySession[r.Session] = r
 	}
 	for _, ws := range sc.Workspaces {
-		for _, w := range ws.Windows {
-			row, ok := byWindow[ws.Session+":"+w.Name]
-			if !ok {
-				t.Errorf("picker missing row for %s:%s", ws.Session, w.Name)
-				continue
-			}
-			if w.Recap != "" && !strings.Contains(row.Recap, w.Recap) {
-				t.Errorf("picker row %s:%s recap = %q, want it to contain %q", ws.Session, w.Name, row.Recap, w.Recap)
-			}
+		row, ok := bySession[ws.Slug]
+		if !ok {
+			t.Errorf("picker missing row for %s", ws.Slug)
+			continue
+		}
+		if !strings.Contains(row.Display, ws.Title) {
+			t.Errorf("picker row %s display = %q, want it to contain title %q", ws.Slug, row.Display, ws.Title)
 		}
 	}
 
@@ -121,14 +106,10 @@ func TestSeed_HydrateThenRestore(t *testing.T) {
 	if _, err := os.Stat(marker); err != nil {
 		t.Errorf("soft-closed marker missing: %v", err)
 	}
-	res, _ := srv.Client.Run("list-windows", "-t", "=acme-platform/platform-scripts", "-F", "#{window_name}")
-	if strings.Contains(string(res), "fix/ci-cache-key") {
-		t.Error("soft-closed worktree fix/ci-cache-key should not be a live window")
-	}
 }
 
-// atelierSessions returns the sorted atelier-managed sessions (those with
-// @repo_path set), ignoring any bootstrap session.
+// atelierSessions returns the sorted atelier-managed sessions, ignoring any
+// bootstrap "default" session (which carries no workspace root).
 func atelierSessions(t *testing.T, srv *testtmux.Server) []string {
 	t.Helper()
 	out, err := srv.Client.Run("list-sessions", "-F", "#{session_name}")
@@ -137,12 +118,10 @@ func atelierSessions(t *testing.T, srv *testtmux.Server) []string {
 	}
 	var names []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
+		if line == "" || line == "default" {
 			continue
 		}
-		if v, _ := srv.Client.Run("show-option", "-v", "-t", line, "@repo_path"); strings.TrimSpace(string(v)) != "" {
-			names = append(names, line)
-		}
+		names = append(names, line)
 	}
 	sort.Strings(names)
 	return names

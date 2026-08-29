@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -41,6 +42,14 @@ const (
 	VHookArmedAtRest       ViolationCode = "hook_armed_at_rest"
 	VMisroutedAttention    ViolationCode = "misrouted_attention"
 	VDeadWorktree          ViolationCode = "dead_worktree"
+	// Intent-workspace invariants (WS-1). workspace_root_missing and
+	// multiple_drivers are pure over the Topology (checked in Validate);
+	// dangling_worktree_link and orphan_pr need the statestore + filesystem
+	// and are checked by the layout reconcile sweep (workspace.ReconcileLayout).
+	VWorkspaceRootMissing ViolationCode = "workspace_root_missing"
+	VMultipleDrivers      ViolationCode = "multiple_drivers"
+	VDanglingWorktreeLink ViolationCode = "dangling_worktree_link"
+	VOrphanPR             ViolationCode = "orphan_pr"
 )
 
 // Violation is a single failed invariant over a Topology.
@@ -116,6 +125,10 @@ func Validate(t *Topology) []Violation {
 	for _, s := range t.Sessions {
 		kindByID[s.ID] = s.Kind
 	}
+	// driverCount tallies workspace windows per session so a workspace with
+	// more than one driver (the WS-8 single-agent invariant) is caught.
+	driverCount := map[string]int{}
+	rootSeen := map[string]bool{}
 	for _, w := range t.Windows {
 		if w.Attention {
 			switch {
@@ -126,17 +139,39 @@ func Validate(t *Topology) []Violation {
 				// notification. --fix unsets it.
 				vs = append(vs, Violation{VMisroutedAttention, SevWarn, w.WindowID,
 					"attention flag stamped on a popup-backing window — the parent workspace should carry it (phantom-notification bug)", true})
-			case kindByID[w.SessionID] == KindWorkspace && !Listable(w.RepoPath, w.WorkspaceKind):
+			case kindByID[w.SessionID] == KindWorkspace && !Listable(w.WorkspaceID):
 				// Report-only: a non-listable workspace window could be a real
 				// workspace that lost its metadata and still wants attention —
 				// clearing it might drop a genuine signal, so leave it to a human.
 				vs = append(vs, Violation{VMisroutedAttention, SevWarn, w.WindowID,
-					"attention flag on a non-listable window (no @repo_path/@ai_workspace_kind) — a phantom the rollup ignores", false})
+					"attention flag on a non-listable window (no @workspace_id) — a phantom the rollup ignores", false})
 			}
 		}
-		if kindByID[w.SessionID] == KindWorkspace && w.RepoPath != "" && w.PaneCwd != "" && !w.PaneCwdLive {
+		if kindByID[w.SessionID] == KindWorkspace && w.PaneCwd != "" && !w.PaneCwdLive {
 			vs = append(vs, Violation{VDeadWorktree, SevWarn, w.WindowID,
-				"workspace window whose working directory no longer exists (worktree may have been removed)", false})
+				"workspace window whose working directory no longer exists (worktree or root may have been removed)", false})
+		}
+		// Intent-workspace checks, on driver windows of a workspace.
+		if kindByID[w.SessionID] == KindWorkspace && Listable(w.WorkspaceID) && w.Driver {
+			driverCount[w.SessionID]++
+			if w.Root != "" && !rootSeen[w.SessionID] {
+				rootSeen[w.SessionID] = true
+				if _, err := os.Stat(w.Root); err != nil {
+					// Report-only: a missing root is a human-visible problem
+					// (the agent's cwd and symlink tree are gone) but auto-
+					// recreating an empty dir would mask data loss.
+					vs = append(vs, Violation{VWorkspaceRootMissing, SevWarn, w.Root,
+						"workspace root directory no longer exists — worktree links and the agent cwd are gone", false})
+				}
+			}
+		}
+	}
+	// One driver per workspace (WS-8). Report-only: which extra window to
+	// demote is a judgment call the user should make.
+	for sid, n := range driverCount {
+		if n > 1 {
+			vs = append(vs, Violation{VMultipleDrivers, SevWarn, sid,
+				fmt.Sprintf("%d driver windows in one workspace — a workspace has exactly one agent (extra windows should be inspection shells, not listable)", n), false})
 		}
 	}
 

@@ -2,15 +2,17 @@
 
 # atelier
 
-**tmux + git-worktree workspaces for running coding agents in parallel.**
+**Intent-first workspaces for running coding agents in parallel.**
 
-One Go binary, curated built-in tools, an unopinionated statusline API.
+You type what you're doing; atelier names the workspace, picks the repos, and
+opens the agent. One Go binary, curated built-in tools, an unopinionated
+statusline API.
 
 [![ci](https://github.com/vyrwu/atelier/actions/workflows/ci.yml/badge.svg)](https://github.com/vyrwu/atelier/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/vyrwu/atelier?display_name=tag&sort=semver)](https://github.com/vyrwu/atelier/releases)
 [![license](https://img.shields.io/github/license/vyrwu/atelier)](LICENSE)
 
-<img src="docs/demo.png" alt="atelier — the M-s workspace picker: parallel agent workspaces with per-row recap and git freshness" width="800">
+<img src="docs/demo.png" alt="atelier — the M-s workspace picker: one row per intent-workspace, with per-row recap and rollups" width="800">
 
 <!-- TODO: replace this splash with a demo video showcasing atelier. -->
 
@@ -25,21 +27,41 @@ One Go binary, curated built-in tools, an unopinionated statusline API.
 
 ## Overview
 
-atelier manages tmux windows, git worktrees, and per-workspace tool state so
-you can run several coding agents (Claude Code, Codex, Aider) in parallel and
-keep track of which ones need attention.
+atelier lets you run several coding agents (Claude Code, Codex, Aider) in
+parallel, organized around what you're *doing* rather than which repo you're in.
+You describe a task; atelier spins up a workspace for it and keeps track of which
+ones need your attention.
 
-A workspace is one tmux window + one git worktree + its own tool state — agent
-session, lazygit, k9s context, postgres CLI. A background loop continuously
-observes each workspace's agent — re-reading its session transcript to derive a
-one-line recap and a three-state status (blocked / running / idle) — tracks git
-freshness, persists it all to disk, and rehydrates on tmux restart.
+**A workspace is an intent** — one driver agent working at a dedicated directory
+(`~/ateliers/<slug>`) that may span several repositories. Instead of picking a
+repo, you type the task at hand (`M-n`); atelier names the workspace, selects the
+repos the intent touches, creates a git worktree per repo, and symlinks each into
+the workspace root as `<repo>/<branch>` — so the agent's `ls` shows the worktrees
+in play and it edits through those paths. The agent can grow its own workspace
+(add worktrees, register the PRs it opens) through a small CLI / MCP control
+surface.
+
+A background loop continuously observes each workspace's driver agent —
+re-reading its session transcript to derive a one-line recap and a three-state
+status (blocked / running / idle) — sweeps the forge for the workspace's PRs,
+rolls it all up into a one-line workspace summary, persists it to disk, and
+rehydrates on tmux restart.
 
 ## Features
 
-- **Workspace = window + worktree + tool state.** `M-n` creates a workspace
-  from a natural-language task, `M-s` switches between them, `M-;` opens any
-  tool for the current workspace, `M-r` recovers one that was soft-closed.
+- **Workspace = intent + driver agent + worktrees.** `M-n` creates a workspace
+  from a natural-language task (atelier names it and selects the repos), `M-s`
+  lists your workspaces one row each, `M-c` reviews changes (PRs) across every
+  repo in flight, `M-;` opens any tool for the current workspace.
+- **The agent can act on its workspace.** The driver agent grows and reports on
+  its own workspace through CLI verbs — `atelier workspace worktree add|list`,
+  `atelier workspace context`, `atelier pr register|list|close` — also exposed to
+  Claude as MCP tools via a built-in stdio server (`atelier mcp serve`). So the
+  agent adds the repos it needs and registers the PRs it opens; atelier tracks
+  them in the Changes view.
+- **Cross-repo Changes view.** `M-c` aggregates every workspace's pull requests
+  into one actionable list — PR number, CI, review decision, comment count — and
+  lets you open (`M-o`) or close (`M-c`) a PR from the terminal.
 - **Load-bearing kernel, swappable integrations.** The kernel owns the views
   and their capability slots — a per-row AI summary, an attention sigil, a
   code-forge badge. An integration is a bounded adapter that fills a slot.
@@ -48,19 +70,19 @@ freshness, persists it all to disk, and rehydrates on tmux restart.
 - **Launchers instead of an SDK.** Register any command with a `[tools.<name>]`
   block; atelier binds a key, opens it in a popup, and owns the window state.
   No Go, no plugin protocol, no recompile.
-- **Unopinionated statusline.** atelier emits git freshness (ahead/behind) and
-  attention (an agent is blocked waiting on you) as `#(atelier status …)`
-  commands you embed in your own statusline. Works with vanilla tmux, Dracula,
-  or Powerline; it supplies data, not visuals.
-- **Persistent state.** Workspaces, recap text, attention flags, and git
-  freshness are written through to disk. `M-q` detaches while the server keeps
+- **Unopinionated statusline.** atelier emits attention (an agent is blocked
+  waiting on you) and a code-forge PR badge as `#(atelier status …)` commands you
+  embed in your own statusline. Works with vanilla tmux, Dracula, or Powerline;
+  it supplies data, not visuals.
+- **Persistent state.** Workspaces, worktrees, PRs, recap text, and attention
+  flags are written through to disk. `M-q` detaches while the server keeps
   running, so background agents survive.
 - **Always-on diagnostics.** Every tmux call from every atelier process is
   logged to `~/.cache/atelier/debug.log`. `atelier doctor` reports missing
   dependencies.
 - **Introspectable, self-healing state.** atelier keeps one validated model of
-  its tmux entity graph — repos, workspaces, popups, and the outer-focus
-  pointer. `atelier state show [--json]` prints the graph plus any invariant
+  its tmux entity graph — workspaces, their worktrees and PRs, popups, and the
+  outer-focus pointer. `atelier state show [--json]` prints the graph plus any invariant
   violations; `atelier reconcile` reports them, and `atelier reconcile --fix`
   repairs the *structural* ones (orphan popups, a stranded outer pointer, a
   leaked hook). It does **not** clear the attention badge — that's a real
@@ -116,8 +138,8 @@ nord setup is unaffected. This is the author's daily driver; see
 atelier doctor      # check tmux and every tool's requirements
 ```
 
-For wiring freshness and attention into your statusline format, see
-[docs/EMBEDDING.md](docs/EMBEDDING.md).
+For wiring the attention rollup and forge PR badge into your statusline format,
+see [docs/EMBEDDING.md](docs/EMBEDDING.md).
 
 <details>
 <summary>Reference tmux configs</summary>
@@ -156,15 +178,23 @@ Font).
 | Keys | Action |
 |------|--------|
 | `M-;` | Tool selector — fzf list of every discovered tool; picks route to the current workspace. |
-| `M-n` | New workspace — natural-language task → Claude names the branch → worktree + agent session. |
-| `M-s` | Select workspace — switch between workspaces (recap + git freshness per row). |
-| `M-r` | Recover workspace — recently soft-closed workspaces rank to the top; recover or delete. |
+| `M-n` | New workspace — type the task; atelier names it, picks the repos, and opens the driver agent. |
+| `M-s` | Active workspaces — one row per workspace, with a recap + rollups; `Enter` switches. |
+| `M-c` | List Changes — cross-repo PR view; `M-o` opens a PR, `M-c` closes it, `Enter` opens in a browser. |
+| `M-k` | Switch k9s context (moved from `M-c`, which is now List Changes). |
 | `M-?` | Cheatsheet — every active binding, scoped to the current context. |
 | `M-q` | Detach — the server keeps running; reattach with `atelier` (or `tmux -L atelier attach`). |
+
+Inside the **Active workspaces** picker (`M-s`): `M-r` renames the workspace,
+`M-x` deletes it (the confirm enumerates the worktrees and PRs that will be
+destroyed), `M-t` tags it, `M-p` pins the search scope.
 
 Each popup runs in its own backing tmux session, so opening a tool does not
 disturb your work and closing it leaves it ready to resume. `M-;` works inside a
 tool's popup, so you can pivot to another tool without closing the first.
+
+> With the bundled launcher, `atelier` opens the `M-n` intent creator on attach
+> when you have no workspaces yet, instead of dropping you on a bare shell.
 
 ## Configuration
 
@@ -183,23 +213,28 @@ The block below is the complete schema, showing every option at its default:
 [ai]
 provider = "claude"   # AI adapter: "claude" | "mock" | "" (disables AI features)
 model    = "haiku"    # default model for AI tasks that don't set their own
+mcp      = true       # register `atelier mcp serve` into the interactive agent
+                      # (worktree/PR/context tools). Background calls never get MCP.
 
 [ai.models]           # per-task model overrides (empty = use `model` above)
-naming = "sonnet"     # model that names branches/sessions (M-n)
-recap  = ""           # model for one-line session recaps (M-s rows); inherits `model`
+naming  = "sonnet"    # model that names workspaces (M-n)
+recap   = ""          # model for one-line per-agent recaps (M-s rows); inherits `model`
+summary = ""          # model for the workspace rollup summary; inherits `model`
 
 [ai.prompts]          # empty = built-in default
-recap      = ""       # override the recap system prompt
-multi_repo = ""       # extra system prompt in multi-repo workspaces
+recap     = ""        # override the recap system prompt
+workspace = ""        # extra system prompt for the driver agent (workspace layout)
+summary   = ""        # override the workspace-rollup summary prompt
 
 [forge]
-provider = ""         # forge/PR-badge adapter: "github" | "mock" | "" (off)
+provider    = ""      # forge/PR adapter: "github" | "mock" | "" (off)
+allow_write = true    # allow mutating forge ops (close PR from M-c); false = read-only
 
 [workspaces]
-code_root       = "~/code/github"             # where M-n clones single repos
-worktree_root   = "~/code/.worktrees/github"  # where M-n creates git worktrees
-multi_repo_root = "~/code"                     # root for multi-repo workspaces
-auto_tag        = true                         # let the AI suggest a tag at M-n creation
+code_root      = "~/code/github"             # repo checkouts the AI picks from at M-n
+worktree_root  = "~/code/.worktrees/github"  # where git worktrees are materialized
+workspace_root = "~/ateliers"                # per-workspace dirs: <root>/<slug>, worktrees symlink in
+auto_tag       = true                        # let the AI suggest a tag at M-n creation
 
 [k8s]
 contexts = "~/.config/atelier/k8s/contexts.yaml"  # k9s context definitions
@@ -244,7 +279,7 @@ lists it in the selector.
 ### 2. An integration (swap a capability)
 
 To change which component fills a kernel capability — the AI that names
-branches, summarizes, and raises attention, or the forge behind the PR badge —
+workspaces, summarizes, and raises attention, or the forge behind the PR badge —
 write an adapter satisfying the kernel port (`internal/integration`:
 `AIIntegration`, `ForgeIntegration`) and select it in config:
 
@@ -270,7 +305,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## How it works
 
 ```
-[ workspace = tmux window backed by a git worktree ]
+[ workspace = intent, one driver agent at ~/ateliers/<slug> ]
         │
         │  bind c → set @atelier_outer_pane=$5
         │       → display-popup -E 'atelier ai open'
@@ -322,7 +357,8 @@ tests. For the release process, see [RELEASING.md](RELEASING.md).
 
 ## Status
 
-Currently shipping `v0.6.x`. Known limitations:
+Currently shipping `v0.9.x`; the intent-workspace redesign (this README) lands as
+the next major. Known limitations:
 
 - macOS only in practice (Linux builds exist but are not tested daily).
 - Requires tmux ≥ 3.4 with `display-popup`.

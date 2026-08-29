@@ -11,6 +11,7 @@ package mock
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,33 +51,62 @@ func (Adapter) SetPrompt(_ *tmuxhost.Client, _, _, _ string) error { return nil 
 
 var nameSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
-// GenerateName produces a deterministic conventional name from the intent.
-// It honors the kernel's requested format: session prompts (which specify
-// the `auto/` format) get an `auto/` prefix, everything else `feat/`. When
-// the kernel asks for the tag-aware two-line contract (issue #56), it also
-// emits a second line: an existing tag echoed back if the intent mentions
-// one, else empty.
-func (Adapter) GenerateName(_ context.Context, systemPrompt, intent string) (string, error) {
-	prefix := "feat"
-	if strings.Contains(systemPrompt, "auto/") {
-		prefix = "auto"
-	}
-	// The tag-aware contract wraps the text as "EXISTING TAGS: ...\nINTENT:
-	// <text>"; name off the real intent, not the wrapper.
-	name := prefix + "/" + nameSlug(intentBody(intent))
-	if !strings.Contains(systemPrompt, "grouping tag") {
-		return name, nil
-	}
-	return name + "\n" + mockTag(intent), nil
+// GenerateName satisfies the kernel's intent-first naming contract
+// deterministically. The kernel's workspace-naming system prompt asks for four
+// "KEY: value" lines (TITLE/SLUG/TAG/REPOS); the mock emits them off the
+// intent + repo index in the wrapped input, echoing an existing tag when the
+// intent mentions one and the first indexed repo as the touched repo. This is
+// the proof the naming port is genuinely swappable — offline, no Claude.
+func (Adapter) GenerateName(_ context.Context, _, intent string) (string, error) {
+	body := intentBody(intent)
+	slug := nameSlug(body)
+	title := titleize(body)
+	tag := mockTag(intent)
+	repos := mockRepos(intent)
+	return "TITLE: " + title + "\nSLUG: " + slug + "\nTAG: " + tag + "\nREPOS: " + repos, nil
 }
 
-// intentBody returns the actual task text from a possibly tag-wrapped
-// intent, stripping the "EXISTING TAGS: ...\nINTENT: " preamble.
+// intentBody returns the actual task text from the wrapped naming input,
+// stripping the "REPO INDEX: …\nEXISTING TAGS: …\nINTENT: " preamble.
 func intentBody(intent string) string {
 	if _, body, ok := strings.Cut(intent, "\nINTENT: "); ok {
 		return body
 	}
 	return intent
+}
+
+// titleize renders the first few intent words as a Title Case title.
+func titleize(text string) string {
+	words := strings.Fields(text)
+	if len(words) > 4 {
+		words = words[:4]
+	}
+	for i, w := range words {
+		if w != "" {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	if len(words) == 0 {
+		return "Mock Workspace"
+	}
+	return strings.Join(words, " ")
+}
+
+// mockRepos echoes the first repo in the REPO INDEX preamble (so the sandbox
+// deterministically materializes a worktree), or "" when none.
+func mockRepos(intent string) string {
+	idx, _, ok := strings.Cut(intent, "\nEXISTING TAGS:")
+	if !ok {
+		return ""
+	}
+	idx = strings.TrimPrefix(idx, "REPO INDEX:\n")
+	for _, line := range strings.Split(idx, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && line != "(none)" {
+			return line
+		}
+	}
+	return ""
 }
 
 // nameSlug is the 2-5-word kebab slug the mock derives from task text.
@@ -97,11 +127,16 @@ func nameSlug(text string) string {
 // the mock deterministically exercises the "reuse vocabulary" behavior),
 // else empty (no tag).
 func mockTag(intent string) string {
-	list, _, ok := strings.Cut(intent, "\nINTENT: ")
-	if !ok {
+	list := ""
+	for _, line := range strings.Split(intent, "\n") {
+		if rest, ok := strings.CutPrefix(line, "EXISTING TAGS: "); ok {
+			list = rest
+			break
+		}
+	}
+	if list == "" {
 		return ""
 	}
-	list = strings.TrimPrefix(list, "EXISTING TAGS: ")
 	body := strings.ToLower(intentBody(intent))
 	for _, tag := range strings.Split(list, ", ") {
 		tag = strings.TrimSpace(tag)
@@ -131,13 +166,56 @@ func (Adapter) AgentPopupSession(parentSessionID, parentWindowID string) string 
 // HasResumableState is always false — the mock keeps no state.
 func (Adapter) HasResumableState(_ *tmuxhost.Client, _, _ string) bool { return false }
 
+// SummarizeWorkspace returns a deterministic workspace-level line so the M-s
+// picker's summary row is observably populated offline. It folds in the PR
+// count so the output changes with the workspace's shape (proof the summarize
+// call sees the PR states), and returns "" when there is nothing to summarize.
+func (Adapter) SummarizeWorkspace(_ context.Context, intent, agentRecap string, prs []integration.PullRequest) (string, error) {
+	if intent == "" && agentRecap == "" && len(prs) == 0 {
+		return "", nil
+	}
+	return fmt.Sprintf("mock workspace summary (%d PRs)", len(prs)), nil
+}
+
 // --- ForgeIntegration --------------------------------------------------------
 
-// MockForgeFixture is the file the mock forge reads to classify workspaces:
-// a JSON object mapping a workspace's canonical worktree path (WorkspaceRef.Cwd)
-// to a ForgeState string ("open"/"draft"/"merged"/"closed"). It lives under
-// the active config home so it's naturally isolated per XDG_CONFIG_HOME. The
-// demo sandbox (and tests) write it; a missing file means "no PRs anywhere".
+// ForgePR is the type-safe fixture entry for the mock forge — a subset of
+// integration.PullRequest's fields, expressed as strings so the fixture is
+// hand-writable and internal/seed can construct it without importing the
+// kernel's enum vocabulary indirectly. State/CI/ReviewDecision are the raw
+// kernel-vocabulary strings ("open"/"draft"/..., "pass"/"fail"/..., etc.).
+type ForgePR struct {
+	Number         int    `json:"number"`
+	Repo           string `json:"repo"`
+	Title          string `json:"title"`
+	State          string `json:"state"`
+	CI             string `json:"ci,omitempty"`
+	ReviewDecision string `json:"review_decision,omitempty"`
+	Comments       int    `json:"comments,omitempty"`
+	URL            string `json:"url,omitempty"`
+	Branch         string `json:"branch,omitempty"`
+}
+
+// toPullRequest maps a fixture entry onto the kernel's rich PR record.
+func (p ForgePR) toPullRequest() integration.PullRequest {
+	return integration.PullRequest{
+		Number:         p.Number,
+		Repo:           p.Repo,
+		Title:          p.Title,
+		State:          integration.ForgeState(p.State),
+		CI:             integration.CIStatus(p.CI),
+		ReviewDecision: integration.ReviewDecision(p.ReviewDecision),
+		Comments:       p.Comments,
+		URL:            p.URL,
+		Branch:         p.Branch,
+	}
+}
+
+// MockForgeFixture is the file the mock forge reads to list PRs: a JSON object
+// mapping a repo checkout path (the repoPath passed to List) to an array of
+// ForgePR entries. It lives under the active config home so it's naturally
+// isolated per XDG_CONFIG_HOME. The demo sandbox (and tests) write it; a
+// missing file — or a repoPath absent from the map — means "no PRs".
 const MockForgeFixture = "mock-forge.json"
 
 // MockForgeFixturePath returns the fixture path under the active config home.
@@ -145,29 +223,36 @@ func MockForgeFixturePath() string {
 	return filepath.Join(config.XDGConfigHome(), "atelier", MockForgeFixture)
 }
 
-// Status classifies the workspace's forge item by looking its worktree path
-// up in the fixture map — deterministic, offline, no `gh`. An absent fixture
-// or unmapped workspace is ForgeNone (badge cleared). This is the proof the
-// forge port is swappable: the kernel's refresh + badge rendering run for
-// real against fixture data.
-func (Adapter) Status(ws integration.WorkspaceRef) (integration.ForgeStatus, error) {
-	return integration.ForgeStatus{State: mockForgeState(ws.Cwd)}, nil
-}
-
-// Open is a no-op — the mock has no real PR to open in a browser.
-func (Adapter) Open(integration.WorkspaceRef) error { return nil }
-
-func mockForgeState(cwd string) integration.ForgeState {
-	if cwd == "" {
-		return integration.ForgeNone
+// List returns the pull requests for the repo checked out at repoPath by
+// looking repoPath up in the fixture map — deterministic, offline, no `gh`. An
+// absent fixture or unmapped repoPath yields nil (the Changes view degrades to
+// "no PRs"). This is the proof the forge port is swappable: the kernel's
+// refresh + rendering run for real against fixture data.
+func (Adapter) List(repoPath string) ([]integration.PullRequest, error) {
+	if repoPath == "" {
+		return nil, nil
 	}
 	data, err := os.ReadFile(MockForgeFixturePath())
 	if err != nil {
-		return integration.ForgeNone
+		return nil, nil
 	}
-	var m map[string]string
+	var m map[string][]ForgePR
 	if err := json.Unmarshal(data, &m); err != nil {
-		return integration.ForgeNone
+		return nil, nil
 	}
-	return integration.ForgeState(m[cwd])
+	entries := m[repoPath]
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	prs := make([]integration.PullRequest, len(entries))
+	for i, e := range entries {
+		prs[i] = e.toPullRequest()
+	}
+	return prs, nil
 }
+
+// Open is a no-op — the mock has no real PR to open in a browser.
+func (Adapter) Open(integration.PullRequest) error { return nil }
+
+// Close is a no-op — the mock is stateless and has no real forge to mutate.
+func (Adapter) Close(integration.PullRequest) error { return nil }

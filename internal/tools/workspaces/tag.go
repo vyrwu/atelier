@@ -176,39 +176,30 @@ func normalizeTag(raw string) string {
 // placeholders).
 var sgrRe = regexp.MustCompile("\033\\[[0-9;]*m")
 
-// formatTagPreview renders the M-t preview line: the target workspace's name
+// formatTagPreview renders the M-t preview line: the target workspace's title
 // row as it WILL look once the pending tag choice is applied, so the user sees
-// the result before committing. It mirrors formatSessionDisplay's styling
-// (branch green, repo sessionColor, tag pill leading) minus the time/icon/badge
-// chrome. Cases, by what fzf currently has focused:
+// the result before committing. Cases, by what fzf currently has focused:
 //
 //   - an existing tag row focused, or a new tag typed → that tag's live pill;
-//   - the clear-tag row focused, or nothing resolvable (empty query, no tag) →
-//     just "branch repo", no pill: the tag simply disappears, previewing removal.
+//   - the clear-tag row focused, or nothing resolvable → just the title, no pill.
 //
-// hovered is the raw (colored) focused item; query is the live typed text.
-// resolveTagChoice already maps the clear row to "", so it needs no special
-// case here. Pure.
-func formatTagPreview(branch, repo, sessionColor, query, hovered string) string {
-	branchCol := "\033[32m" + branch + "\033[0m"
-	repoCol := "\033[" + sessionColor + "m" + repo + "\033[0m"
-
+// hovered is the raw (colored) focused item; query is the live typed text. Pure.
+func formatTagPreview(title, query, hovered string) string {
+	titleCol := "\033[38;5;255m" + title + "\033[0m"
 	tag := resolveTagChoice(sgrRe.ReplaceAllString(hovered, ""), query)
 	pill := ""
 	if tag != "" {
 		pill = strings.TrimSpace(renderTagPill(tag)) + " "
 	}
-	// Dim "Preview:" label so the rendered row reads as the subject, not the
-	// prefix.
-	return "\033[2mPreview:\033[0m " + pill + branchCol + " " + repoCol
+	return "\033[2mPreview:\033[0m " + pill + titleCol
 }
 
 // TagPreviewCommand is the hidden `_tag-preview`: the M-t picker's live
-// header-preview command. Flags carry the fixed target (branch/repo/color); the
-// two trailing positionals are fzf's live {q} (query) and {} (hovered row).
-// Pure render, no tmux/git — it runs on every keystroke.
+// header-preview command. The --title flag carries the workspace title; the two
+// trailing positionals are fzf's live {q} (query) and {} (hovered row). Pure
+// render — runs on every keystroke.
 func TagPreviewCommand() *cobra.Command {
-	var branch, repo, color string
+	var title string
 	c := &cobra.Command{
 		Use:    "_tag-preview [query] [hovered]",
 		Short:  "internal: render the M-t tag preview line",
@@ -222,50 +213,44 @@ func TagPreviewCommand() *cobra.Command {
 			if len(args) > 1 {
 				hovered = args[1]
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), formatTagPreview(branch, repo, color, query, hovered))
+			fmt.Fprintln(cmd.OutOrStdout(), formatTagPreview(title, query, hovered))
 			return nil
 		},
 	}
-	c.Flags().StringVar(&branch, "branch", "", "workspace branch (window name)")
-	c.Flags().StringVar(&repo, "repo", "", "workspace repo (session name)")
-	c.Flags().StringVar(&color, "color", "36", "SGR color body for the repo")
+	c.Flags().StringVar(&title, "title", "", "workspace title")
 	return c
 }
 
-// TagCommand is the hidden `_tag <row>`: bound to M-t in the session
+// TagCommand is the hidden `_tag <session>`: bound to M-t in the workspace
 // picker. It opens a nested fzf listing existing tags for the selected
-// workspace's window, lets the user pick one or type a new one (empty
-// clears), and writes workspace.OptWorkspaceTag on that window. It runs
-// inline via the picker's execute() bind — no new tmux session or window
-// — and the picker reloads afterward so the pill appears immediately.
+// workspace, lets the user pick one or type a new one (empty clears), and
+// writes workspace.OptWorkspaceTag on that session. It runs inline via the
+// picker's execute() bind, and the picker reloads afterward so the pill appears.
 func TagCommand() *cobra.Command {
 	var socket string
 	c := &cobra.Command{
-		Use:    "_tag <row>",
-		Short:  "internal: tag the selected workspace (M-t in the session picker)",
+		Use:    "_tag <session>",
+		Short:  "internal: tag the selected workspace (M-t in the picker)",
 		Hidden: true,
 		Args:   cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			h := tmuxhost.New(socket)
-			session, window, ok := parseForgeRow(strings.Join(args, " "))
-			if !ok {
-				debuglog.Logf("workspaces._tag: unparseable row %q", strings.Join(args, " "))
+			session := strings.TrimSpace(args[0])
+			if session == "" {
 				return nil
 			}
-			windowID, err := h.DisplayMessageAt(session+":"+window, "#{window_id}")
-			if err != nil || windowID == "" {
-				debuglog.Logf("workspaces._tag: no window id for %s/%s: %v", session, window, err)
-				return nil
+			curOut, _ := h.Run("show-option", "-t", session, "-qv", workspace.OptWorkspaceTag)
+			current := strings.TrimSpace(string(curOut))
+			title := session
+			if t, _ := h.Run("show-option", "-t", session, "-qv", workspace.OptWorkspaceTitle); strings.TrimSpace(string(t)) != "" {
+				title = strings.TrimSpace(string(t))
 			}
-			current, _ := h.GetWindowOption(windowID, workspace.OptWorkspaceTag)
 
-			// Live preview rendered as the header (below the input, where a
-			// static hint used to sit): the target row as it will look once the
-			// pending choice is applied. transform-header re-runs on start, on
-			// every keystroke (change), and on selection move (focus); fzf
-			// substitutes {q} (query) and {} (hovered row).
+			// Live preview as the header: the target row as it will look once
+			// the pending choice is applied. transform-header re-runs on start,
+			// keystroke (change), and selection move (focus).
 			previewCmd := dispatch.ToolCmd("workspaces", "_tag-preview",
-				"--branch="+window, "--repo="+session, "--", "{q}", "{}")
+				"--title="+title, "--", "{q}", "{}")
 			preview := "transform-header(" + previewCmd + ")"
 			opts := []fzfstyle.Opt{
 				fzfstyle.WithCustomColor("prompt:111:bold,pointer:111,query:111,hl:111,hl+:111:bold,label:103,border:103,header:111,footer:103"),
@@ -275,26 +260,22 @@ func TagCommand() *cobra.Command {
 				fzfstyle.WithBind("change", preview),
 				fzfstyle.WithBind("focus", preview),
 				fzfstyle.WithFooter("M-t · cancel"),
-				// M-t is a toggle: the same key that opened the tag menu from
-				// the M-s picker also dismisses it (back to the picker, tag
-				// unchanged) — same effect as Esc.
 				fzfstyle.WithBind("alt-t", "abort"),
 			}
 			pickerArgs := fzfstyle.Args("宛 ", "Tag Workspace", "111", opts...)
 			res, err := fzf.PickWithExpect(tagPickerItems(current, collectTags(h)), []string{"enter"}, pickerArgs...)
 			if err != nil {
-				// Esc / Ctrl-C: leave the tag as-is.
-				return nil
+				return nil // Esc / Ctrl-C: leave the tag as-is.
 			}
 			chosen := resolveTagChoice(res.Selection, res.Query)
 			if chosen == current {
 				return nil
 			}
-			if err := workspace.SetTag(h, windowID, chosen); err != nil {
+			if err := workspace.SetTag(h, session, chosen); err != nil {
 				debuglog.LogErr("workspaces._tag", err)
 				return err
 			}
-			debuglog.Logf("workspaces._tag: %s/%s (%s) tag=%q (was %q)", session, window, windowID, chosen, current)
+			debuglog.Logf("workspaces._tag: %s tag=%q (was %q)", session, chosen, current)
 			return nil
 		},
 	}
@@ -302,9 +283,9 @@ func TagCommand() *cobra.Command {
 	return c
 }
 
-// tagBind is the session-picker M-t action: open the nested tag picker
-// for the current row, then reload the list so the new pill renders.
+// tagBind is the workspace-picker M-t action: open the nested tag picker for the
+// current row (session = {1}), then reload the list so the new pill renders.
 func tagBind() string {
-	return "execute(" + dispatch.ToolCmd("workspaces", "_tag", "{}") + ")+reload(" +
+	return "execute(" + dispatch.ToolCmd("workspaces", "_tag", "{1}") + ")+reload(" +
 		dispatch.ToolCmd("workspaces", "_session-list") + ")"
 }

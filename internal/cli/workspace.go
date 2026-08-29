@@ -26,7 +26,9 @@ creation, recap parsing) lives in the workspaces tool ` + "(`atelier tools works
 	}
 	c.AddCommand(workspaceListCmd(), workspaceInfoCmd(), workspaceCreateCmd(),
 		workspaceSwitchCmd(), workspaceDeleteCmd(),
-		workspaceDefaultBranchCmd(), workspacePullDefaultCmd())
+		workspaceDefaultBranchCmd(), workspacePullDefaultCmd(),
+		// Intent-workspace control surface (WS-5): the driver agent's verbs.
+		worktreeCmd(), workspaceContextCmd())
 	return c
 }
 

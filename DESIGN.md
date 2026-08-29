@@ -14,21 +14,42 @@ Terminal-centric agentic dev framework. Per-workspace tool clusters in tmux, dri
 
 | Concept | Definition |
 |---|---|
-| **Workspace** | First-class canvas. A git worktree + tmux window + state attached to that pair. |
+| **Workspace** | First-class canvas. An **intent** — a tmux session + a dedicated root directory + one driver agent + the git worktrees and PRs that agent produces. |
+| **Intent** | The free-text task a workspace exists for ("what are we doing today?"). Entered at M-n; atelier derives the workspace's name and the repos it touches. |
+| **Driver agent** | The single AI agent that inhabits a workspace (window 1, marked `@workspace_driver`). Runs from the workspace root; edits repos through the symlinked worktrees. |
+| **Worktree** | A git worktree the agent works in — a filesystem artifact, not a UI object. Lives repo-local, symlinked into the workspace root as `<repo>/<branch>`. |
 | **Tool** | A TUI program scoped per workspace (Claude, k9s, pgcli, lazygit, granted, popup shell). |
 | **Atelier** | The binary that manages workspaces and orchestrates tools. |
 
 Workspaces are the substrate. Tools operate on or within workspaces. The workspace-picker is a tool; the workspace itself is not.
 
+### The unit of work is an intent, not a branch
+
+Before v1, `session = repo, window = worktree/branch` — the unit of work was
+a branch. After v1, `session = workspace/intent, window = driver agent`, with
+worktrees demoted from first-class UI objects to **filesystem artifacts the
+agent produces**. You no longer pick a repo to start; you type the task (M-n),
+and atelier names the workspace, AI-selects the repos it touches from a scan of
+the code root, materializes a worktree per repo symlinked into the workspace's
+dedicated directory (`~/ateliers/<slug>/`), and opens the driver agent there
+with the intent as its first prompt. One agent per workspace is the v1 scope
+(multi-agent is deferred; the `Agents` set is modeled as a length-1 list so it
+never forces a schema bump). See [`REDESIGN.md`](REDESIGN.md) for the full
+rationale and [`DECISIONS.md`](DECISIONS.md) for the calls made along the way.
+
 ## CLI surface
 
 ```
-atelier                            # boot the bundled tmux runtime (default)
-atelier workspace list|info|create|switch|delete   # workspace primitive
+atelier                            # boot the bundled tmux runtime (default; opens M-n when empty)
+atelier workspace list|info|switch|delete          # workspace primitive
+atelier workspace worktree add|list                # the driver agent's control surface (WS-5)
+atelier workspace context                           # the agent's read of its own workspace
+atelier pr register|list|close                     # register / act on the workspace's PRs
+atelier mcp serve                  # stdio MCP server wrapping the verbs above (for the agent)
 atelier tools list                 # list registered tools + their capabilities
 atelier tools <name> <action>      # e.g. atelier tools k8s open
 atelier ai open | set-prompt | recap        # drive the configured AI integration
-atelier status freshness … | attention count | forge …   # status-line emitters
+atelier status attention count | forge …    # status-line emitters
 atelier state show [--json] | sync | restore   # topology + invariant report / cache ops
 atelier reconcile [--fix]          # report (default) / repair invariant violations
 atelier init [--bare]              # generate the tmux.conf snippet
@@ -58,7 +79,7 @@ what `--fix` will and won't do:
 | Class | Violations | `--fix` behavior |
 |---|---|---|
 | **Fixable** | orphan popup, outer-on-launcher/popup/stale, detached outer-client hint, client-moving hook armed at rest, attention stranded on a **popup** window | auto-repaired (kill / clear / disarm) |
-| **Report-only** | attention on a non-listable **workspace** window, working-dir-gone, >1 workspace client per tty | surfaced only — the fix is a human action |
+| **Report-only** | attention on a non-listable **workspace** window, working-dir-gone, missing workspace root, >1 driver window in a workspace, >1 workspace client per tty | surfaced only — the fix is a human action |
 
 (Attention *misrouted onto a popup-backing window* is fixable — a popup must never carry it and the rollup ignores popups, so clearing is safe. Attention on a real-but-non-listable workspace window is report-only, since it might be a genuine signal on a workspace that lost its metadata.)
 
@@ -126,14 +147,22 @@ itself — an AI summary, a forge status — is a **port** it defines and
 bounded provider, never a driver. The kernel pulls; integrations don't
 push into open slots.
 
-- `AIIntegration` — the agent that inhabits a workspace: open-in-popup,
-  branch naming, and pull-based recap + attention verdict (`RefreshRecap`
-  re-reads the transcript; there is no stop-hook). Adapters:
-  `internal/adapters/claude` (default), `mock` (tests/dev). A
-  codex/gemini adapter would implement the same port.
-- `ForgeIntegration` — per-workspace code-forge status → the picker
-  badge + open-in-browser. Adapter: `internal/adapters/github`. A
-  GitLab adapter would implement the same port.
+- `AIIntegration` — the driver agent that inhabits a workspace:
+  open-in-popup, workspace naming, pull-based recap + attention verdict
+  (`RefreshRecap` re-reads the transcript; there is no stop-hook), and the
+  workspace-level rollup summary (`SummarizeWorkspace`, the daemon's
+  change-gated second call). Adapters: `internal/adapters/claude` (default),
+  `mock` (tests/dev). A codex/gemini adapter would implement the same port.
+  MCP is the claude adapter's transport for the kernel's agent-control verbs,
+  not a port concern — the capability is kernel (`atelier workspace …`),
+  the `--mcp-config` plumbing is the adapter's.
+- `ForgeIntegration` — code-forge pull requests: `List(repoPath)` (batched,
+  one query per repo), `Open(pr)`, `Close(pr)` (the sole mutating op,
+  confirm- + config-gated). The kernel batches the sweep, associates PRs with
+  workspaces by worktree branch, persists them in the statestore, and owns all
+  rendering (the M-s rollup badge, the M-c row glyphs for state/CI/approval)
+  and sort order. Adapter: `internal/adapters/github`. A GitLab adapter would
+  implement the same port.
 
 The kernel keeps the *policy* (naming system-prompt + conventional-commit
 validation; the forge state vocabulary + glyph + sort order); the adapter
@@ -202,9 +231,10 @@ atelier/
 │   ├── cli/                 # cobra command tree (ai, state, reconcile, status, popup, server, …)
 │   ├── integration/         # KERNEL PORTS: AIIntegration, ForgeIntegration, active Set
 │   ├── adapters/            # ADAPTERS (imported only by cmd/atelier):
-│   │   ├── claude/          #   AIIntegration (default AI agent; pull-based recap/attention)
-│   │   ├── github/          #   ForgeIntegration (PR badge via gh)
+│   │   ├── claude/          #   AIIntegration (default agent; recap/attention/summary; --mcp-config)
+│   │   ├── github/          #   ForgeIntegration (batched `gh pr list`; open/close)
 │   │   └── mock/            #   AIIntegration + ForgeIntegration (deterministic; tests/sandbox)
+│   ├── repoindex/           # scan the code root for repos → AI repo-selection at M-n
 │   ├── plugin/              # tool registry: RegisterBuiltin, Discover, launcher specs
 │   ├── manifest/            # Manifest type (in-tree literal / synthesized from [tools.*])
 │   ├── toolmain/            # in-process tool dispatch (cancel/error → exit code)
@@ -225,7 +255,7 @@ atelier/
 │   ├── testtmux/            # isolated tmux-server fixtures for e2e tests
 │   └── tools/               # kernel views + built-in logic-carrying tools
 │       ├── all/             # registers every built-in tool (blank-imported by main)
-│       ├── workspaces/      # kernel view: creator/selector/history + forge badge + refresh loop
+│       ├── workspaces/      # kernel view: M-n creator + M-s picker + M-c changes + refresh daemon
 │       ├── toolselector/    # kernel view: M-; tool picker
 │       ├── k8s/             # built-in tool: k9s context picker (requires k9s)
 │       ├── pg/              # built-in tool: pgcli context picker (requires pgcli)
@@ -256,12 +286,16 @@ Standard `#( ... )` interpolation pattern (parallels `gitmux`, `tmux-cpu`):
 set -g status-right "#( atelier status attention count ) | %H:%M"
 ```
 
-The per-window freshness segment (git ahead/behind) is injected into
+The current workspace's forge (PR) badge is injected into
 `window-status-current-format` automatically by `atelier internal stamp-statusline`
 (wired by `atelier init`), since it needs per-window args. Only the current
 format is decorated, so the bar shows just the focused workspace; inactive
-windows render nothing. The `attention count` rollup is a standalone emitter
-you can place anywhere.
+windows render nothing. The `attention count` rollup — the count of workspaces
+wanting your eyes (a blocked agent, or a PR with failing CI / changes
+requested) — is a standalone emitter you can place anywhere. (The old
+per-branch git-freshness segment is gone: a driver window is not a branch, so
+ahead/behind has no single window to attach to — branch sync now surfaces
+through the PR state in the M-c Changes view.)
 Coexists with any status-line framework. Go binary startup ≤30ms — fine
 for 3s refresh.
 
@@ -286,15 +320,16 @@ load-bearing details.
 
 ## Window management belongs to the workspace primitive
 
-**Rule:** tools MUST NOT call `tmux switch-client`, `select-window`, `new-window`, `new-session`, or stamp workspace metadata (`@ai_*`, `@repo_path`, `@attention_*`, `@agent_status`) directly. They go through `internal/workspace`.
+**Rule:** tools MUST NOT call `tmux switch-client`, `select-window`, `new-window`, `new-session`, stamp workspace metadata (`@workspace_*`, `@ai_*`, `@repo_path`, `@attention_*`, `@agent_status`) directly, or manage the worktree symlink layout. They go through `internal/workspace`.
 
-**Why:** every tool that opens or transitions to a workspace hits the same set of edge cases — picking the right outer client, ordering select-window before switch-client, killing auto-created default-branch windows, propagating `@atelier_outer_client` through popup-pty chains. When this logic is inlined per-tool, a fix in one place leaves the same bug latent in every other tool. When it lives in the primitive, a fix lands once.
+**Why:** every tool that opens or transitions to a workspace hits the same set of edge cases — picking the right outer client, ordering select-window before switch-client, materializing the workspace root + worktree symlink tree, propagating `@atelier_outer_client` through popup-pty chains. When this logic is inlined per-tool, a fix in one place leaves the same bug latent in every other tool. When it lives in the primitive, a fix lands once.
 
 **The primitive owns:**
-- Session creation (`workspace.EnsureSession`)
-- Worktree-window creation + stamping (`workspace.CreateWorktreeWindow`)
+- Session creation + workspace identity (`workspace.EnsureSession`, `StampWorkspaceIdentity`, `SetTitle`, `MarkDriver`)
+- The on-disk layout — workspace root, git worktrees, and the symlink tree (`EnsureWorkspaceRoot`, `AddWorktree`, `LinkWorktree`, `ReconcileLayout`, `RemoveWorktreeDir`)
+- Path canonicalization for the AI adapters (`CanonicalPath` — resolve symlinks before a path reaches a transcript lookup)
 - Outer-client landing — the select-window + switch-client -c outer dance (`workspace.LandOuter`)
-- Workspace metadata read/write (`SetAttention`, `SetRecap`, etc.)
+- Workspace metadata read/write (`SetAttention`, `SetRecap`, `SetTag`, etc.)
 
 **Tools own:** their own popup UX, fzf binds, custom transformations, multi-stage spinner labels, plugin-specific keybinds. Anything where the user's MENTAL MODEL of the tool changes — not the underlying tmux mechanics.
 

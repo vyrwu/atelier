@@ -83,11 +83,11 @@ func TestParsePopup_NonPopup(t *testing.T) {
 }
 
 func TestListable(t *testing.T) {
-	if !Listable("/repo", "") || !Listable("", "multi-repo") || !Listable("/repo", "auto") {
-		t.Error("a window with @repo_path OR @ai_workspace_kind is listable")
+	if Listable("") {
+		t.Error("a window with no @workspace_id is not listable")
 	}
-	if Listable("", "") {
-		t.Error("a window with neither is not listable")
+	if !Listable("slug") {
+		t.Error("a window carrying a @workspace_id is listable")
 	}
 }
 

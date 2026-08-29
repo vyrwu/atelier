@@ -8,8 +8,8 @@
 //     legacy hostname-keyed cache by construction. See Path for why it is
 //     neither hostname- nor socket-keyed.
 //   - Atomic via write-to-temp + rename.
-//   - Versioned. Version mismatch on read → treat as empty rather than
-//     attempt migration (kept deliberately simple until v2 happens).
+//   - Versioned. A v2 cache is migrated to the current schema on read
+//     (migrateFromV2); any other version mismatch is treated as empty.
 //
 // What this isn't:
 //
@@ -34,7 +34,10 @@
 //   - Two atelier versions on one machine writing the same cache file
 //     (dev build + installed build) is a dev-only foot-gun; the
 //     hostname namespace doesn't protect against it.
-//   - Schema v2 wipes v1 cache. Migration plumbing added when v2 ships.
+//   - Schema v3 (the intent-workspace redesign) MIGRATES a v2 cache rather
+//     than wiping it — users have live workspaces. See migrateFromV2. Any
+//     other version mismatch (a far-future cache, or the never-shipped v1)
+//     is treated as empty.
 package statestore
 
 import (
@@ -91,12 +94,16 @@ func withWriteLock(path string, fn func() error) error {
 // SchemaVersion is the current schema version. Bumped only when on-disk
 // fields change in a way old readers can't handle.
 //
-// v2 (current): typed plugin-specific fields (`ClaudePrompt`,
-// `ClaudeWorkspaceKind`, `ClaudeActiveSessionID`) removed from Window.
-// Replaced by a generic `Metadata map[string]string` keyed by
-// `<plugin>.<field>` convention. Core no longer knows about plugin-
-// specific schemas; plugins own their key namespaces.
-const SchemaVersion = 2
+// v3 (current): the intent-workspace redesign. A Workspace is no longer "a
+// tmux session that happens to be a repo" — it gains Title, Intent, Root, and
+// two owned sets (Worktrees, PRs). The old `Kind` ("worktree" | "multi-repo")
+// discriminator is gone: every workspace is just a workspace. Migrated from
+// v2 by migrateFromV2 (repo-session → single-workspace with a derived title).
+//
+// v2: typed plugin-specific fields (`ClaudePrompt`, `ClaudeWorkspaceKind`,
+// `ClaudeActiveSessionID`) removed from Window, replaced by a generic
+// `Metadata map[string]string` keyed by `<plugin>.<field>` convention.
+const SchemaVersion = 3
 
 // State is the root persisted shape. One file per host.
 type State struct {
@@ -169,21 +176,100 @@ type AIUsage struct {
 	ByTask  map[string]AIUsageCounts `json:"by_task,omitempty"`
 }
 
-// Workspace is one atelier-managed tmux session — either a single-repo
-// session (Kind=worktree, RepoPath set) or a multi-repo session
-// (Kind=multi-repo).
+// Workspace is one atelier-managed tmux session — an INTENT. Its identity is
+// the SessionName (= the workspace slug = the `@workspace_id` tmux option =
+// the tmux session name, all the same string). It carries a human Title (what
+// M-r renames), the Intent text the user typed at M-n, a dedicated Root
+// directory, and two owned sets the agent produces: Worktrees and PRs.
+//
+// The Windows list holds the driver agent window plus any inspection shells
+// the user opened. Per-agent state (recap, attention, ai.active_session_id)
+// stays addressed by window — a workspace has exactly one driver window (the
+// `multiple_drivers` invariant), but per-window is where that state lives so
+// the door to multiple agents (WS-8) stays open without a schema bump.
 type Workspace struct {
-	SessionName string   `json:"session_name"`
-	RepoPath    string   `json:"repo_path,omitempty"` // empty for multi-repo
-	Kind        string   `json:"kind,omitempty"`      // "worktree" | "multi-repo" | ""
-	Windows     []Window `json:"windows,omitempty"`
+	// SessionName is the workspace id/slug and the tmux session name — the
+	// persistence key. tmux mangles '.'/':' to '_', so it's canonicalized.
+	SessionName string `json:"session_name"`
 
-	// CreatedAt mirrors the @workspace_created_ts tmux window option
-	// (unix epoch of when the workspace was first created). Persisted
-	// so the picker's age column survives across atelier restarts —
-	// without this the column shows empty for restored workspaces,
-	// making them look brand-new.
+	// Title is the human, renameable label shown in the M-s picker. Distinct
+	// from SessionName so a rename (M-r) never moves the tmux target.
+	Title string `json:"title,omitempty"`
+
+	// Intent is the free-text task description the user entered at M-n ("what
+	// are we doing today?"). Seeds the driver agent's first prompt.
+	Intent string `json:"intent,omitempty"`
+
+	// Summary is the workspace-level rollup line shown under the title in the
+	// M-s picker ("PRs completed, work pending your action"). Written by the
+	// daemon's SummarizeWorkspace pass (WS-7), change-detection gated.
+	Summary string `json:"summary,omitempty"`
+	// SummaryHash is the content hash of the inputs the last Summary was
+	// derived from (driver recap + PR states), so the daemon re-summarizes
+	// only when an input changed.
+	SummaryHash string `json:"summary_hash,omitempty"`
+
+	// Root is the workspace's dedicated directory (~/ateliers/<slug>) that
+	// worktrees are symlinked into and the driver agent runs from. Empty until
+	// materialized on first use (a v2-migrated workspace has none yet).
+	Root string `json:"root,omitempty"`
+
+	// RepoPath is an optional single-repo convenience hint (the repo a
+	// one-repo workspace was seeded from). A workspace spans repos, so this is
+	// no longer identity — just a hint some flows read.
+	RepoPath string `json:"repo_path,omitempty"`
+
+	// Tag is the workspace's grouping label (client/initiative/subsystem),
+	// mirroring @workspace_tag. Restore re-stamps it on the session.
+	Tag string `json:"tag,omitempty"`
+
+	// Windows is the driver agent window + inspection shells.
+	Windows []Window `json:"windows,omitempty"`
+
+	// Worktrees is the set of git worktrees this workspace's agent produced —
+	// materialized under Root as symlinks. See the Worktree type.
+	Worktrees []Worktree `json:"worktrees,omitempty"`
+
+	// PRs is the workspace's set of registered / discovered pull requests,
+	// surfaced by the M-c Changes view. See the PR type.
+	PRs []PR `json:"prs,omitempty"`
+
+	// CreatedAt is the unix epoch when the workspace was first created.
+	// Persisted so the picker's age column survives restarts.
 	CreatedAt int64 `json:"created_at,omitempty"`
+}
+
+// Worktree is one git worktree owned by a workspace: a repo + branch checkout
+// living at its real repo-local Path (git bookkeeping unchanged) and
+// symlinked into the workspace Root at Link. The agent works through the link;
+// the invariants keep Link and Path in sync.
+type Worktree struct {
+	Repo   string `json:"repo"`           // "owner/repo"
+	Branch string `json:"branch"`         // may contain slashes (feat/foo)
+	Path   string `json:"path"`           // real worktree dir (~/code/.worktrees/...)
+	Link   string `json:"link,omitempty"` // symlink under the workspace Root
+}
+
+// PR mirrors integration.PullRequest for persistence. statestore stays
+// dependency-free (it must not import the kernel ports), so the workspaces
+// kernel converts between this and integration.PullRequest at the seam. One
+// entry per registered or forge-discovered pull request in the workspace.
+type PR struct {
+	Number         int    `json:"number"`
+	Repo           string `json:"repo"` // "owner/repo"
+	Title          string `json:"title,omitempty"`
+	State          string `json:"state,omitempty"`           // open|draft|merged|closed
+	CI             string `json:"ci,omitempty"`              // pass|fail|pending|none
+	ReviewDecision string `json:"review_decision,omitempty"` // approved|changes_requested|review_required|none
+	Comments       int    `json:"comments,omitempty"`
+	URL            string `json:"url,omitempty"`
+	Branch         string `json:"branch,omitempty"`
+	UpdatedAt      int64  `json:"updated_at,omitempty"`
+	// Registered is true for a PR the agent explicitly registered (atelier pr
+	// register) rather than one discovered by branch-match. The forge sweep
+	// refreshes registered PRs' fields but never drops them for lack of a
+	// branch match.
+	Registered bool `json:"registered,omitempty"`
 }
 
 // Window is one tmux window in an atelier workspace — typically a git
@@ -303,11 +389,23 @@ func loadFrom(path string) (*State, error) {
 		return nil, fmt.Errorf("statestore: parse %s: %w", path, err)
 	}
 	if s.SchemaVersion != SchemaVersion {
-		// Old or future cache — treat as empty rather than crash.
-		// Future versions can add migration here.
-		debuglog.Logf("statestore.Load: path=%s SCHEMA-MISMATCH v%d≠v%d → treated as empty",
-			path, s.SchemaVersion, SchemaVersion)
-		return nil, nil
+		// v2 → v3: migrate in place (users have live workspaces — WS-9). Any
+		// other mismatch (never-shipped v1, a far-future cache) is treated as
+		// empty rather than crash.
+		if s.SchemaVersion == 2 {
+			migrated, err := migrateFromV2(data)
+			if err != nil {
+				debuglog.Logf("statestore.Load: path=%s v2→v3 migration failed (%v) → treated as empty", path, err)
+				return nil, nil
+			}
+			debuglog.Logf("statestore.Load: path=%s MIGRATED v2→v3 workspaces=%d", path, len(migrated.Workspaces))
+			s = *migrated
+			// Fall through to the shared filter/canonicalize pass below.
+		} else {
+			debuglog.Logf("statestore.Load: path=%s SCHEMA-MISMATCH v%d≠v%d → treated as empty",
+				path, s.SchemaVersion, SchemaVersion)
+			return nil, nil
+		}
 	}
 	// Same filter as Save: drop any non-atelier entries on read so a
 	// cache poisoned by older code paths (pre-scope-fix, or test
@@ -326,20 +424,28 @@ func loadFrom(path string) (*State, error) {
 	return &s, nil
 }
 
-// filterAtelierManaged returns only workspaces with RepoPath or Kind
-// set — the atelier-managed scope. Non-atelier sessions that leaked
-// in via SetRecap / SetAttention write-through on random windows
-// (claude hook firing in a non-atelier session, manual seeds, etc.)
-// are dropped silently.
+// filterAtelierManaged returns only workspaces carrying workspace identity —
+// the atelier-managed scope. A leaked non-atelier session (a claude hook
+// firing in some random tmux session, a manual seed) has no id/title/intent/
+// root/repo/worktrees and is dropped silently, so restore never resurrects it.
 func filterAtelierManaged(ws []Workspace) []Workspace {
 	out := ws[:0]
 	for _, w := range ws {
-		if w.RepoPath == "" && w.Kind == "" {
+		if !w.managed() {
 			continue
 		}
 		out = append(out, w)
 	}
 	return out
+}
+
+// managed reports whether a workspace record carries any workspace identity.
+// The SessionName alone doesn't count (a leaked record has one); it needs a
+// real marker atelier stamps — a slug-derived title/intent/root, a repo hint,
+// or materialized worktrees.
+func (w *Workspace) managed() bool {
+	return w.Title != "" || w.Intent != "" || w.Root != "" ||
+		w.RepoPath != "" || len(w.Worktrees) > 0
 }
 
 // Save writes the state atomically. Empty state still writes (records
@@ -432,7 +538,7 @@ func UpdateWindow(sessionName, windowName string, mutate func(*Window)) error {
 }
 
 // UpdateWorkspace finds (or creates) the workspace record and applies
-// `mutate`. Used when registering a fresh workspace (set RepoPath, Kind).
+// `mutate`. Used when registering a fresh workspace (set Title, Intent, Root).
 func UpdateWorkspace(sessionName string, mutate func(*Workspace)) error {
 	return withWriteLock(Path(), func() error {
 		s, err := Load()
@@ -665,6 +771,20 @@ func (s *State) FindWindow(sessionName, windowName string) *Window {
 			if ws.Windows[j].Name == windowName {
 				return &ws.Windows[j]
 			}
+		}
+	}
+	return nil
+}
+
+// FindWorkspace returns the Workspace record for a session name, or nil.
+func (s *State) FindWorkspace(sessionName string) *Workspace {
+	if s == nil {
+		return nil
+	}
+	sessionName = CanonicalSessionName(sessionName)
+	for i := range s.Workspaces {
+		if s.Workspaces[i].SessionName == sessionName {
+			return &s.Workspaces[i]
 		}
 	}
 	return nil

@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+The **intent-workspace redesign** — a major, breaking change to atelier's core
+model. The unit of work is no longer a git branch; it is an **intent**. Instead
+of `session = repo, window = branch`, a workspace is one driver agent at a
+dedicated directory (`~/ateliers/<slug>`) into which git worktrees are symlinked
+as `<repo>/<branch>`. You no longer pick a repo — you type what you're doing
+(`M-n`) and atelier names the workspace, selects the repos it touches, and opens
+the agent.
+
+### ⚠ BREAKING CHANGES
+
+* **workspaces:** the workspace model changed from branch-per-window to
+  intent-per-session. A workspace is now one driver agent whose cwd is the
+  workspace root (`~/ateliers/<slug>`); worktrees are filesystem artifacts
+  (repo-local git worktrees symlinked into the root as `<repo>/<branch>`), not
+  windows.
+* **bindings:** keybindings changed. `M-n` opens the intent prompt (was the repo
+  picker); `M-s` lists one row per workspace (was per worktree); `M-c` is now
+  List Changes (the cross-repo PR view); the k9s context switcher moved `M-c` →
+  `M-k`; `M-r` renames a workspace (was workspace history/recover). **Embedded
+  (`atelier init --bare`) users must re-source their tmux.conf after upgrading**
+  — the running server keeps the old bindings until reloaded.
+* **statestore:** on-disk cache is now **schema v3**. A v2 cache (repo-sessions)
+  **auto-migrates** on load — each v2 workspace becomes a single-agent workspace
+  whose title is derived from its repo/branch, whose intent is recovered from the
+  first window's metadata, and whose root materializes on first use. No manual
+  action required; older/other versions are treated as an empty cache.
+* **config:** new keys, and one rename. `[workspaces] multi_repo_root` is
+  replaced by `[workspaces] workspace_root` (default `~/ateliers`). `[ai]` gains
+  `mcp`, `[ai.models] summary`, and `[ai.prompts] workspace` / `summary`;
+  `[ai.prompts] multi_repo` is replaced by `[ai.prompts] workspace`. `[forge]`
+  gains `allow_write` (default true).
+
+### Features
+
+* **workspaces:** `M-n` intent-first creation — type the task; atelier names the
+  workspace, AI-selects the repos it touches, creates a worktree per repo, and
+  opens the driver agent at the workspace root.
+* **workspaces:** `M-s` aggregate picker — one row per workspace with rollups
+  (attention, forge, PR count) and a workspace-level summary; `M-r` renames,
+  `M-x` deletes (confirm enumerates the worktrees + PRs destroyed).
+* **workspaces:** `M-c` List Changes — cross-repo PR view with per-PR CI, review
+  decision, and comment count; `M-o` opens a PR, `M-c` closes it (confirm-gated,
+  requires `[forge] allow_write`).
+* **agent control surface:** the driver agent can act on its workspace via CLI
+  verbs — `atelier workspace worktree add|list`, `atelier workspace context`,
+  `atelier pr register|list|close` — also exposed to Claude as MCP tools through
+  a built-in stdio server (`atelier mcp serve`), registered into the interactive
+  agent via `--mcp-config`.
+* **launcher:** the bundled `atelier` opens the `M-n` intent creator on attach
+  when no workspaces exist yet, instead of a bare shell.
+* **daemon:** the background loop now sweeps the forge per-repo (batched,
+  TTL-throttled) and rolls each workspace up into a one-line summary.
+
+### Removed
+
+* **workspaces:** clone-from-URL (`M-u`) — in the intent model repos pre-exist in
+  the code root and are AI-selected; clone a new repo in a shell first.
+* **workspaces:** workspace history / recover — workspaces persist and restore via
+  the statestore, so there is no separate soft-close/recover flow. `M-r` is now
+  rename.
+* **workspaces:** the `worktree | multi-repo` workspace-kind split — a workspace
+  is a workspace; a one-repo workspace is just one whose agent needed a single
+  worktree.
+* **statusline:** the git-freshness (ahead/behind) segment — it was a per-branch
+  signal with no window to attach to now that the agent runs at the workspace
+  root. The unpushed/unmerged-work signal now lives in the PR state in `M-c`.
+
 ## [0.9.0](https://github.com/vyrwu/atelier/compare/v0.8.0...v0.9.0) (2026-08-17)
 
 

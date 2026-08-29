@@ -6,13 +6,20 @@ import (
 	"github.com/vyrwu/atelier/internal/config"
 )
 
-// DefaultMultiRepoSystemPrompt is the verbatim bash claude_start
-// IMPL_SYS_MULTIREPO string — appended via --append-system-prompt when claude
-// opens in a multi-repo workspace.
-const DefaultMultiRepoSystemPrompt = `You are working on a multi-repo task. CWD is ~/code.
-On startup, read ~/code/CLAUDE.md (create if missing) for a concise per-repo summary maintained across sessions. Use it to skip re-scanning.
-Inspect ~/code/github/* to determine which repos are relevant to the user prompt below.
-Continuously update ~/code/CLAUDE.md with newly discovered repo summaries — keep them VERY concise (purpose, primary language, key entry points). Prioritize token efficiency.`
+// DefaultWorkspaceSystemPrompt is appended via --append-system-prompt when the
+// driver agent opens in an atelier workspace. It describes the intent-workspace
+// layout (the drawing's model): the agent's cwd is the workspace root, each
+// repo/branch it works on appears as a <repo>/<branch> symlink into a real git
+// worktree, and atelier CLI verbs (also exposed over MCP) let it grow the
+// workspace and register the PRs it opens.
+const DefaultWorkspaceSystemPrompt = `You are the driver agent for an atelier WORKSPACE — a single task ("intent") that may span multiple git repositories.
+Your working directory is the workspace root. Each repository/branch you work on appears as a symlink "<repo>/<branch>" pointing at its real git worktree, so ` + "`ls`" + ` shows the worktrees in play. Edit files through those paths.
+Useful atelier commands (also available as MCP tools):
+  - atelier workspace worktree add <owner/repo> <branch>  — add a repo+branch to this workspace (creates the worktree + symlink)
+  - atelier workspace worktree list                       — list this workspace's worktrees
+  - atelier workspace context                             — show the workspace's intent, worktrees, and open PRs
+  - atelier pr register <url>                             — register a PR you opened so atelier tracks it in the Changes view
+Keep your footprint tight and prefer these verbs over re-implementing workspace bookkeeping by hand.`
 
 // DefaultRecapSystemPrompt is the recap summarizer's system prompt.
 //
@@ -88,25 +95,36 @@ type Config struct {
 	// Prompts holds capability-level system-prompt overrides; empty means
 	// "use the built-in default".
 	Prompts PromptConfig `toml:"prompts"`
+	// MCP registers atelier's stdio MCP server (atelier mcp serve) into the
+	// interactive driver agent via --mcp-config, so the agent can add
+	// worktrees / register PRs / read workspace context. Default true; set
+	// `mcp = false` under [ai] to launch Claude without it. Background naming/
+	// recap/summary calls never get MCP regardless (they run --tools "").
+	MCP bool `toml:"mcp"`
 }
 
 // ModelConfig is `[ai.models]` — per-task model overrides. An empty value
 // falls back to Config.Model.
 type ModelConfig struct {
-	// Naming is the model that names branches/sessions (M-n). Defaults to
-	// "sonnet" — naming benefits from a sharper model than the haiku default.
+	// Naming is the model that names workspaces (M-n). Defaults to "sonnet" —
+	// naming benefits from a sharper model than the haiku default.
 	Naming string `toml:"naming"`
-	// Recap is the model for one-line session recaps (M-s rows / attention).
+	// Recap is the model for one-line per-agent recaps (M-s rows / attention).
 	Recap string `toml:"recap"`
+	// Summary is the model for the workspace-level rollup summary (WS-7).
+	// Defaults to the global Model (haiku) — it's a cheap heartbeat call.
+	Summary string `toml:"summary"`
 }
 
 // PromptConfig is `[ai.prompts]` — capability-level system-prompt overrides.
 type PromptConfig struct {
 	// Recap overrides DefaultRecapSystemPrompt.
 	Recap string `toml:"recap"`
-	// MultiRepo is appended via --append-system-prompt when claude opens in
-	// a multi-repo workspace. Empty falls back to DefaultMultiRepoSystemPrompt.
-	MultiRepo string `toml:"multi_repo"`
+	// Workspace is appended via --append-system-prompt when the driver agent
+	// opens in a workspace. Empty falls back to DefaultWorkspaceSystemPrompt.
+	Workspace string `toml:"workspace"`
+	// Summary overrides DefaultSummarySystemPrompt (the workspace rollup).
+	Summary string `toml:"summary"`
 }
 
 // NamingModel resolves the model for branch/session naming: the per-task
@@ -127,6 +145,27 @@ func (c Config) RecapModel() string {
 	return c.Model
 }
 
+// SummaryModel resolves the model for the workspace rollup summary.
+func (c Config) SummaryModel() string {
+	if c.Models.Summary != "" {
+		return c.Models.Summary
+	}
+	return c.Model
+}
+
+// DefaultSummarySystemPrompt drives the workspace-level rollup (WS-7): one line
+// folding the driver agent's recap + the workspace's PR states into a status a
+// user scans in M-s ("PRs completed, work pending your action").
+const DefaultSummarySystemPrompt = `You write a ONE-LINE status for a development WORKSPACE (a single task that may span repos), for a picker row the user scans at a glance.
+
+You are given: the workspace INTENT, the driver agent's latest recap, and a list of the workspace's pull requests with their CI + review state.
+
+Output ONE line (NO line breaks), up to ~100 characters, terse and skimmable. Lead with what the USER should know now:
+  1. Anything blocking / needing the user (changes-requested review, failing CI, agent waiting).
+  2. Overall progress ("3 PRs open, all green", "PRs merged, work pending your action").
+  3. Else the agent's current objective.
+NO quotes, NO labels, NO markdown, NO trailing whitespace. Output ONLY the line.`
+
 func DefaultConfig() Config {
 	return Config{
 		Model:  "haiku",
@@ -142,11 +181,14 @@ func LoadConfig() (Config, error) {
 	if cfg.Model == "" {
 		cfg.Model = "haiku"
 	}
-	if cfg.Prompts.MultiRepo == "" {
-		cfg.Prompts.MultiRepo = DefaultMultiRepoSystemPrompt
+	if cfg.Prompts.Workspace == "" {
+		cfg.Prompts.Workspace = DefaultWorkspaceSystemPrompt
 	}
 	if cfg.Prompts.Recap == "" {
 		cfg.Prompts.Recap = DefaultRecapSystemPrompt
+	}
+	if cfg.Prompts.Summary == "" {
+		cfg.Prompts.Summary = DefaultSummarySystemPrompt
 	}
 	return cfg, nil
 }

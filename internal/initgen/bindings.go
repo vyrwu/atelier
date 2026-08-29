@@ -164,6 +164,20 @@ run-shell -b 'atelier popup cleanup --startup'
 `
 }
 
+// WelcomeBlock arms the launcher default screen (WS-3): on client attach, when
+// the runtime has NO workspaces yet, open the M-n intent creator instead of
+// dumping the user on a bare launcher shell. Appended (-ag) so it coexists with
+// the refresh-loop's own client-attached hook; a no-op the moment any workspace
+// exists, so it stops after the first is created. Bundled mode only — an
+// embedded (`--bare`) user drives their own tmux and shouldn't get a popup on
+// every attach.
+func WelcomeBlock() string {
+	return `# --- launcher default screen ---
+# No workspaces yet → open M-n on attach (guarded: no-op once one exists).
+set-hook -ag client-attached 'run-shell -b "atelier internal welcome"'
+`
+}
+
 // RefreshLoopBlock starts the background refresh daemon (issue #17). One
 // long-lived process, launched via `run-shell -b` so it doesn't block config
 // sourcing and inherits ATELIER_TMUX_SOCKET for routing. It binds to the tmux

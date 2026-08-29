@@ -69,4 +69,12 @@ type AIIntegration interface {
 	// on-disk transcript). The switcher uses it to decide whether to auto-open
 	// the agent on land vs. leave a bare shell.
 	HasResumableState(h *tmuxhost.Client, wid, cwd string) bool
+
+	// SummarizeWorkspace rolls the driver agent's recap and the workspace's PR
+	// states up into a single workspace-level line for the M-s picker's summary
+	// row ("PRs completed, work pending your action"). This is the daemon's
+	// second AI call shape (WS-7); the caller change-detection-gates it (a hash
+	// of recap + PR states) so it re-runs only when an input changed, and
+	// budget-guards it. Returns "" when there is nothing to summarize.
+	SummarizeWorkspace(ctx context.Context, intent, agentRecap string, prs []PullRequest) (string, error)
 }

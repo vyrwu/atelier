@@ -17,11 +17,20 @@ Concretely, the following are *prohibited* in `internal/tools/...`:
   `switch-client`, `select-window`, `respawn-pane` (the workspace-
   lifecycle verbs)
 - `set-option`/`set-window-option` calls that write atelier-managed
-  window options as string literals — `@needs_attention`,
+  options as string literals — the workspace-identity options
+  `@workspace_id`, `@workspace_title`, `@workspace_intent`,
+  `@workspace_root`, `@workspace_driver` (use `workspace.StampWorkspaceIdentity`
+  / `SetTitle` / `MarkDriver`), the per-window signals `@needs_attention`,
   `@attention_recap`, `@attention_recap_ts`, `@agent_status`,
-  `@repo_path` (use the `workspace.Opt*` constants), or the adapter
-  metadata options `@ai_prompt`, `@ai_workspace_kind`,
-  `@ai_active_session_id` (write through statestore metadata, not literals)
+  `@workspace_tag`, `@repo_path` (use the `workspace.Opt*` constants +
+  `SetAttention`/`SetRecap`/`SetTag`), or the adapter metadata options
+  `@ai_prompt`, `@ai_active_session_id` (write through statestore
+  metadata, not literals)
+- Writing PR / code-forge state directly. PRs belong to the kernel's
+  **forge slot**: the `ForgeIntegration` adapter classifies + lists,
+  the kernel batches the sweep and persists `Workspace.PRs` in the
+  statestore. A tool never issues `gh`/`glab` itself or stamps a
+  `@forge_*` option — it reads `Active().Forge` and the persisted PRs.
 - The `set-option <key> + statestore.UpdateGlobal(<key>)` two-step for
   persisted tmux globals — use `workspace.SetPersistedGlobal`
 - The "spawn workspace-scoped popup" four-step recipe (resolve parent
@@ -36,11 +45,11 @@ Concretely, the following are *prohibited* in `internal/tools/...`:
 **Why:** every tool that opens a popup, creates a workspace, lands the
 outer client on a workspace, or stamps workspace metadata hits the
 same edge cases — picking the right outer client, ordering
-select-window before switch-client, killing auto-created default-branch
-windows, sigil-restoring stripped `$`/`@` env values. Inlined in each
-tool, one bug fix has to touch every tool. In the primitive, fixes
-land once. The five-copy `applyPopupStyle` extraction (Layer A) and
-the persistence write-through helpers (Layer B in progress) exist
+select-window before switch-client, materializing the workspace root +
+worktree symlink tree, sigil-restoring stripped `$`/`@` env values.
+Inlined in each tool, one bug fix has to touch every tool. In the
+primitive, fixes land once. The five-copy `applyPopupStyle` extraction
+(Layer A) and the persistence write-through helpers (Layer B) exist
 because we kept hitting the same bug class until we accepted that.
 
 **Where to add new behavior:**

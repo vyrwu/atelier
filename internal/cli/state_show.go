@@ -84,8 +84,11 @@ func windowFlags(win state.Window) []string {
 	if win.Attention {
 		f = append(f, "attn")
 	}
-	if win.WorkspaceKind != "" {
-		f = append(f, "kind="+win.WorkspaceKind)
+	if win.WorkspaceID != "" {
+		f = append(f, "ws="+win.WorkspaceID)
+	}
+	if win.Driver {
+		f = append(f, "driver")
 	}
 	if win.Tag != "" {
 		f = append(f, "tag="+win.Tag)
@@ -132,16 +135,18 @@ type stateShowJSON struct {
 }
 
 type windowJSON struct {
-	SessionID     string `json:"session_id"`
-	WindowID      string `json:"window_id"`
-	Name          string `json:"name"`
-	RepoPath      string `json:"repo_path,omitempty"`
-	WorkspaceKind string `json:"workspace_kind,omitempty"`
-	Attention     bool   `json:"attention,omitempty"`
-	Recap         string `json:"recap,omitempty"`
-	Tag           string `json:"tag,omitempty"`
-	ForgeState    string `json:"forge_state,omitempty"`
-	PaneCwdLive   bool   `json:"pane_cwd_live"`
+	SessionID   string `json:"session_id"`
+	WindowID    string `json:"window_id"`
+	Name        string `json:"name"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	Root        string `json:"root,omitempty"`
+	RepoPath    string `json:"repo_path,omitempty"`
+	Driver      bool   `json:"driver,omitempty"`
+	Attention   bool   `json:"attention,omitempty"`
+	Recap       string `json:"recap,omitempty"`
+	Tag         string `json:"tag,omitempty"`
+	ForgeState  string `json:"forge_state,omitempty"`
+	PaneCwdLive bool   `json:"pane_cwd_live"`
 }
 
 type sessionJSON struct {
@@ -190,7 +195,8 @@ func writeStateJSON(w io.Writer, top *state.Topology, violations []state.Violati
 	for _, win := range top.Windows {
 		out.Windows = append(out.Windows, windowJSON{
 			SessionID: win.SessionID, WindowID: win.WindowID, Name: win.Name,
-			RepoPath: win.RepoPath, WorkspaceKind: win.WorkspaceKind, Attention: win.Attention,
+			WorkspaceID: win.WorkspaceID, Root: win.Root, RepoPath: win.RepoPath,
+			Driver: win.Driver, Attention: win.Attention,
 			Recap: win.Recap, Tag: win.Tag, ForgeState: win.ForgeState, PaneCwdLive: win.PaneCwdLive,
 		})
 	}

@@ -70,7 +70,10 @@ func (f *fakeHost) Run(args ...string) ([]byte, error) {
 			if len(ff) < 2 {
 				continue
 			}
-			rec := make([]string, 10)
+			// windowCaptureFormat has 13 fields; only sid/wid are structural
+			// here, the rest empty (matches the many CaptureTopology tests that
+			// seed windows via f.windows as "$sid @wid").
+			rec := make([]string, 13)
 			rec[0], rec[1] = ff[0], ff[1]
 			lines = append(lines, strings.Join(rec, winSep))
 		}
@@ -80,9 +83,15 @@ func (f *fakeHost) Run(args ...string) ([]byte, error) {
 }
 
 // windowLine builds an enriched list-windows capture line for tests that need
-// capability fields. Order matches windowCaptureFormat.
-func windowLine(sid, wid, name, repoPath, kind, attention, recap, tag, forge, worktree string) string {
-	return strings.Join([]string{sid, wid, name, repoPath, kind, attention, recap, tag, forge, worktree}, winSep)
+// capability fields. Order matches windowCaptureFormat (the intent-workspace
+// model): sid, wid, windowIndex, name, @workspace_id, @workspace_root,
+// @repo_path, @workspace_driver, @needs_attention, @attention_recap,
+// @workspace_tag, @forge_state, pane_current_path.
+func windowLine(sid, wid, idx, name, workspaceID, root, repoPath, driver, attention, recap, tag, forge, paneCwd string) string {
+	return strings.Join([]string{
+		sid, wid, idx, name, workspaceID, root, repoPath, driver,
+		attention, recap, tag, forge, paneCwd,
+	}, winSep)
 }
 
 // setClients stores raw list-clients output lines (already in

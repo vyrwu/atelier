@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -36,16 +37,12 @@ import (
 // `Meta*` is the canonical metadata key; each `Opt*` is its tmux option name.
 const (
 	MetaPrompt          = "ai.prompt"
-	MetaWorkspaceKind   = "ai.workspace_kind"
 	MetaActiveSessionID = "ai.active_session_id"
-
-	WorkspaceKindMultiRepo = "multi-repo"
 )
 
 // Tmux option names — derived via the canonical dots→underscores translation.
 var (
 	OptPrompt          = statestore.MetadataKeyToOptionName(MetaPrompt)
-	OptWorkspaceKind   = statestore.MetadataKeyToOptionName(MetaWorkspaceKind)
 	OptActiveSessionID = statestore.MetadataKeyToOptionName(MetaActiveSessionID)
 )
 
@@ -70,89 +67,121 @@ func (Adapter) Name() string { return "claude" }
 // DisplayName is the user-facing product name shown in the tool selector.
 func (Adapter) DisplayName() string { return "Claude Code" }
 
-// OpenAgent opens the Claude popup for the current workspace. Reads
-// @ai_prompt / @ai_workspace_kind (one-shot) + @ai_active_session_id
-// (durable resume pointer) off the parent window, ensures atelier's Claude
-// settings exist, builds the launch command, and delegates to the kernel's
-// popup lifecycle. (Was `atelier tools claude open`.)
+// OpenAgent opens the Claude popup for the current workspace (the driver
+// agent). Reads @ai_prompt (one-shot) + @ai_active_session_id (durable resume
+// pointer) off the parent window, registers atelier's MCP server (so the agent
+// can grow the workspace + register PRs), builds the launch command, and
+// delegates to the kernel's popup lifecycle.
 func (Adapter) OpenAgent(h *tmuxhost.Client) error {
 	return popup.OpenWorkspaceScopedWithCmd(h, Spec, func(ctx popup.ParentContext) (string, error) {
 		debuglog.Logf("claude.OpenAgent: parentSession=%q parentWindow=%q",
 			ctx.SessionID, ctx.WindowID)
 
 		prompt, _ := h.GetWindowOption(ctx.WindowID, OptPrompt)
-		kind, _ := h.GetWindowOption(ctx.WindowID, OptWorkspaceKind)
 		storedID, _ := h.GetWindowOption(ctx.WindowID, OptActiveSessionID)
+		// Canonical (symlink-resolved) cwd: a symlinked worktree hashes to the
+		// wrong Claude project dir, so --resume would target an empty transcript
+		// (WS-2 landmine). The driver runs at the real workspace root, but be
+		// defensive for any caller that hands a symlinked cwd.
+		cwd := workspace.CanonicalPath(ctx.Cwd)
 		resumeID := resumeIDForLaunch(storedID)
 		if storedID != "" && resumeID == "" {
 			debuglog.Logf("claude.OpenAgent: transcript for @ai_active_session_id=%q not found — fresh this launch, id preserved", storedID)
 		}
-		if resumeID == "" && prompt == "" && ctx.Cwd != "" {
-			if id := latestSessionIDForCwd(ctx.Cwd); id != "" {
-				debuglog.Logf("claude.OpenAgent: no tracked id; resuming latest transcript for cwd=%q id=%q", ctx.Cwd, id)
+		if resumeID == "" && prompt == "" && cwd != "" {
+			if id := latestSessionIDForCwd(cwd); id != "" {
+				debuglog.Logf("claude.OpenAgent: no tracked id; resuming latest transcript for cwd=%q id=%q", cwd, id)
 				resumeID = id
 				_ = h.SetWindowOption(ctx.WindowID, OptActiveSessionID, id)
 				_ = workspace.PersistWindowMetadata(h, ctx.WindowID, MetaActiveSessionID, id)
 			}
 		}
 
-		// One-shot: consume the prompt so it can't be replayed.
-		// @ai_workspace_kind is DURABLE (the picker's only signal for
-		// multi-repo workspaces) and @ai_active_session_id stays too — the
-		// persistent conversation pointer.
+		// One-shot: consume the prompt so it can't be replayed. The durable
+		// @ai_active_session_id resume pointer stays.
 		clearLaunchPrompt(h, ctx.WindowID, prompt)
 
 		cfg, _ := LoadConfig()
-		// No --settings injection: atelier no longer installs a Stop hook into
-		// Claude's config. The recap + attention verdict are pulled by the
-		// refresh loop reading the transcript (RefreshRecap), so Claude launches
-		// with the user's own untouched config.
-		return buildClaudeStartCmd(prompt, kind, cfg.Prompts.MultiRepo, "", resumeID), nil
+		// No --settings/Stop-hook injection — recap + attention are pulled by
+		// the refresh loop reading the transcript. The interactive agent DOES
+		// get the atelier MCP server (--mcp-config) so it can act on the
+		// workspace; background naming/recap/summary calls never do (they run
+		// via claudegen with --tools "").
+		mcp := ""
+		if cfg.MCP {
+			mcp = ensureMCPConfig()
+		}
+		return buildClaudeStartCmd(prompt, cfg.Prompts.Workspace, mcp, resumeID), nil
 	})
 }
 
-// SetPrompt queues the initial prompt (and optional workspace kind) for the
-// next OpenAgent on windowID. Empty prompt clears it. (Was `set-prompt`.)
-func (Adapter) SetPrompt(h *tmuxhost.Client, windowID, prompt, kind string) error {
+// SetPrompt queues the initial prompt for the next OpenAgent on windowID. Empty
+// prompt clears it. The kind parameter is accepted for port compatibility but
+// unused — the intent-workspace model has no per-workspace kind.
+func (Adapter) SetPrompt(h *tmuxhost.Client, windowID, prompt, _ string) error {
 	if windowID == "" {
 		return fmt.Errorf("claude.SetPrompt: windowID required")
 	}
 	if prompt == "" {
-		if err := h.UnsetWindowOption(windowID, OptPrompt); err != nil {
-			return err
-		}
-	} else if err := h.SetWindowOption(windowID, OptPrompt, prompt); err != nil {
-		return err
+		return h.UnsetWindowOption(windowID, OptPrompt)
 	}
-	if kind != "" {
-		if err := h.SetWindowOption(windowID, OptWorkspaceKind, kind); err != nil {
-			return err
-		}
-	}
-	return nil
+	return h.SetWindowOption(windowID, OptPrompt, prompt)
 }
 
 // clearLaunchPrompt consumes the one-shot @ai_prompt after OpenAgent has
 // folded it into the launch command — from BOTH the live window AND the
-// restore cache. Clearing only the window option (the old behavior) let a
-// spent prompt survive in the statestore cache and get re-stamped on the next
-// tmux server restart; a restored window then carried both a dead prompt and a
-// live @ai_active_session_id, and buildClaudeStartCmd forked a fresh session
-// off the prompt instead of resuming. Best-effort: the cache mirror is only
-// cleared when there was actually something to clear so a plain resume doesn't
-// leave empty keys behind.
-//
-// @ai_workspace_kind is deliberately NOT cleared. Unlike the prompt it is
-// durable: it's the M-s picker's ONLY signal that a repo-less multi-repo
-// workspace is a workspace at all (those have no @repo_path). Clearing it on
-// launch made every multi-repo workspace vanish from the picker after its
-// first Claude launch, while the later Stop-hook @needs_attention flag still
-// inflated the status-line rollup — a phantom notification with no workspace.
+// restore cache. Clearing only the window option let a spent prompt survive in
+// the statestore cache and get re-stamped on the next tmux server restart; a
+// restored window then carried both a dead prompt and a live
+// @ai_active_session_id, and buildClaudeStartCmd forked a fresh session off the
+// prompt instead of resuming. Best-effort: the cache mirror is only cleared
+// when there was actually something to clear so a plain resume doesn't leave
+// empty keys behind.
 func clearLaunchPrompt(h *tmuxhost.Client, windowID, prompt string) {
 	_ = h.UnsetWindowOption(windowID, OptPrompt)
 	if prompt != "" {
 		_ = workspace.PersistWindowMetadata(h, windowID, MetaPrompt, "")
 	}
+}
+
+// ensureMCPConfig writes (idempotently) a Claude MCP config registering
+// atelier's stdio MCP server, and returns its path for --mcp-config. The server
+// (atelier mcp serve) is a thin wrapper over the kernel's workspace/pr CLI
+// verbs; registering it here is the adapter's job (the plumbing), while the
+// capability itself is kernel. Best-effort: on any write failure returns "" so
+// the launch simply omits --mcp-config.
+func ensureMCPConfig() string {
+	self, err := os.Executable()
+	if err != nil || self == "" {
+		self = "atelier"
+	}
+	cfg := map[string]any{
+		"mcpServers": map[string]any{
+			"atelier": map[string]any{
+				"type":    "stdio",
+				"command": self,
+				"args":    []string{"mcp", "serve"},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return ""
+	}
+	cache := os.Getenv("XDG_CACHE_HOME")
+	if cache == "" {
+		home, _ := os.UserHomeDir()
+		cache = filepath.Join(home, ".cache")
+	}
+	dir := filepath.Join(cache, "atelier")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	path := filepath.Join(dir, "claude-mcp.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return ""
+	}
+	return path
 }
 
 // GenerateName runs Claude with a kernel-supplied naming instruction and
@@ -221,6 +250,9 @@ func (Adapter) RefreshRecap(h *tmuxhost.Client, windowID, cwd string) error {
 	if windowID == "" || cwd == "" {
 		return nil
 	}
+	// Resolve symlinks so the transcript lookup hashes the REAL path (a
+	// symlinked worktree hashes to a different, empty Claude project dir).
+	cwd = workspace.CanonicalPath(cwd)
 	transcript, _ := claudeproj.LatestTranscriptPath(cwd)
 	if transcript == "" {
 		return nil // no agent session for this workspace
@@ -458,35 +490,81 @@ func (Adapter) HasResumableState(h *tmuxhost.Client, wid, cwd string) bool {
 
 // buildClaudeStartCmd assembles the claude command line:
 //
-//	resume             : claude --settings <atelier.json> --resume <session-id>
-//	multi-repo + prompt: claude --settings <atelier.json> --append-system-prompt <sys> <prompt>
-//	worktree   + prompt: claude --settings <atelier.json> <prompt>
-//	no prompt          : claude --settings <atelier.json>
+//	resume    : claude [--mcp-config <cfg>] --resume <session-id>
+//	prompt    : claude [--mcp-config <cfg>] --append-system-prompt <workspaceSys> <prompt>
+//	no prompt : claude [--mcp-config <cfg>]
 //
-// A validated resumeSessionID (its transcript exists — resumeIDForLaunch
-// already checked) takes precedence over any prompt still stamped on the
-// window. That conversation already exists and already received its initial
-// prompt; replaying the prompt would fork a fresh session and orphan the
-// history. This is what made respawned workspaces start over instead of
-// resuming: restore re-stamps the one-shot @ai_prompt from the cache, so a
-// restored window carries BOTH a spent prompt and a live session id, and the
-// resume must win.
-func buildClaudeStartCmd(prompt, kind, multiRepoSys, settingsPath, resumeSessionID string) string {
-	settings := ""
-	if settingsPath != "" {
-		settings = "--settings " + shellQuote(settingsPath) + " "
+// A validated resumeSessionID (its transcript exists — resumeIDForLaunch already
+// checked) takes precedence over any prompt still stamped on the window. That
+// conversation already exists and already received its initial prompt; replaying
+// the prompt would fork a fresh session and orphan the history.
+//
+// Every interactive launch (fresh or resumed) gets --mcp-config when set, so the
+// atelier MCP tools are available in both cases. A fresh launch with a prompt
+// also gets the workspace system prompt describing the symlinked-worktree layout.
+func buildClaudeStartCmd(prompt, workspaceSys, mcpConfigPath, resumeSessionID string) string {
+	flags := ""
+	if mcpConfigPath != "" {
+		flags = "--mcp-config " + shellQuote(mcpConfigPath) + " "
 	}
 	if resumeSessionID != "" {
-		return "claude " + settings + "--resume " + shellQuote(resumeSessionID)
+		return "claude " + flags + "--resume " + shellQuote(resumeSessionID)
 	}
 	if prompt == "" {
-		return "claude " + settings
+		return "claude " + flags
 	}
-	if kind == WorkspaceKindMultiRepo {
-		return fmt.Sprintf("claude %s--append-system-prompt %s %s",
-			settings, shellQuote(multiRepoSys), shellQuote(prompt))
+	return fmt.Sprintf("claude %s--append-system-prompt %s %s",
+		flags, shellQuote(workspaceSys), shellQuote(prompt))
+}
+
+// SummarizeWorkspace folds the driver agent's recap + the workspace's PR states
+// into a single workspace-level status line (WS-7's second AI call shape). The
+// caller change-detection-gates + budget-guards this; here we just run the
+// model. Returns "" when there's nothing to summarize (no recap, no PRs).
+func (Adapter) SummarizeWorkspace(_ context.Context, intent, agentRecap string, prs []integration.PullRequest) (string, error) {
+	if agentRecap == "" && len(prs) == 0 {
+		return "", nil
 	}
-	return fmt.Sprintf("claude %s%s", settings, shellQuote(prompt))
+	cfg, _ := LoadConfig()
+	input := buildSummaryInput(intent, agentRecap, prs)
+	gen := claudegen.New()
+	gen.Model = cfg.SummaryModel()
+	out, err := gen.RunWithSystemPrompt(cfg.Prompts.Summary, input)
+	if err != nil {
+		return "", err
+	}
+	recordUsage("summary", gen.LastUsage)
+	return truncateLine(out, summaryMaxRunes), nil
+}
+
+// summaryMaxRunes bounds the workspace summary line (a picker row, one wide line).
+const summaryMaxRunes = 120
+
+// buildSummaryInput renders the summarizer input: the intent, the agent's
+// recap, and a compact per-PR line (repo #num state ci review). Pure.
+func buildSummaryInput(intent, agentRecap string, prs []integration.PullRequest) string {
+	var b strings.Builder
+	if intent != "" {
+		fmt.Fprintf(&b, "INTENT: %s\n", intent)
+	}
+	if agentRecap != "" {
+		fmt.Fprintf(&b, "AGENT RECAP: %s\n", agentRecap)
+	}
+	if len(prs) > 0 {
+		b.WriteString("PULL REQUESTS:\n")
+		for _, pr := range prs {
+			ci := string(pr.CI)
+			if ci == "" {
+				ci = "no-ci"
+			}
+			rev := string(pr.ReviewDecision)
+			if rev == "" {
+				rev = "no-review"
+			}
+			fmt.Fprintf(&b, "  %s #%d %s ci=%s review=%s\n", pr.Repo, pr.Number, pr.State, ci, rev)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // Thin delegators to the shared claudeproj package.
@@ -506,13 +584,6 @@ func resumeIDForLaunch(storedID string) string {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-func ensurePrefix(s, prefix string) string {
-	if s == "" || strings.HasPrefix(s, prefix) {
-		return s
-	}
-	return prefix + s
 }
 
 // truncateLine returns a single-line, length-bounded recap.

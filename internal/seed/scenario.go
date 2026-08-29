@@ -15,6 +15,13 @@
 // A scenario is DATA, not code: it is read from a YAML specification
 // (bundled under scenarios/, or an external file). Consumed by the demo
 // sandbox launcher (sandbox/) and usable from e2e tests.
+//
+// The scenario schema mirrors the v1 intent-workspace model: a Workspace
+// is an INTENT (a task the user handed the agent), not a repo. It owns a
+// dedicated Root directory into which one or more repo worktrees are
+// symlinked, a driver window (the agent), and a set of PRs. Repos remain
+// real git built independently of workspaces; a workspace's worktrees
+// reference branches those repos declare.
 package seed
 
 import (
@@ -37,8 +44,8 @@ var scenariosFS embed.FS
 type Scenario struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
-	// LastActive is the session atelier resumes on launch. Point it at a
-	// workspace WITHOUT attention so the attention badge is something the
+	// LastActive is the workspace slug atelier resumes on launch. Point it at
+	// a workspace WITHOUT attention so the attention badge is something the
 	// demo reveals (via M-s) rather than lands on.
 	LastActive string      `yaml:"lastActive"`
 	Repos      []Repo      `yaml:"repos"`
@@ -82,49 +89,60 @@ type Worktree struct {
 	SoftClosed bool `yaml:"softClosed"`
 }
 
-// Workspace is seeded atelier statestore state pointing at the real repos.
+// Workspace is a seeded intent-workspace: a task the agent worked on,
+// spanning one or more repo worktrees, with a driver window and PRs. It
+// materializes as a statestore.Workspace pointing at a dedicated Root
+// directory under the sandbox workspace root, into which the referenced
+// worktrees are symlinked.
 type Workspace struct {
-	Session   string   `yaml:"session"`   // tmux session name; convention: the repo slug
-	RepoSlug  string   `yaml:"repoSlug"`  // which Repo this workspace is for
-	Kind      string   `yaml:"kind"`      // "worktree"; filterAtelierManaged needs this or RepoPath
-	CreatedAt Duration `yaml:"createdAt"` // "ago": workspace age (drives the picker's age column)
-	Windows   []Window `yaml:"windows"`
-}
+	Slug    string `yaml:"slug"`    // session name / workspace id (the persistence key)
+	Title   string `yaml:"title"`   // human, renameable label shown in M-s
+	Intent  string `yaml:"intent"`  // the task text the user typed at M-n
+	Summary string `yaml:"summary"` // workspace-level rollup line under the title
+	Tag     string `yaml:"tag"`     // grouping label (client/initiative/subsystem)
 
-// Window is one seeded window in a workspace.
-type Window struct {
-	Name   string `yaml:"name"`   // tmux window name; convention: the branch name
-	Branch string `yaml:"branch"` //
-
-	// Worktree selects the cwd: if set, cwd = <worktreeRoot>/<repoSlug>/<Worktree>
-	// (a feature worktree); if empty, cwd = <codeRoot>/<repoSlug> (the
-	// default-branch checkout).
-	Worktree string `yaml:"worktree"`
-
-	Attention bool     `yaml:"attention"` // seeds @needs_attention on restore
-	Recap     string   `yaml:"recap"`     // seeds @attention_recap
-	RecapAge  Duration `yaml:"recapAge"`  // "ago" for @attention_recap_ts
-
-	// CreatedAt is this window's age ("ago" duration → @workspace_created_ts,
-	// the picker's per-window age column). Empty inherits the enclosing
-	// workspace's createdAt — set it on additional worktree windows so each
-	// row shows its own age, not a blank.
+	// CreatedAt is the workspace age ("ago" duration) — drives the picker's
+	// age column and stamps every driver window's created_ts.
 	CreatedAt Duration `yaml:"createdAt"`
 
-	// Tag seeds the workspace tag (M-t) — a free-form label the picker
-	// renders as a pill and sorts/groups by. Stored as the workspace.tag
-	// metadata → @workspace_tag on restore. Empty = untagged.
-	Tag string `yaml:"tag"`
+	// Recap / RecapAge / Attention describe the DRIVER window's state: what
+	// the agent was doing (recap), how long ago (recapAge), and whether it
+	// finished blocked on the user (attention → ⏺ badge).
+	Recap     string   `yaml:"recap"`
+	RecapAge  Duration `yaml:"recapAge"`
+	Attention bool     `yaml:"attention"`
 
-	// PR seeds the kernel forge badge: one of open|draft|merged|closed
-	// (empty = no PR, no badge). Hydrate stores it as the forge.* metadata
-	// the picker reads (@forge_state for the glyph + sort), with a
-	// far-future @forge_ts so the picker's offline `gh` refresh leaves it
-	// alone. Requires [forge] provider to be active (the sandbox sets
-	// provider = "mock").
-	PR string `yaml:"pr"`
+	// Worktrees are the repo branches this workspace's agent produced —
+	// symlinked into the workspace Root. Each references a real Worktree
+	// declared under the matching Repo.
+	Worktrees []WsWorktree `yaml:"worktrees"`
 
-	Metadata map[string]string `yaml:"metadata"` // plugin-namespaced (e.g. ai.*)
+	// PRs are the pull requests surfaced in the M-c Changes view, classified
+	// offline by the mock forge from the seeded fixture.
+	PRs []WsPR `yaml:"prs"`
+}
+
+// WsWorktree selects one repo branch to symlink into the workspace Root.
+// Branch must correspond to a real Worktree declared under RepoSlug; the
+// real worktree lives at <worktreeRoot>/<repoSlug>/<branch>.
+type WsWorktree struct {
+	RepoSlug string `yaml:"repoSlug"`
+	Branch   string `yaml:"branch"`
+}
+
+// WsPR seeds one pull request on a workspace. State/CI/ReviewDecision use
+// the kernel's normalized vocabulary (see internal/integration). Empty
+// State = no badge.
+type WsPR struct {
+	Number         int    `yaml:"number"`
+	RepoSlug       string `yaml:"repoSlug"`
+	Title          string `yaml:"title"`
+	State          string `yaml:"state"`          // open|draft|merged|closed
+	CI             string `yaml:"ci"`             // pass|fail|pending
+	ReviewDecision string `yaml:"reviewDecision"` // approved|changes_requested|review_required
+	Comments       int    `yaml:"comments"`
+	Branch         string `yaml:"branch"`
+	URL            string `yaml:"url"`
 }
 
 // Duration is a time.Duration that unmarshals from a YAML string like
@@ -198,22 +216,59 @@ func (sc *Scenario) validate() error {
 	if len(sc.Repos) == 0 {
 		return fmt.Errorf("scenario %q: at least one repo is required", sc.Name)
 	}
-	slugs := map[string]bool{}
+	// repo slug → set of declared branches (for worktree cross-checks).
+	branches := map[string]map[string]bool{}
 	for _, r := range sc.Repos {
 		if r.Slug == "" {
 			return fmt.Errorf("scenario %q: repo with empty slug", sc.Name)
 		}
-		slugs[r.Slug] = true
-	}
-	for _, ws := range sc.Workspaces {
-		if !slugs[ws.RepoSlug] {
-			return fmt.Errorf("scenario %q: workspace %q references unknown repo %q", sc.Name, ws.Session, ws.RepoSlug)
+		if _, dup := branches[r.Slug]; dup {
+			return fmt.Errorf("scenario %q: duplicate repo slug %q", sc.Name, r.Slug)
 		}
-		for _, w := range ws.Windows {
-			if w.PR != "" && !validForgeState(w.PR) {
-				return fmt.Errorf("scenario %q: window %q pr=%q, want one of open|draft|merged|closed", sc.Name, w.Name, w.PR)
+		set := map[string]bool{}
+		for _, wt := range r.Worktrees {
+			set[wt.Branch] = true
+		}
+		branches[r.Slug] = set
+	}
+	slugs := map[string]bool{}
+	for _, ws := range sc.Workspaces {
+		if ws.Slug == "" {
+			return fmt.Errorf("scenario %q: workspace with empty slug", sc.Name)
+		}
+		if ws.Title == "" {
+			// filterAtelierManaged drops a workspace with no identity; Title is
+			// the cheapest guarantee it survives Save/Load.
+			return fmt.Errorf("scenario %q: workspace %q missing title", sc.Name, ws.Slug)
+		}
+		if slugs[ws.Slug] {
+			return fmt.Errorf("scenario %q: duplicate workspace slug %q", sc.Name, ws.Slug)
+		}
+		slugs[ws.Slug] = true
+		for _, wt := range ws.Worktrees {
+			set, ok := branches[wt.RepoSlug]
+			if !ok {
+				return fmt.Errorf("scenario %q: workspace %q references unknown repo %q", sc.Name, ws.Slug, wt.RepoSlug)
+			}
+			if !set[wt.Branch] {
+				return fmt.Errorf("scenario %q: workspace %q worktree %s@%s has no matching worktree under that repo",
+					sc.Name, ws.Slug, wt.RepoSlug, wt.Branch)
 			}
 		}
+		for _, pr := range ws.PRs {
+			if _, ok := branches[pr.RepoSlug]; !ok {
+				return fmt.Errorf("scenario %q: workspace %q PR references unknown repo %q", sc.Name, ws.Slug, pr.RepoSlug)
+			}
+			if pr.State != "" && !validForgeState(pr.State) {
+				return fmt.Errorf("scenario %q: workspace %q pr state=%q, want one of open|draft|merged|closed", sc.Name, ws.Slug, pr.State)
+			}
+			if pr.CI != "" && !validCIStatus(pr.CI) {
+				return fmt.Errorf("scenario %q: workspace %q pr ci=%q, want one of pass|fail|pending", sc.Name, ws.Slug, pr.CI)
+			}
+		}
+	}
+	if sc.LastActive != "" && !slugs[sc.LastActive] {
+		return fmt.Errorf("scenario %q: lastActive %q is not a known workspace", sc.Name, sc.LastActive)
 	}
 	return nil
 }
@@ -221,6 +276,14 @@ func (sc *Scenario) validate() error {
 func validForgeState(s string) bool {
 	switch integration.ForgeState(s) {
 	case integration.ForgeOpen, integration.ForgeDraft, integration.ForgeMerged, integration.ForgeClosed:
+		return true
+	}
+	return false
+}
+
+func validCIStatus(s string) bool {
+	switch integration.CIStatus(s) {
+	case integration.CIPass, integration.CIFail, integration.CIPending:
 		return true
 	}
 	return false

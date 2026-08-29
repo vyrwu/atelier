@@ -12,57 +12,52 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// TestFullCycle_KillServerThenRestoreReproducesWorkspaces is the
-// load-bearing end-to-end test for the entire persistence story.
+// TestFullCycle_KillServerThenRestoreReproducesWorkspaces is the load-bearing
+// end-to-end test for the entire persistence story.
 //
 // Scenario:
-//  1. Spin up a tmux server. Create a workspace, attention-flag a
-//     window, write a recap. These mutations go through the write-
-//     through chokepoints (SetRecap, SetAttention,
-//     RegisterCreatedWorkspace) → cache file is up to date.
-//  2. Kill the tmux server. All in-memory tmux state is gone — but
-//     the cache file survives on disk.
+//  1. Spin up a tmux server. Create a workspace, attention-flag its driver,
+//     write a recap. These mutations go through the write-through chokepoints
+//     (SetRecap, SetAttention, RegisterCreatedWorkspace) → cache is up to date.
+//  2. Kill the tmux server. All in-memory tmux state is gone — the cache file
+//     survives on disk.
 //  3. Start a fresh tmux server.
-//  4. Invoke workspace.Restore (which is what `atelier state restore`
-//     fires from the init tmux config).
-//  5. Assert: the workspace is back. The window is named correctly.
-//     The recap + attention + claude session id are re-stamped. The
-//     user perceives no loss.
-//
-// If this test fails, the persistence story is broken from the user's
-// perspective even if every individual unit test passes.
+//  4. Invoke workspace.Restore (what `atelier state restore` fires from init).
+//  5. Assert: the workspace is back as a driver window with its recap +
+//     attention + claude session id re-stamped. The user perceives no loss.
 func TestFullCycle_KillServerThenRestoreReproducesWorkspaces(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("ATELIER_WORKSPACE_ROOT", t.TempDir())
 
-	wt := filepath.Join(t.TempDir(), "worktrees", "atelier", "feat-persist")
-	if err := os.MkdirAll(wt, 0o755); err != nil {
+	root := filepath.Join(t.TempDir(), "atelier-root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	// --- Phase 1: original tmux session ---
 	srv1 := testtmux.New(t)
 	srv1.NewSession("vyrwu/atelier")
-	// Mark session atelier-managed so write-through scope check passes.
-	if _, err := srv1.Client.Run("set-option", "-t", "vyrwu/atelier", "@repo_path", wt); err != nil {
-		t.Fatalf("seed @repo_path: %v", err)
+	// Mark the session atelier-managed (stamp @workspace_id) so the
+	// write-through scope check passes.
+	if _, err := srv1.Client.Run("set-option", "-t", "vyrwu/atelier",
+		workspace.OptWorkspaceID, "vyrwu/atelier"); err != nil {
+		t.Fatalf("seed @workspace_id: %v", err)
 	}
 
-	// Record the original window's @ID before we touch options.
+	// Record the driver window's @ID before we touch options.
 	out, err := srv1.Client.Run("list-windows", "-t", "=vyrwu/atelier", "-F", "#{window_id}")
 	if err != nil {
 		t.Fatalf("list-windows: %v", err)
 	}
 	origWid := splitLinesForTest(string(out))[0]
 
-	// Register through the canonical persistence chokepoints (the same
-	// path workspaces.go uses in its creator flows).
+	// Register through the canonical persistence chokepoints.
 	workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
 		Session:    "vyrwu/atelier",
-		RepoPath:   wt,
-		Kind:       "worktree",
+		Title:      "atelier",
+		Root:       root,
 		WindowName: actualWindowName(t, srv1, origWid),
-		Cwd:        wt,
-		Branch:     "feat-persist",
+		Cwd:        root,
 	})
 	if err := workspace.SetRecap(srv1.Client, origWid, "Designed persistence layer"); err != nil {
 		t.Fatalf("SetRecap: %v", err)
@@ -70,9 +65,8 @@ func TestFullCycle_KillServerThenRestoreReproducesWorkspaces(t *testing.T) {
 	if err := workspace.SetAttention(srv1.Client, origWid, true); err != nil {
 		t.Fatalf("SetAttention: %v", err)
 	}
-	// Simulate a Claude task completion stamping the session id via
-	// the generic metadata API (`ai.active_session_id` key — AI
-	// plugin's namespace).
+	// Simulate a Claude task stamping the session id via the generic metadata
+	// API (`ai.active_session_id` key — AI plugin's namespace).
 	if err := workspace.PersistWindowMetadata(srv1.Client, origWid,
 		"ai.active_session_id", "uuid-abc-123"); err != nil {
 		t.Fatalf("PersistWindowMetadata: %v", err)
@@ -89,9 +83,6 @@ func TestFullCycle_KillServerThenRestoreReproducesWorkspaces(t *testing.T) {
 
 	// --- Phase 3: fresh tmux server ---
 	srv2 := testtmux.New(t)
-	// The fresh server has no sessions yet beyond what testtmux created.
-	// CRUCIAL: the cache file from srv1 survives in XDG_CACHE_HOME
-	// because we set it once at the top of the test.
 
 	// --- Phase 4: restore ---
 	if err := workspace.Restore(srv2.Client); err != nil {
@@ -103,8 +94,7 @@ func TestFullCycle_KillServerThenRestoreReproducesWorkspaces(t *testing.T) {
 		t.Fatal("session 'vyrwu/atelier' was not restored")
 	}
 
-	// Find the restored window's new @ID (different from origWid — tmux
-	// reassigns IDs on every server start).
+	// Find the restored driver window's new @ID.
 	out, _ = srv2.Client.Run("list-windows", "-t", "=vyrwu/atelier",
 		"-F", "#{window_name}|#{window_id}")
 	var newWid, newName string
@@ -128,10 +118,6 @@ func TestFullCycle_KillServerThenRestoreReproducesWorkspaces(t *testing.T) {
 	if newWid == "" {
 		t.Fatalf("restored window not found. list-windows:\n%s", out)
 	}
-	// (We deliberately don't assert newWid != origWid — each testtmux
-	// server is its own tmux process starting IDs from @0, so they
-	// happen to match. The MEANINGFUL property is that options keyed
-	// on window NAME made it across the restart, which we check next.)
 
 	// Persisted options should be back, stamped by name (the persistent
 	// identity that survives @ID reassignment).
@@ -147,15 +133,13 @@ func TestFullCycle_KillServerThenRestoreReproducesWorkspaces(t *testing.T) {
 				opt, got, want, newWid, newName)
 		}
 	}
-	// Recap timestamp is present (non-zero) — set by SetRecap before kill.
+	// Recap timestamp is present (non-zero).
 	if ts, _ := srv2.Client.GetWindowOption(newWid, "@attention_recap_ts"); ts == "" || ts == "0" {
 		t.Errorf("@attention_recap_ts should be non-zero, got %q", ts)
 	}
 }
 
 // actualWindowName resolves the tmux window name for a window @ID.
-// testtmux gives newly-created sessions a default window whose name
-// varies by shell — we read it back rather than assume.
 func actualWindowName(t *testing.T, srv *testtmux.Server, wid string) string {
 	t.Helper()
 	name, err := srv.Client.DisplayMessageAt(wid, "#{window_name}")

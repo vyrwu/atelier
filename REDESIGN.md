@@ -1,12 +1,18 @@
 # REDESIGN.md — atelier v1: the workspace becomes the intent
 
+> **STATUS: IMPLEMENTED.** All of Phases 0–3 landed in the v1 redesign
+> (WS-1 through WS-7 + WS-9; WS-8 multi-agent is out of scope as planned).
+> The concepts now live in [`DESIGN.md`](DESIGN.md); the calls made where this
+> plan left choices open are logged in [`DECISIONS.md`](DECISIONS.md). This
+> document is retained as the historical plan/rationale — read DESIGN.md for
+> what atelier *is*, this for *why it changed*.
+
 Plan doc for the major redesign sketched in the design canvas. Breaks the
 drawing into implementable workstreams, grounds each in the code that
 exists today, and sequences them into shippable phases.
 
 Companion to [`DESIGN.md`](DESIGN.md) (what atelier *is* today) — this doc
-is what changes and in what order. When a workstream lands, its rationale
-moves into DESIGN.md and its entry here is struck.
+is what changes and in what order.
 
 ---
 

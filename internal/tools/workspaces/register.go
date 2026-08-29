@@ -6,22 +6,24 @@ import (
 	"github.com/vyrwu/atelier/internal/manifest"
 )
 
-// Manifest is workspaces' registry descriptor.
+// Manifest is workspaces' registry descriptor. In the intent-workspace model
+// the primary action is M-n (create from an intent), M-s picks among live
+// workspaces, and M-c is the cross-repo Changes (PR) view.
 var Manifest = &manifest.Manifest{
 	Tool:          true,
 	Name:          "workspaces",
-	Description:   "Workspace picker, session switcher, clone-from-URL (fzf-driven, bash-exact)",
+	Description:   "Intent-first workspaces: create (M-n), switch (M-s), review changes (M-c)",
 	PrimaryInvoke: "sessions",
 	Binding: &manifest.Binding{
 		Key:         "M-n",
 		Title:       "New workspace",
 		Style:       manifest.StylePicker,
-		Invoke:      "pick",
+		Invoke:      "new",
 		AlsoInPopup: true,
 	},
 	Bindings: []manifest.Binding{
 		{Key: "M-s", Title: "Active workspaces", Style: manifest.StylePicker, Invoke: "sessions", AlsoInPopup: true},
-		{Key: "M-r", Title: "Workspace history", Style: manifest.StylePicker, Invoke: "recover", AlsoInPopup: true},
+		{Key: "M-c", Title: "List changes", Style: manifest.StylePicker, Invoke: "changes", AlsoInPopup: true},
 	},
 	UI: &manifest.UI{
 		Icon:        "栽",
@@ -31,74 +33,52 @@ var Manifest = &manifest.Manifest{
 	Popup:    manifest.KindNone,
 	Requires: []string{"git", "fzf"},
 	PickerBindings: []manifest.PickerBinding{
-		// creator (repo picker) — M-m toggles a multi-repo (AI-named) session.
-		{Picker: "creator", Key: "Enter", Action: "Accept repo (or submit prompt in multi-repo mode)"},
-		{Picker: "creator", Key: "M-m", Action: "Toggle multi-repo (AI-named) session mode"},
-		{Picker: "creator", Key: "M-s", Action: "Jump to active workspaces"},
-		{Picker: "creator", Key: "M-r", Action: "Jump to workspace history"},
-		{Picker: "creator", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// name (forced manual picker 製! — reached via M-m from prompt)
-		{Picker: "name", Key: "Enter", Action: "Accept branch name (empty → default branch)"},
-		{Picker: "name", Key: "M-m", Action: "Switch back to AI mode (製? )"},
-		{Picker: "name", Key: "M-s", Action: "Jump to active workspaces"},
-		{Picker: "name", Key: "M-r", Action: "Jump to workspace history"},
-		{Picker: "name", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// prompt (AI branch-naming — default after repo pick)
-		{Picker: "prompt", Key: "Enter", Action: "Submit prompt → agent generates branch name"},
-		{Picker: "prompt", Key: "M-m", Action: "Switch to manual branch name (製! )"},
-		{Picker: "prompt", Key: "M-s", Action: "Jump to active workspaces"},
-		{Picker: "prompt", Key: "M-r", Action: "Jump to workspace history"},
-		{Picker: "prompt", Key: "M-u", Action: "Jump to clone-from-URL picker"},
+		// new (intent prompt — M-n)
+		{Picker: "new", Key: "Enter", Action: "Create workspace from the intent (empty → cancel)"},
+		{Picker: "new", Key: "M-s", Action: "Jump to active workspaces"},
+		{Picker: "new", Key: "M-c", Action: "Jump to changes"},
 		// sessions (Active Workspaces — M-s)
 		{Picker: "sessions", Key: "Enter", Action: "Switch to workspace / confirm action"},
-		{Picker: "sessions", Key: "M-x", Action: "Delete workspace (with confirm)"},
+		{Picker: "sessions", Key: "M-x", Action: "Delete workspace (confirm enumerates worktrees + PRs)"},
+		{Picker: "sessions", Key: "M-r", Action: "Rename workspace"},
 		{Picker: "sessions", Key: "M-t", Action: "Tag workspace (pick/create; empty clears)"},
+		{Picker: "sessions", Key: "M-p", Action: "Pin/unpin the search scope"},
 		{Picker: "sessions", Key: "M-n", Action: "Jump to new-workspace creator"},
-		{Picker: "sessions", Key: "M-r", Action: "Jump to workspace history"},
-		{Picker: "sessions", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// recover (Workspace History — M-r)
-		{Picker: "recover", Key: "Enter", Action: "Open the worktree / confirm action"},
-		{Picker: "recover", Key: "M-x", Action: "Delete worktree (with confirm)"},
-		{Picker: "recover", Key: "M-s", Action: "Jump to active workspaces"},
-		{Picker: "recover", Key: "M-n", Action: "Jump to new-workspace creator"},
-		{Picker: "recover", Key: "M-u", Action: "Jump to clone-from-URL picker"},
-		// clone (URL picker)
-		{Picker: "clone", Key: "Enter", Action: "Validate URL + clone"},
-		{Picker: "clone", Key: "M-s", Action: "Jump to active workspaces"},
-		{Picker: "clone", Key: "M-n", Action: "Jump to new-workspace creator"},
-		{Picker: "clone", Key: "M-r", Action: "Jump to workspace history"},
+		{Picker: "sessions", Key: "M-c", Action: "Jump to changes"},
+		// changes (List Changes — M-c)
+		{Picker: "changes", Key: "M-o", Action: "Open the PR in a browser"},
+		{Picker: "changes", Key: "M-c", Action: "Close the PR (confirm)"},
+		{Picker: "changes", Key: "Enter", Action: "Open the PR in a browser"},
+		{Picker: "changes", Key: "M-s", Action: "Jump to active workspaces"},
+		{Picker: "changes", Key: "M-n", Action: "Jump to new-workspace creator"},
 	},
 }
 
-// AddCommands wires workspaces' subcommands (including the internal
-// fzf-transform helpers) onto the dispatch root.
+// AddCommands wires workspaces' subcommands (including internal fzf-transform
+// helpers) onto the dispatch root.
 func AddCommands(root *cobra.Command) {
-	root.AddCommand(PickCommand())
+	// User-facing pickers.
+	root.AddCommand(NewCommand())
 	root.AddCommand(SessionsCommand())
-	root.AddCommand(CreateCommand())
-	root.AddCommand(DeleteCommand())
-	root.AddCommand(RecoverCommand())
-	root.AddCommand(CloneCommand())
-	// Internal subcommands wired up by the fzf transforms in pickers.
+	root.AddCommand(ChangesCommand())
+	// Intent-creation internals.
+	root.AddCommand(BuildCommand())
+	root.AddCommand(NameCommand())
+	// M-s picker internals.
+	root.AddCommand(SessionListCommand())
 	root.AddCommand(DeletePromptCommand())
 	root.AddCommand(DeleteRowCommand())
-	root.AddCommand(SessionListCommand())
+	root.AddCommand(RenameCommand())
 	root.AddCommand(TagCommand())
 	root.AddCommand(TagPreviewCommand())
 	root.AddCommand(SetScopePinCommand())
-	root.AddCommand(RecoverRowsCommand())
-	root.AddCommand(RecoverDeletePromptCommand())
-	root.AddCommand(RecoverDeleteRowCommand())
-	root.AddCommand(AutoSessionCommand())
-	root.AddCommand(PromptCommand())
-	root.AddCommand(BuildCommand())
-	root.AddCommand(NameCommand())
-	root.AddCommand(BgPullCommand())
-	// Kernel forge-badge slot commands (fed by the active ForgeIntegration).
-	root.AddCommand(ForgeRefreshCommand())
-	root.AddCommand(OpenForgeCommand())
-	// Continuous background refresh daemon (freshness + forge + self-heal).
-	root.AddCommand(RefreshLoopCommand())
-	// Live-update M-s: records the picker's fzf --listen port for the loop.
 	root.AddCommand(MSListenCommand())
+	// M-c Changes internals + forge slot.
+	root.AddCommand(ChangesListCommand())
+	root.AddCommand(OpenForgeCommand())
+	root.AddCommand(PRClosePromptCommand())
+	root.AddCommand(CloseForgeCommand())
+	root.AddCommand(ForgeRefreshCommand())
+	// Background refresh daemon.
+	root.AddCommand(RefreshLoopCommand())
 }

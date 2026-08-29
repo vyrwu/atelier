@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vyrwu/atelier/internal/adapters/mock"
 	"github.com/vyrwu/atelier/internal/statestore"
 )
 
@@ -19,6 +20,7 @@ func hydrateAcme(t *testing.T) *Layout {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("ATELIER_WORKSPACE_ROOT", filepath.Join(root, "ateliers"))
 
 	sc, err := Builtin("acme-platform")
 	if err != nil {
@@ -53,41 +55,61 @@ func TestBuiltin_AcmePlatformParses(t *testing.T) {
 	if len(sc.Repos) < 10 {
 		t.Errorf("repos = %d, want >= 10", len(sc.Repos))
 	}
+	if len(sc.Workspaces) < 4 {
+		t.Fatalf("workspaces = %d, want >= 4", len(sc.Workspaces))
+	}
 	if sc.Workspaces[0].CreatedAt == 0 {
 		t.Error("createdAt not parsed from YAML duration string")
 	}
 
-	var windows, attn, tagged int
+	var attn, tagged, multiRepo int
 	prStates := map[string]int{}
+	prCI := map[string]int{}
 	for _, ws := range sc.Workspaces {
-		for _, w := range ws.Windows {
-			windows++
-			if w.Recap == "" {
-				t.Errorf("%s:%s has no recap", ws.Session, w.Name)
+		if ws.Title == "" {
+			t.Errorf("%s has no title (filterAtelierManaged would drop it)", ws.Slug)
+		}
+		if ws.Intent == "" {
+			t.Errorf("%s has no intent", ws.Slug)
+		}
+		if ws.Recap == "" && len(ws.Worktrees) > 0 {
+			t.Errorf("%s has worktrees but no driver recap", ws.Slug)
+		}
+		if ws.Attention {
+			attn++
+		}
+		if ws.Tag != "" {
+			tagged++
+		}
+		if len(ws.Worktrees) > 1 {
+			multiRepo++
+		}
+		for _, pr := range ws.PRs {
+			if pr.State != "" {
+				prStates[pr.State]++
 			}
-			if w.Attention {
-				attn++
-			}
-			if w.PR != "" {
-				prStates[w.PR]++
-			}
-			if w.Tag != "" {
-				tagged++
+			if pr.CI != "" {
+				prCI[pr.CI]++
 			}
 		}
 	}
-	if windows < 10 {
-		t.Errorf("windows = %d, want >= 10", windows)
-	}
 	if attn == 0 {
-		t.Error("no attention windows")
+		t.Error("no attention workspaces")
 	}
 	if tagged == 0 {
-		t.Error("no tagged windows (M-t demo)")
+		t.Error("no tagged workspaces (M-t demo)")
+	}
+	if multiRepo == 0 {
+		t.Error("no multi-repo workspaces (the new-model demo)")
 	}
 	for _, s := range []string{"open", "draft", "merged", "closed"} {
 		if prStates[s] == 0 {
-			t.Errorf("no window with PR state %q", s)
+			t.Errorf("no PR with state %q", s)
+		}
+	}
+	for _, s := range []string{"pass", "fail", "pending"} {
+		if prCI[s] == 0 {
+			t.Errorf("no PR with CI %q", s)
 		}
 	}
 }
@@ -104,15 +126,49 @@ name: bad
 repos:
   - slug: a/b
     files: {README.md: "x\n"}
+    worktrees:
+      - {branch: feat/x}
 workspaces:
-  - session: a/b
-    repoSlug: a/nope
-    kind: worktree
-    windows:
-      - {name: main, branch: main}
+  - slug: ws
+    title: Bad
+    worktrees:
+      - {repoSlug: a/nope, branch: feat/x}
 `))
 	if err == nil || !strings.Contains(err.Error(), "unknown repo") {
 		t.Fatalf("expected unknown-repo validation error, got %v", err)
+	}
+}
+
+func TestLoad_ValidatesUnknownWorktreeBranch(t *testing.T) {
+	_, err := Load([]byte(`
+name: bad
+repos:
+  - slug: a/b
+    files: {README.md: "x\n"}
+    worktrees:
+      - {branch: feat/x}
+workspaces:
+  - slug: ws
+    title: Bad
+    worktrees:
+      - {repoSlug: a/b, branch: feat/nope}
+`))
+	if err == nil || !strings.Contains(err.Error(), "no matching worktree") {
+		t.Fatalf("expected worktree-branch validation error, got %v", err)
+	}
+}
+
+func TestLoad_RequiresWorkspaceTitle(t *testing.T) {
+	_, err := Load([]byte(`
+name: bad
+repos:
+  - slug: a/b
+    files: {README.md: "x\n"}
+workspaces:
+  - slug: ws
+`))
+	if err == nil || !strings.Contains(err.Error(), "missing title") {
+		t.Fatalf("expected missing-title validation error, got %v", err)
 	}
 }
 
@@ -122,15 +178,55 @@ name: bad
 repos:
   - slug: a/b
     files: {README.md: "x\n"}
+    worktrees:
+      - {branch: feat/x}
 workspaces:
-  - session: a/b
-    repoSlug: a/b
-    kind: worktree
-    windows:
-      - {name: main, branch: main, pr: bogus}
+  - slug: ws
+    title: Bad
+    worktrees:
+      - {repoSlug: a/b, branch: feat/x}
+    prs:
+      - {number: 1, repoSlug: a/b, state: bogus}
 `))
-	if err == nil || !strings.Contains(err.Error(), "pr=") {
+	if err == nil || !strings.Contains(err.Error(), "state=") {
 		t.Fatalf("expected pr-state validation error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsBadPRCI(t *testing.T) {
+	_, err := Load([]byte(`
+name: bad
+repos:
+  - slug: a/b
+    files: {README.md: "x\n"}
+    worktrees:
+      - {branch: feat/x}
+workspaces:
+  - slug: ws
+    title: Bad
+    worktrees:
+      - {repoSlug: a/b, branch: feat/x}
+    prs:
+      - {number: 1, repoSlug: a/b, state: open, ci: bogus}
+`))
+	if err == nil || !strings.Contains(err.Error(), "ci=") {
+		t.Fatalf("expected pr-ci validation error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsUnknownLastActive(t *testing.T) {
+	_, err := Load([]byte(`
+name: bad
+lastActive: nope
+repos:
+  - slug: a/b
+    files: {README.md: "x\n"}
+workspaces:
+  - slug: ws
+    title: Bad
+`))
+	if err == nil || !strings.Contains(err.Error(), "lastActive") {
+		t.Fatalf("expected lastActive validation error, got %v", err)
 	}
 }
 
@@ -182,64 +278,94 @@ func TestHydrate_SoftClosedMarker(t *testing.T) {
 }
 
 func TestHydrate_SeedsStatestore(t *testing.T) {
-	hydrateAcme(t)
+	l := hydrateAcme(t)
 	st, err := statestore.Load()
 	if err != nil || st == nil {
 		t.Fatalf("statestore.Load: %v (nil=%v)", err, st == nil)
 	}
-	if len(st.Workspaces) < 10 {
-		t.Fatalf("workspaces = %d, want >= 10", len(st.Workspaces))
+	if len(st.Workspaces) < 4 {
+		t.Fatalf("workspaces = %d, want >= 4", len(st.Workspaces))
 	}
-	if st.LastActiveSession == "" {
-		t.Error("last_active not seeded")
-	}
-
-	w := st.FindWindow("acme-platform/helm-charts", "feat/bump-ingress-nginx")
-	if w == nil {
-		t.Fatal("helm-charts window missing from state")
-	}
-	if !w.Attention {
-		t.Error("helm-charts window: attention not seeded")
-	}
-	if !strings.Contains(w.Recap, "ingress-nginx") {
-		t.Errorf("recap = %q, want it to mention ingress-nginx", w.Recap)
-	}
-	if w.RecapTs == 0 {
-		t.Error("recap_ts not set")
-	}
-	// Forge badge seeded as metadata → restore stamps @forge_state for the
-	// immediate first render (the mock forge re-affirms it from the fixture).
-	if w.Metadata["forge.state"] != "open" {
-		t.Errorf("forge.state = %q, want open", w.Metadata["forge.state"])
-	}
-	// Per-window age: the first window inherits the workspace createdAt (9m);
-	// the second declares its own (24m), so both are non-zero and distinct —
-	// this is what makes every picker row show its own age, not a blank.
-	if w.CreatedAt == 0 {
-		t.Error("first helm window: CreatedAt not seeded")
-	}
-	redis := st.FindWindow("acme-platform/helm-charts", "feat/redis-pdb")
-	if redis == nil {
-		t.Fatal("helm-charts feat/redis-pdb window missing from state")
-	}
-	if redis.CreatedAt == 0 {
-		t.Error("second helm window: CreatedAt not seeded (would show blank age)")
-	}
-	if redis.CreatedAt == w.CreatedAt {
-		t.Errorf("both helm windows share CreatedAt %d; want per-window ages", w.CreatedAt)
+	if st.LastActiveSession != "service-catalog-ownership" {
+		t.Errorf("last_active = %q, want service-catalog-ownership", st.LastActiveSession)
 	}
 
-	var attn, total int
-	for _, ws := range st.Workspaces {
-		for _, win := range ws.Windows {
-			total++
-			if win.Attention {
-				attn++
-			}
+	// The multi-repo EKS upgrade: title/intent/root set, three worktrees
+	// symlinked in, three PRs, driver window with attention + recap.
+	ws := st.FindWorkspace("eks-1-30-upgrade")
+	if ws == nil {
+		t.Fatal("eks-1-30-upgrade workspace missing from state")
+	}
+	if ws.Title == "" || ws.Intent == "" {
+		t.Errorf("eks workspace: title=%q intent=%q, want both set", ws.Title, ws.Intent)
+	}
+	if ws.Root == "" || !strings.HasSuffix(ws.Root, filepath.Join("ateliers", "eks-1-30-upgrade")) {
+		t.Errorf("eks workspace root = %q, want <root>/ateliers/eks-1-30-upgrade", ws.Root)
+	}
+	if len(ws.Worktrees) != 3 {
+		t.Errorf("eks workspace worktrees = %d, want 3", len(ws.Worktrees))
+	}
+	if len(ws.PRs) != 3 {
+		t.Errorf("eks workspace PRs = %d, want 3", len(ws.PRs))
+	}
+	// Multi-repo => no single RepoPath hint.
+	if ws.RepoPath != "" {
+		t.Errorf("multi-repo workspace RepoPath = %q, want empty", ws.RepoPath)
+	}
+	if len(ws.Windows) != 1 {
+		t.Fatalf("eks workspace windows = %d, want 1 (the driver)", len(ws.Windows))
+	}
+	driver := ws.Windows[0]
+	if !driver.Attention {
+		t.Error("eks driver: attention not seeded")
+	}
+	if !strings.Contains(driver.Recap, "1.30") {
+		t.Errorf("eks driver recap = %q, want it to mention 1.30", driver.Recap)
+	}
+	if driver.RecapTs == 0 {
+		t.Error("eks driver: recap_ts not set")
+	}
+	if driver.CreatedAt == 0 {
+		t.Error("eks driver: CreatedAt not seeded")
+	}
+	if driver.Metadata["ai.prompt"] != ws.Intent {
+		t.Errorf("eks driver ai.prompt = %q, want the intent", driver.Metadata["ai.prompt"])
+	}
+
+	// Worktree symlinks materialized: <root>/<repo-name>/<branch> -> real path.
+	link := filepath.Join(ws.Root, "terraform-infra", "feat/eks-1-30-upgrade")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("worktree symlink missing: %v", err)
+	}
+	wantTarget := filepath.Join(l.WorktreeRoot, "acme-platform/terraform-infra/feat/eks-1-30-upgrade")
+	if target != wantTarget {
+		t.Errorf("symlink %q -> %q, want %q", link, target, wantTarget)
+	}
+
+	// Single-repo workspace: RepoPath hint set to the code-root checkout.
+	single := st.FindWorkspace("service-catalog-ownership")
+	if single == nil {
+		t.Fatal("service-catalog-ownership workspace missing")
+	}
+	wantRepoPath := filepath.Join(l.CodeRoot, "acme-platform/service-catalog")
+	if single.RepoPath != wantRepoPath {
+		t.Errorf("single-repo RepoPath = %q, want %q", single.RepoPath, wantRepoPath)
+	}
+
+	// A mix of attention across workspaces (driver-window level).
+	var attn int
+	for _, w := range st.Workspaces {
+		if len(w.Windows) > 0 && w.Windows[0].Attention {
+			attn++
 		}
 	}
-	if attn == 0 || attn == total {
-		t.Errorf("attention windows = %d of %d, want a mix", attn, total)
+	if attn == 0 || attn == len(st.Workspaces) {
+		t.Errorf("attention workspaces = %d of %d, want a mix", attn, len(st.Workspaces))
+	}
+	// The last-active workspace must NOT be an attention one.
+	if la := st.FindWorkspace(st.LastActiveSession); la != nil && len(la.Windows) > 0 && la.Windows[0].Attention {
+		t.Error("lastActive points at an attention workspace; should reveal attention via M-s")
 	}
 }
 
@@ -250,7 +376,7 @@ func TestHydrate_WritesConfigWithIntegrations(t *testing.T) {
 		t.Fatalf("read config.toml: %v", err)
 	}
 	cfg := string(data)
-	for _, want := range []string{l.CodeRoot, "[ai]", `provider = "claude"`, "[forge]", `provider = "mock"`, "[tools.lazygit]", `launch       = "lazygit"`} {
+	for _, want := range []string{l.CodeRoot, l.WorkspaceRoot, "workspace_root", "[ai]", `provider = "claude"`, "[forge]", `provider = "mock"`, "[tools.lazygit]", `launch       = "lazygit"`} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("config.toml missing %q:\n%s", want, cfg)
 		}
@@ -269,6 +395,7 @@ func TestHydrate_SeedsK8sContextFromKubeconfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("ATELIER_WORKSPACE_ROOT", filepath.Join(root, "ateliers"))
 
 	sc, _ := Builtin("acme-platform")
 	l, err := Hydrate(root, sc, Options{AI: "claude"})
@@ -294,19 +421,27 @@ func TestHydrate_WritesMockForgeFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read mock-forge.json: %v", err)
 	}
-	var fixture map[string]string
+	var fixture map[string][]mock.ForgePR
 	if err := json.Unmarshal(data, &fixture); err != nil {
 		t.Fatalf("parse fixture: %v", err)
 	}
-	// The mock forge classifies by worktree Cwd; the helm ingress worktree
-	// must map to "open" so the badge refresh reproduces it offline.
-	cwd := filepath.Join(l.WorktreeRoot, "acme-platform/helm-charts/feat/bump-ingress-nginx")
-	if fixture[cwd] != "open" {
-		t.Errorf("fixture[%q] = %q, want open", cwd, fixture[cwd])
+	// The mock forge queries the real worktree dir (repoQueryDir); the helm
+	// ingress worktree must map to an open PR so the badge refresh reproduces
+	// it offline.
+	dir := filepath.Join(l.WorktreeRoot, "acme-platform/helm-charts/feat/bump-ingress-nginx")
+	entries := fixture[dir]
+	if len(entries) != 1 || entries[0].State != "open" {
+		t.Errorf("fixture[%q] = %+v, want a single open PR", dir, entries)
+	}
+	if entries[0].Repo != "acme-platform/helm-charts" || entries[0].Branch != "feat/bump-ingress-nginx" {
+		t.Errorf("fixture PR repo/branch = %q/%q, want acme-platform/helm-charts/feat/bump-ingress-nginx",
+			entries[0].Repo, entries[0].Branch)
 	}
 	states := map[string]int{}
-	for _, s := range fixture {
-		states[s]++
+	for _, prs := range fixture {
+		for _, pr := range prs {
+			states[pr.State]++
+		}
 	}
 	for _, s := range []string{"open", "draft", "merged", "closed"} {
 		if states[s] == 0 {
@@ -327,6 +462,7 @@ func TestLayout_EnvIsolatesReposAndStripsTmux(t *testing.T) {
 		"ATELIER_CODE_ROOT":       l.CodeRoot,
 		"ATELIER_WORKTREE_ROOT":   l.WorktreeRoot,
 		"ATELIER_MULTI_REPO_ROOT": l.MultiRoot,
+		"ATELIER_WORKSPACE_ROOT":  l.WorkspaceRoot,
 		"XDG_CONFIG_HOME":         l.ConfigHome,
 		"XDG_CACHE_HOME":          l.CacheHome,
 		"GIT_CONFIG_GLOBAL":       l.GitConfig,

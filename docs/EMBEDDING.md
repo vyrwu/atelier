@@ -1,50 +1,45 @@
 # Embedding atelier into your tmux statusline
 
-This is the load-bearing integration doc. Atelier exposes three
-shell-runnable data emitters as its **public statusline API**. You
-plug them into your tmux `window-status-format` (or anywhere else
-that accepts `#(...)` shell-out) to surface atelier's per-workspace
-state in whatever visual style you want.
+This is the load-bearing integration doc. Atelier exposes shell-runnable
+data emitters as its **public statusline API**. You plug them into your
+tmux `window-status-format` (or anywhere else that accepts `#(...)`
+shell-out) to surface atelier's per-workspace state in whatever visual
+style you want.
 
 If you're using the bundled launcher (`atelier` command), these are
 already wired for you. Everyone else: this is how.
 
+> [!IMPORTANT]
+> **Upgrading to the intent-workspace release? Re-source your tmux.conf.**
+> The v1 redesign **changed the keybindings** (`M-c` is now List Changes,
+> the k9s context switcher moved to `M-k`, `M-r` renames a workspace, and
+> `M-u` clone-from-URL is gone). `atelier init --bare` emits the new
+> binding block, but your running tmux server keeps the *old* bindings
+> until you reload — so an embedded (`--bare`) setup will still fire the
+> pre-redesign bindings after you upgrade the binary. Reload with:
+>
+> ```bash
+> tmux source-file ~/.config/tmux/tmux.conf   # or your config path
+> ```
+>
+> (Bundled-launcher users get this for free — a fresh `atelier` sources
+> the current init.) This is a breaking change for embedders.
+
 ---
 
-## The three emitters
+## The two emitters
 
-All three are subcommands of the `atelier` binary. They print to stdout
+Both are subcommands of the `atelier` binary. They print to stdout
 and exit 0 in all states (so tmux `#(...)` never produces noise).
 
-### `atelier status freshness <behind> <ahead> <pull_error> <freshness_ts> <repo_path>`
-
-Renders the git sync status for a workspace as a colored icon. The
-arguments come from tmux options that atelier's background git-pull
-worker stamps on the workspace's window (`_bg-pull` on workspace switch,
-and the continuous `_refresh-loop`).
-
-| Arguments (in order) | Source | Type |
-|---|---|---|
-| `behind` | `#{@workspace_behind}` | integer (commits behind `origin/<default>`) |
-| `ahead` | `#{@workspace_ahead}` | integer (commits ahead of `origin/<default>`) |
-| `pull_error` | `#{@workspace_pull_error}` | short error string from the last failed pull |
-| `freshness_ts` | `#{@workspace_freshness_ts}` | unix epoch of last successful fetch |
-| `repo_path` | `#{@repo_path}` | absolute path of the workspace's repo (set on the tmux session) |
-
-**Output shapes:**
-
-| Workspace state | Output |
-|---|---|
-| Not a git repo (`repo_path` empty) | `` (empty) |
-| Pull pending / never ran (`freshness_ts` empty + no error) | `` (empty) |
-| In sync (`behind=0 ahead=0`) | ` #[fg=green]✔#[default]` |
-| Behind only | ` #[fg=red]↓N#[default]` |
-| Ahead only | ` #[fg=yellow]↑N#[default]` |
-| Diverged (behind AND ahead) | ` #[fg=red]↓N↑M#[default]` |
-| Pull error | ` #[fg=red]⚠ <truncated msg>#[default]` |
-
-Note the leading space — the emitter pads itself so adjacent content
-doesn't kiss the icon.
+> [!NOTE]
+> **The git-freshness (ahead/behind) segment is retired.** It was a
+> per-*branch* signal, and a workspace is no longer a branch checkout —
+> the driver agent runs at the workspace root, which spans repos. The
+> "is there unpushed/unmerged work" signal now lives in the **PR state**
+> in the `M-c` Changes view. `atelier status freshness` is no longer part
+> of the stamped statusline (its input options are no longer populated,
+> so it renders nothing); don't wire it into new configs.
 
 ### `atelier status attention count`
 
@@ -105,9 +100,8 @@ Add to your `~/.config/tmux/tmux.conf` after sourcing atelier:
 run-shell 'atelier init --bare | tmux source-file -'
 
 # Show only the active window in the status bar, with atelier's
-# freshness icon next to the window name, then the attention rollup,
-# then the forge PR badge.
-set -g window-status-current-format "#W #(atelier status freshness '#{@workspace_behind}' '#{@workspace_ahead}' '#{@workspace_pull_error}' '#{@workspace_freshness_ts}' '#{@repo_path}')#(atelier status attention count)#(atelier status forge '#{@forge_state}')"
+# attention rollup next to the window name, then the forge PR badge.
+set -g window-status-current-format "#W #(atelier status attention count)#(atelier status forge '#{@forge_state}')"
 ```
 
 ### Idempotent stamping (recommended)
@@ -120,17 +114,16 @@ ships a stamp command that injects the canonical segments after
 run-shell 'atelier init --bare | tmux source-file -'
 
 # Set whatever format you want. Atelier's stamp-statusline (run via
-# init) will inject the freshness + attention + forge segments
-# AFTER `#W` and before any other content. Safe to re-source the
-# config any number of times — the stamp strips prior injections
-# before adding the canonical segments.
+# init) will inject the attention + forge segments AFTER `#W` and
+# before any other content. Safe to re-source the config any number
+# of times — the stamp strips prior injections before adding the
+# canonical segments.
 set -g window-status-current-format "#W"
 ```
 
-The stamp regex matches and strips any prior `#(atelier status
-(freshness|attention|forge)...)` injection, then re-injects the
-canonical segments AFTER `#W` and any trailing color/glyph blocks (so
-the icons land in the right segment of a powerline-style format).
+The stamp re-injects the canonical segments AFTER `#W` and any trailing
+color/glyph blocks (so the icons land in the right segment of a
+powerline-style format), stripping any prior atelier injection first.
 Segments are injected into `window-status-current-format` ONLY, so the
 bar reflects the focused workspace; inactive windows render nothing
 (keep `window-status-format ""`). The global `attention count` rollup
@@ -143,15 +136,18 @@ still surfaces how many background workspaces are waiting.
 set -g window-status-current-format "#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]"
 
 # Atelier's stamp finds `#W ` + the trailing color/arrow block and
-# injects after the arrow, so the icon renders in the NEXT segment
+# injects after the arrow, so the icons render in the NEXT segment
 # rather than inside the colored name box.
 run-shell 'atelier init --bare | tmux source-file -'
 ```
 
 Final format (after stamp):
 ```
-#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]#(atelier status freshness …)#(atelier status attention count)#(atelier status forge '#{@forge_state}')
+#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]#(atelier status attention count)#(atelier status forge '#{@forge_state}')
 ```
+
+Only two segments are injected now; the freshness icon that used to sit
+between `#W` and the attention rollup is gone.
 
 ### Dracula
 
@@ -167,20 +163,13 @@ the same stamp logic works against dracula's status format. See
 Atelier writes the per-workspace tmux options consumed by these
 emitters:
 
-- `@repo_path` — set by atelier on session creation
-  (`workspaces` plugin).
-- `@workspace_behind`, `@workspace_ahead`,
-  `@workspace_freshness_ts`, `@workspace_pull_error` — set by
-  atelier's background git-pull worker, which fires on every workspace
-  switch, at startup for stale workspaces, and on the continuous
-  `_refresh-loop` heartbeat.
 - `@needs_attention` — set by atelier's observer loop when a workspace's
   agent is blocked waiting on you; cleared by atelier's
   `after-select-window` and `client-session-changed` hooks.
 - `@forge_state` — set by the forge-refresh worker
-  (`SpawnForgeRefresh`), which classifies each workspace's PR/MR via
+  (`SpawnForgeRefresh`), which classifies each workspace's PR via
   the active forge adapter. Fires on every workspace-land event and on
-  picker open; per-window TTL throttles the underlying forge queries.
+  picker open; per-repo batched queries are TTL-throttled.
 
 All four atelier hooks (`window-unlinked`, `session-closed`,
 `after-select-window`, `client-session-changed`) are emitted by
@@ -190,11 +179,9 @@ All four atelier hooks (`window-unlinked`, `session-closed`,
 
 ## Performance
 
-All three emitters are fast and side-effect-free:
+Both emitters are fast and side-effect-free:
 
-- `freshness` is a pure function — no subprocess, no tmux call,
-  just arg-to-output string mapping.
-- `forge` is likewise pure — it maps the pre-cached `@forge_state`
+- `forge` is pure — it maps the pre-cached `@forge_state`
   argument to a glyph. The forge query happens out-of-band in the
   refresh worker, never in the emitter.
 - `attention count` does one `tmux list-windows -a` (~5ms typical)
@@ -202,7 +189,7 @@ All three emitters are fast and side-effect-free:
 
 tmux invokes `#(...)` shell-outs once per `status-interval` (default
 15s; atelier sets it to 3s in its `StatuslineBlock`). 8 windows ×
-0.3 Hz × 3 emitters = ~8 invocations/second. Trivial.
+0.3 Hz × 2 emitters = ~5 invocations/second. Trivial.
 
 ---
 
@@ -214,16 +201,38 @@ output strings. Fork the emitter logic, or wrap them in your own shell
 function and post-process the output:
 
 ```bash
-# in some script atelier_freshness on PATH:
-out=$(atelier status freshness "$@")
-echo "${out/✔/✓}"  # your preferred glyph
+# in some script atelier_forge on PATH:
+out=$(atelier status forge "$@")
+echo "${out/ /  }"  # your preferred spacing/glyph
 ```
 
-Then in tmux: `#(atelier_freshness '#{@workspace_behind}' …)`.
+Then in tmux: `#(atelier_forge '#{@forge_state}')`.
 
 Atelier's API stability promise is on the **arg shape and output
 shape contract**, not on the specific glyphs/colors. Wrap if you
 need different visuals.
+
+---
+
+## What `--bare` emits (and what it doesn't)
+
+`atelier init --bare` emits **engine wiring only** — the tool bindings,
+core bindings, the four hooks above, the `stamp-statusline` injection,
+the background refresh loop, and workspace restore. It does **not** emit:
+
+- The bundled **theme** (`window-status-*` formats, palette, clipboard,
+  behavioral defaults) — you own the visual layer.
+- The **launcher default screen**. In the bundled launcher, a
+  `client-attached` hook runs `atelier internal welcome`, which opens the
+  `M-n` intent creator on attach when you have no workspaces yet (and
+  no-ops once one exists). This is bundled-only: an embedded (`--bare`)
+  user drives their own tmux, so it isn't wired — create your first
+  workspace with `M-n` yourself.
+
+Because the binding block *is* emitted in `--bare` mode, the
+keybinding-change callout at the top of this doc applies to you: after
+upgrading the binary, re-source your config so tmux picks up the new
+bindings.
 
 ---
 

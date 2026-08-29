@@ -10,12 +10,12 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// TestCreateWorktreeWindow_DottedSessionName is the regression guard for the
-// "creating a workspace for cloudnativedenmark.dk breaks" bug. With the
-// SessionName-normalized identity, EnsureSession + CreateWorktreeWindow
-// resolve cleanly end-to-end. Before the fix the raw "…dk" target had tmux
-// parsing ".dk" as a window/pane, so every -t operation failed.
-func TestCreateWorktreeWindow_DottedSessionName(t *testing.T) {
+// TestEnsureSession_DottedSessionName is the regression guard for the
+// "creating a workspace for cloudnativedenmark.dk breaks" bug. tmux rewrites
+// '.' and ':' to '_' in session names, so a raw "…dk" target has tmux parsing
+// ".dk" as a window/pane and every -t operation fails. With the
+// SessionName-normalized identity, EnsureSession resolves cleanly end-to-end.
+func TestEnsureSession_DottedSessionName(t *testing.T) {
 	srv := testtmux.New(t)
 
 	session := workspace.SessionName("cloudnativedenmark/cloudnativedenmark.dk")
@@ -23,8 +23,8 @@ func TestCreateWorktreeWindow_DottedSessionName(t *testing.T) {
 		t.Fatalf("SessionName left a tmux delimiter in %q", session)
 	}
 
-	repoPath := t.TempDir()
-	created, err := workspace.EnsureSession(srv.Client, session, repoPath, "main")
+	root := t.TempDir()
+	created, err := workspace.EnsureSession(srv.Client, session, root, "agent")
 	if err != nil {
 		t.Fatalf("EnsureSession: %v", err)
 	}
@@ -37,38 +37,19 @@ func TestCreateWorktreeWindow_DottedSessionName(t *testing.T) {
 		t.Fatalf("session %q not resolvable after EnsureSession", session)
 	}
 
-	wid, err := workspace.CreateWorktreeWindow(srv.Client, workspace.WorktreeWindowSpec{
-		Session:    session,
-		WtPath:     t.TempDir(),
-		WindowName: "feat/add-sponsor-logos",
-		Kind:       "worktree",
-	})
-	if err != nil {
-		t.Fatalf("CreateWorktreeWindow: %v", err)
+	// @workspace_id (the Listable marker) is stamped and equals the session.
+	got, _ := srv.Client.Run("show-option", "-t", session, "-qv", workspace.OptWorkspaceID)
+	if strings.TrimSpace(string(got)) != session {
+		t.Fatalf("@workspace_id = %q, want %q", strings.TrimSpace(string(got)), session)
 	}
-	if !strings.HasPrefix(wid, "@") {
-		t.Fatalf("window id is not a tmux @ID (poisoned target?): %q", wid)
-	}
-}
 
-// TestCreateWorktreeWindow_MissingSessionReturnsError guards Bug B: on a failed
-// new-window, tmux returns its stderr AS the command output. The old code
-// captured that "can't find session: …" text as the window @ID and fed it into
-// every downstream -t target. A failed creation must surface an error and an
-// empty id instead.
-func TestCreateWorktreeWindow_MissingSessionReturnsError(t *testing.T) {
-	srv := testtmux.New(t)
-
-	wid, err := workspace.CreateWorktreeWindow(srv.Client, workspace.WorktreeWindowSpec{
-		Session:    "vyrwu/does-not-exist",
-		WtPath:     t.TempDir(),
-		WindowName: "feat/x",
-		Kind:       "worktree",
-	})
-	if err == nil {
-		t.Fatalf("expected error for missing session, got wid=%q", wid)
+	// Window 1 is marked the driver.
+	wid, err := srv.Client.DisplayMessageAt(session+":1", "#{window_id}")
+	if err != nil || wid == "" {
+		t.Fatalf("resolve window 1: %v", err)
 	}
-	if wid != "" {
-		t.Fatalf("window id must be empty on failure, got %q (error text used as id?)", wid)
+	drv, _ := srv.Client.GetWindowOption(wid, workspace.OptWorkspaceDriver)
+	if drv != "1" {
+		t.Fatalf("@workspace_driver on window 1 = %q, want 1", drv)
 	}
 }

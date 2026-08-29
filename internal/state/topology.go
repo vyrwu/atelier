@@ -2,6 +2,7 @@ package state
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -40,18 +41,20 @@ type Session struct {
 // delivery ever changes (a daemon), only the capture layer changes, not this
 // model or the validators over it.
 type Window struct {
-	SessionID     string // $N
-	WindowID      string // @N
-	Name          string // window name (the branch, for workspace windows)
-	RepoPath      string // @repo_path (session-scoped; empty for multi-repo/raw)
-	WorkspaceKind string // @ai_workspace_kind ("", "auto", "multi-repo", …)
-	Attention     bool   // @needs_attention == "1"
-	Recap         string // @attention_recap — the AI summary
-	Tag           string // @workspace_tag
-	ForgeState    string // @forge_state
-	// PaneCwd is the window's active pane cwd (pane_current_path). For a
-	// workspace window this is normally the git worktree, but the user can cd
-	// elsewhere — so it's the active cwd, not authoritatively the worktree.
+	SessionID   string // $N
+	WindowID    string // @N
+	WindowIndex int    // #{window_index} — the driver is the lowest index
+	Name        string // window name (the driver title, for workspace windows)
+	WorkspaceID string // @workspace_id (session-scoped; the workspace marker)
+	Root        string // @workspace_root (session-scoped; the dedicated dir)
+	RepoPath    string // @repo_path (session-scoped; optional single-repo hint)
+	Driver      bool   // @workspace_driver == "1" — the one agent window
+	Attention   bool   // @needs_attention == "1"
+	Recap       string // @attention_recap — the AI summary
+	Tag         string // @workspace_tag
+	ForgeState  string // @forge_state
+	// PaneCwd is the window's active pane cwd (pane_current_path). For a driver
+	// window this is normally the workspace root, but the user can cd elsewhere.
 	// PaneCwdLive is os.Stat'd in CaptureTopology so Validate stays pure over
 	// the captured bool.
 	PaneCwd     string
@@ -124,31 +127,39 @@ const clientListFormat = "#{client_name}|#{session_id}|#{window_id}|#{client_tty
 const winSep = "\x1f"
 
 // windowCaptureFormat reads every window's structural ids + the kernel-owned
-// capability state in a single list-windows call. @repo_path is session-scoped
-// but resolves through inheritance in a window's format context.
+// capability state in a single list-windows call. The @workspace_* / @repo_path
+// options are session-scoped but resolve through inheritance in a window's
+// format context.
 var windowCaptureFormat = strings.Join([]string{
-	"#{session_id}", "#{window_id}", "#{window_name}",
-	"#{@repo_path}", "#{@ai_workspace_kind}", "#{@needs_attention}",
-	"#{@attention_recap}", "#{@workspace_tag}", "#{@forge_state}",
+	"#{session_id}", "#{window_id}", "#{window_index}", "#{window_name}",
+	"#{@workspace_id}", "#{@workspace_root}", "#{@repo_path}", "#{@workspace_driver}",
+	"#{@needs_attention}", "#{@attention_recap}", "#{@workspace_tag}", "#{@forge_state}",
 	"#{pane_current_path}",
 }, winSep)
 
 func parseWindow(line string) (Window, bool) {
 	f := strings.Split(line, winSep)
-	if len(f) < 10 {
+	if len(f) < 13 {
 		return Window{}, false
 	}
+	idx := 0
+	if n, err := strconv.Atoi(strings.TrimSpace(f[2])); err == nil {
+		idx = n
+	}
 	w := Window{
-		SessionID:     f[0],
-		WindowID:      f[1],
-		Name:          f[2],
-		RepoPath:      f[3],
-		WorkspaceKind: f[4],
-		Attention:     strings.TrimSpace(f[5]) == "1",
-		Recap:         f[6],
-		Tag:           f[7],
-		ForgeState:    f[8],
-		PaneCwd:       f[9],
+		SessionID:   f[0],
+		WindowID:    f[1],
+		WindowIndex: idx,
+		Name:        f[3],
+		WorkspaceID: f[4],
+		Root:        f[5],
+		RepoPath:    f[6],
+		Driver:      strings.TrimSpace(f[7]) == "1",
+		Attention:   strings.TrimSpace(f[8]) == "1",
+		Recap:       f[9],
+		Tag:         f[10],
+		ForgeState:  f[11],
+		PaneCwd:     f[12],
 	}
 	w.PaneCwdLive = paneCwdLive(w.PaneCwd)
 	return w, true

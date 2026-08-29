@@ -18,28 +18,30 @@ import (
 // Layout is the resolved filesystem layout of a hydrated sandbox under a
 // single root. Every path is disposable — delete Root and it's gone.
 type Layout struct {
-	Root         string
-	CodeRoot     string // <root>/code/github  (owner/repo checkouts)
-	WorktreeRoot string // <root>/code/.worktrees/github
-	MultiRoot    string // <root>/code  (non-git; safe launch cwd)
-	Origins      string // <root>/origins  (bare origins)
-	ConfigHome   string // <root>/config  (XDG_CONFIG_HOME)
-	CacheHome    string // <root>/cache   (XDG_CACHE_HOME)
-	BinDir       string // <root>/bin
-	GitConfig    string // <root>/gitconfig
+	Root          string
+	CodeRoot      string // <root>/code/github  (owner/repo checkouts)
+	WorktreeRoot  string // <root>/code/.worktrees/github
+	MultiRoot     string // <root>/code  (non-git; safe launch cwd)
+	WorkspaceRoot string // <root>/ateliers  (intent-workspace roots; worktree symlinks)
+	Origins       string // <root>/origins  (bare origins)
+	ConfigHome    string // <root>/config  (XDG_CONFIG_HOME)
+	CacheHome     string // <root>/cache   (XDG_CACHE_HOME)
+	BinDir        string // <root>/bin
+	GitConfig     string // <root>/gitconfig
 }
 
 func newLayout(root string) *Layout {
 	return &Layout{
-		Root:         root,
-		CodeRoot:     filepath.Join(root, "code", "github"),
-		WorktreeRoot: filepath.Join(root, "code", ".worktrees", "github"),
-		MultiRoot:    filepath.Join(root, "code"),
-		Origins:      filepath.Join(root, "origins"),
-		ConfigHome:   filepath.Join(root, "config"),
-		CacheHome:    filepath.Join(root, "cache"),
-		BinDir:       filepath.Join(root, "bin"),
-		GitConfig:    filepath.Join(root, "gitconfig"),
+		Root:          root,
+		CodeRoot:      filepath.Join(root, "code", "github"),
+		WorktreeRoot:  filepath.Join(root, "code", ".worktrees", "github"),
+		MultiRoot:     filepath.Join(root, "code"),
+		WorkspaceRoot: filepath.Join(root, "ateliers"),
+		Origins:       filepath.Join(root, "origins"),
+		ConfigHome:    filepath.Join(root, "config"),
+		CacheHome:     filepath.Join(root, "cache"),
+		BinDir:        filepath.Join(root, "bin"),
+		GitConfig:     filepath.Join(root, "gitconfig"),
 	}
 }
 
@@ -59,6 +61,7 @@ func (l *Layout) Env() []string {
 		"ATELIER_CODE_ROOT":       l.CodeRoot,
 		"ATELIER_WORKTREE_ROOT":   l.WorktreeRoot,
 		"ATELIER_MULTI_REPO_ROOT": l.MultiRoot,
+		"ATELIER_WORKSPACE_ROOT":  l.WorkspaceRoot,
 	}
 	out := make([]string, 0, len(os.Environ())+len(set))
 	for _, e := range os.Environ() {
@@ -85,10 +88,11 @@ func (l *Layout) Env() []string {
 // hydration.
 func (l *Layout) apply() error {
 	for k, v := range map[string]string{
-		"XDG_CONFIG_HOME":   l.ConfigHome,
-		"XDG_CACHE_HOME":    l.CacheHome,
-		"GIT_CONFIG_GLOBAL": l.GitConfig,
-		"GIT_CONFIG_SYSTEM": os.DevNull,
+		"XDG_CONFIG_HOME":        l.ConfigHome,
+		"XDG_CACHE_HOME":         l.CacheHome,
+		"GIT_CONFIG_GLOBAL":      l.GitConfig,
+		"GIT_CONFIG_SYSTEM":      os.DevNull,
+		"ATELIER_WORKSPACE_ROOT": l.WorkspaceRoot,
 	} {
 		if err := os.Setenv(k, v); err != nil {
 			return fmt.Errorf("setenv %s: %w", k, err)
@@ -112,7 +116,7 @@ func Hydrate(root string, sc *Scenario, opts Options) (*Layout, error) {
 		opts.AI = "claude"
 	}
 	l := newLayout(root)
-	for _, d := range []string{l.CodeRoot, l.WorktreeRoot, l.Origins, l.ConfigHome, l.CacheHome, l.BinDir} {
+	for _, d := range []string{l.CodeRoot, l.WorktreeRoot, l.WorkspaceRoot, l.Origins, l.ConfigHome, l.CacheHome, l.BinDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir %s: %w", d, err)
 		}
@@ -168,6 +172,7 @@ func (l *Layout) writeAtelierConfig(ai string) error {
 code_root       = %q
 worktree_root   = %q
 multi_repo_root = %q
+workspace_root  = %q
 
 [ai]
 provider = %q
@@ -186,7 +191,7 @@ icon         = "枝"
 accent_color = "140"
 title        = "Lazygit"
 description  = "Per-workspace lazygit"
-`, l.CodeRoot, l.WorktreeRoot, l.MultiRoot, ai)
+`, l.CodeRoot, l.WorktreeRoot, l.MultiRoot, l.WorkspaceRoot, ai)
 	return os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o644)
 }
 
@@ -351,70 +356,113 @@ func (l *Layout) buildWorktree(slug, work string, wt Worktree) error {
 // seedState builds the statestore.State from the scenario and Saves it,
 // and writes the mock-forge fixture the forge adapter classifies from.
 // XDG_CACHE_HOME is already set (apply), so Save writes into the sandbox.
+//
+// Each scenario workspace becomes one statestore.Workspace (an intent): a
+// dedicated Root under the sandbox workspace root, its declared repo
+// worktrees symlinked in via workspace.LinkWorktree, one driver window,
+// and its PRs. The PRs are also written to the mock-forge fixture keyed by
+// the exact dir the forge sweep queries (repoQueryDir), so the offline
+// refresh reproduces them.
 func (l *Layout) seedState(sc *Scenario) error {
 	now := time.Now().Unix()
 	st := &statestore.State{
 		CapturedAt:        now,
 		LastActiveSession: sc.LastActive,
 	}
-	// cwd -> forge state, consumed by the mock forge adapter (mock.Status
-	// looks a workspace's Cwd up here). This is the real source of truth
-	// for the PR badge; the refresh reads it offline, no `gh`.
-	forgeFixture := map[string]string{}
+	// repoQueryDir -> the PRs the mock forge should return for that dir. The
+	// forge sweep runs `List(dir)` where dir is a worktree's real path (or
+	// <codeRoot>/<repo> when the repo has no worktree in the workspace); this
+	// map mirrors that key so the offline refresh reproduces every PR.
+	forgeFixture := map[string][]mock.ForgePR{}
 
 	for _, ws := range sc.Workspaces {
+		root := filepath.Join(l.WorkspaceRoot, ws.Slug)
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return fmt.Errorf("workspace %s: mkdir root: %w", ws.Slug, err)
+		}
 		w := statestore.Workspace{
-			SessionName: ws.Session,
-			RepoPath:    filepath.Join(l.CodeRoot, ws.RepoSlug),
-			Kind:        ws.Kind,
+			SessionName: ws.Slug,
+			Title:       ws.Title,
+			Intent:      ws.Intent,
+			Summary:     ws.Summary,
+			Tag:         ws.Tag,
+			Root:        root,
 			CreatedAt:   ago(now, time.Duration(ws.CreatedAt)),
 		}
-		for _, win := range ws.Windows {
-			cwd := filepath.Join(l.CodeRoot, ws.RepoSlug)
-			if win.Worktree != "" {
-				cwd = filepath.Join(l.WorktreeRoot, ws.RepoSlug, win.Worktree)
+
+		// Symlink each declared worktree into the workspace root so the sandbox
+		// shows the real <root>/<repo>/<branch> layout. wtByRepoBranch lets PRs
+		// resolve their query dir back to the real worktree path.
+		wtByRepoBranch := map[string]string{} // "repo\x00branch" -> real worktree path
+		wtByRepo := map[string]string{}       // repo -> any worktree path in this ws
+		for _, wt := range ws.Worktrees {
+			wtPath := filepath.Join(l.WorktreeRoot, wt.RepoSlug, wt.Branch)
+			link, err := workspace.LinkWorktree(root, wtPath, wt.RepoSlug, wt.Branch)
+			if err != nil {
+				return fmt.Errorf("workspace %s: link worktree %s@%s: %w", ws.Slug, wt.RepoSlug, wt.Branch, err)
 			}
-			meta := cloneMeta(win.Metadata)
-			ensure := func() {
-				if meta == nil {
-					meta = map[string]string{}
-				}
-			}
-			if win.PR != "" {
-				forgeFixture[cwd] = win.PR
-				// Also seed @forge_state directly so the badge renders on the
-				// very first picker open, before the (async, offline) refresh
-				// re-affirms it from the fixture.
-				ensure()
-				meta["forge.state"] = win.PR
-			}
-			if win.Tag != "" {
-				// workspace.tag metadata → @workspace_tag on restore (the
-				// picker's tag pill + tag-group sort).
-				ensure()
-				meta[workspace.TagMetadataKey] = win.Tag
-			}
-			// Per-window age: use the window's own createdAt, else inherit
-			// the workspace-level one so EVERY window gets a stamped
-			// @workspace_created_ts on restore (not just the session's first).
-			winCreated := time.Duration(win.CreatedAt)
-			if winCreated == 0 {
-				winCreated = time.Duration(ws.CreatedAt)
-			}
-			sw := statestore.Window{
-				Name:      win.Name,
-				Cwd:       cwd,
-				Branch:    win.Branch,
-				Attention: win.Attention,
-				Recap:     win.Recap,
-				CreatedAt: ago(now, winCreated),
-				Metadata:  meta,
-			}
-			if win.Recap != "" {
-				sw.RecapTs = ago(now, time.Duration(win.RecapAge))
-			}
-			w.Windows = append(w.Windows, sw)
+			w.Worktrees = append(w.Worktrees, statestore.Worktree{
+				Repo:   wt.RepoSlug,
+				Branch: wt.Branch,
+				Path:   wtPath,
+				Link:   link,
+			})
+			wtByRepoBranch[wt.RepoSlug+"\x00"+wt.Branch] = wtPath
+			wtByRepo[wt.RepoSlug] = wtPath
 		}
+
+		// Single-repo workspace: seed the RepoPath convenience hint at the
+		// repo's code-root checkout. A multi-repo workspace spans repos, so no
+		// single hint applies.
+		if len(ws.Worktrees) == 1 {
+			w.RepoPath = filepath.Join(l.CodeRoot, ws.Worktrees[0].RepoSlug)
+		}
+
+		// PRs: onto the workspace record AND into the forge fixture at the dir
+		// the sweep will query for that repo.
+		for _, pr := range ws.PRs {
+			w.PRs = append(w.PRs, statestore.PR{
+				Number:         pr.Number,
+				Repo:           pr.RepoSlug,
+				Title:          pr.Title,
+				State:          pr.State,
+				CI:             pr.CI,
+				ReviewDecision: pr.ReviewDecision,
+				Comments:       pr.Comments,
+				URL:            pr.URL,
+				Branch:         pr.Branch,
+				UpdatedAt:      ago(now, time.Duration(ws.CreatedAt)),
+			})
+			key := l.forgeQueryDir(pr, wtByRepoBranch, wtByRepo)
+			forgeFixture[key] = append(forgeFixture[key], mock.ForgePR{
+				Number:         pr.Number,
+				Repo:           pr.RepoSlug,
+				Title:          pr.Title,
+				State:          pr.State,
+				CI:             pr.CI,
+				ReviewDecision: pr.ReviewDecision,
+				Comments:       pr.Comments,
+				URL:            pr.URL,
+				Branch:         pr.Branch,
+			})
+		}
+
+		// The driver window: the agent, running from the workspace root.
+		driver := statestore.Window{
+			Name:      driverWindowName(ws.Slug),
+			Cwd:       root,
+			Attention: ws.Attention,
+			Recap:     ws.Recap,
+			CreatedAt: ago(now, time.Duration(ws.CreatedAt)),
+		}
+		if ws.Recap != "" {
+			driver.RecapTs = ago(now, time.Duration(ws.RecapAge))
+		}
+		if ws.Intent != "" {
+			driver.Metadata = map[string]string{"ai.prompt": ws.Intent}
+		}
+		w.Windows = append(w.Windows, driver)
+
 		st.Workspaces = append(st.Workspaces, w)
 	}
 	if err := l.writeMockForgeFixture(forgeFixture); err != nil {
@@ -423,9 +471,34 @@ func (l *Layout) seedState(sc *Scenario) error {
 	return statestore.Save(st)
 }
 
-// writeMockForgeFixture writes the cwd->state map the mock forge adapter
-// reads (mock.MockForgeFixturePath, under XDG_CONFIG_HOME/atelier).
-func (l *Layout) writeMockForgeFixture(fixture map[string]string) error {
+// forgeQueryDir returns the dir the forge sweep (repoQueryDir) will run
+// `List` in for a PR's repo: the real worktree path of the worktree that
+// backs the PR (matched by branch, else any worktree for the repo), else
+// the repo's code-root checkout when the workspace has no worktree for it.
+func (l *Layout) forgeQueryDir(pr WsPR, byRepoBranch, byRepo map[string]string) string {
+	if pr.Branch != "" {
+		if p, ok := byRepoBranch[pr.RepoSlug+"\x00"+pr.Branch]; ok {
+			return p
+		}
+	}
+	if p, ok := byRepo[pr.RepoSlug]; ok {
+		return p
+	}
+	return filepath.Join(l.CodeRoot, pr.RepoSlug)
+}
+
+// driverWindowName is the driver window's tmux name: the last segment of the
+// workspace slug (a readable label), or "agent" when the slug is empty.
+func driverWindowName(slug string) string {
+	if slug == "" {
+		return "agent"
+	}
+	return filepath.Base(slug)
+}
+
+// writeMockForgeFixture writes the repoQueryDir->PRs map the mock forge
+// adapter reads (mock.MockForgeFixturePath, under XDG_CONFIG_HOME/atelier).
+func (l *Layout) writeMockForgeFixture(fixture map[string][]mock.ForgePR) error {
 	data, err := json.MarshalIndent(fixture, "", "  ")
 	if err != nil {
 		return err
@@ -438,17 +511,6 @@ func ago(now int64, d time.Duration) int64 {
 		return 0
 	}
 	return now - int64(d.Seconds())
-}
-
-func cloneMeta(m map[string]string) map[string]string {
-	if m == nil {
-		return nil
-	}
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
 }
 
 // --- small git + fs helpers -------------------------------------------------

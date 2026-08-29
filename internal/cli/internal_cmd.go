@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -35,7 +37,64 @@ func InternalCommand() *cobra.Command {
 	c.AddCommand(internalStampStatuslineCmd())
 	c.AddCommand(internalStampLastActiveCmd())
 	c.AddCommand(internalClipboardCopyCmd())
+	c.AddCommand(internalWelcomeCmd())
 	return c
+}
+
+// welcomeDebounce is how long after a welcome-popup open we suppress another,
+// so a burst of client-attached events (reattach) can't stack M-n popups.
+const welcomeDebounce = 5
+
+// internalWelcomeCmd is the launcher default screen (WS-3): when the bundled
+// runtime has NO workspaces yet, open the M-n intent creator instead of leaving
+// the user on a bare launcher shell. Fired from the generated config's
+// client-attached hook; a no-op the moment any workspace exists, so it stops
+// after the first one is created.
+func internalWelcomeCmd() *cobra.Command {
+	var socket string
+	c := &cobra.Command{
+		Use:    "welcome",
+		Short:  "internal: open the M-n creator when no workspaces exist yet",
+		Hidden: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			h := tmuxhost.New(socket)
+			if workspaceCount(h) > 0 {
+				return nil // there are workspaces — the launcher resumes one
+			}
+			// Debounce so a reattach burst doesn't stack popups.
+			if ts, _ := h.ShowGlobalOption("@atelier_welcome_ts"); strings.TrimSpace(ts) != "" {
+				if last, err := strconv.ParseInt(strings.TrimSpace(ts), 10, 64); err == nil {
+					if time.Now().Unix()-last < welcomeDebounce {
+						return nil
+					}
+				}
+			}
+			_ = h.SetGlobalOption("@atelier_welcome_ts", strconv.FormatInt(time.Now().Unix(), 10))
+			// Same picker geometry as the M-n binding.
+			_, err := h.Run("display-popup", "-B", "-w70%", "-h70%", "-E", "atelier tools workspaces new")
+			return err
+		},
+	}
+	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
+	return c
+}
+
+// workspaceCount returns how many listable workspaces (windows carrying a
+// @workspace_id, excluding popup sessions) currently exist. Pure over tmux.
+func workspaceCount(h *tmuxhost.Client) int {
+	out, err := h.Run("list-windows", "-a", "-F", "#{session_name}|#{@workspace_id}")
+	if err != nil {
+		return 0
+	}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 || parts[1] == "" || strings.HasPrefix(parts[0], "_") {
+			continue
+		}
+		seen[parts[0]] = true
+	}
+	return len(seen)
 }
 
 // internalClipboardCopyCmd is the copy-mode-vi yank target. tmux's

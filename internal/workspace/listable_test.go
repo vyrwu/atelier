@@ -3,25 +3,22 @@ package workspace
 import "testing"
 
 // TestListable locks the single inclusion predicate shared by the M-s picker
-// and the status-line attention rollup. A window is listable when it has a
-// repo path (worktree kind) OR an AI workspace-kind (repo-less multi-repo);
-// with neither it is a raw tmux window or a spent popup and must be invisible
-// to both.
+// and the status-line attention rollup. In the intent-workspace model the
+// marker is the session's @workspace_id (resolved at window scope via tmux
+// option inheritance): a window with it belongs to a real workspace; a window
+// without it is a raw shell or a spent popup and must be invisible to both.
 func TestListable(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		repoPath string
-		kind     string
-		want     bool
+		name        string
+		workspaceID string
+		want        bool
 	}{
-		{"worktree has repo path", "/home/u/code/repo", "", true},
-		{"multi-repo has only kind", "", "multi-repo", true},
-		{"both set", "/home/u/code/repo", "multi-repo", true},
-		{"neither — raw window or spent popup", "", "", false},
+		{"has @workspace_id", "vyrwu/atelier", true},
+		{"empty — raw window or spent popup", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Listable(tc.repoPath, tc.kind); got != tc.want {
-				t.Errorf("Listable(%q, %q) = %v, want %v", tc.repoPath, tc.kind, got, tc.want)
+			if got := Listable(tc.workspaceID); got != tc.want {
+				t.Errorf("Listable(%q) = %v, want %v", tc.workspaceID, got, tc.want)
 			}
 		})
 	}

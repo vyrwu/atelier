@@ -11,21 +11,17 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// TestSetTag_OptionAndCacheMirror locks in the workspace-tag primitive:
-// SetTag writes @workspace_tag on the window (source of truth), mirrors
-// it to the statestore cache under TagMetadataKey (so it survives a tmux
-// restart), replaces on re-tag, and clears both on empty.
+// TestSetTag_OptionAndCacheMirror locks in the workspace-tag primitive: SetTag
+// is SESSION-scoped now — it writes @workspace_tag on the session (source of
+// truth, resolved at window scope via inheritance), mirrors it to the
+// statestore Workspace.Tag (so it survives a tmux restart), replaces on re-tag,
+// and clears both on empty.
 func TestSetTag_OptionAndCacheMirror(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	srv := testtmux.New(t)
 	srv.NewSession("vyrwu/demo")
 	time.Sleep(150 * time.Millisecond)
 
-	// Atelier-managed: stamp @repo_path so the cache mirror isn't skipped
-	// (PersistWindowMetadata refuses to pollute non-atelier sessions).
-	if _, err := srv.Client.Run("set-option", "-t", "vyrwu/demo", "@repo_path", "/tmp/demo"); err != nil {
-		t.Fatalf("stamp repo_path: %v", err)
-	}
 	wid, err := srv.Client.DisplayMessageAt("vyrwu/demo", "#{window_id}")
 	if err != nil || wid == "" {
 		t.Fatalf("window id: %v", err)
@@ -35,62 +31,63 @@ func TestSetTag_OptionAndCacheMirror(t *testing.T) {
 		t.Fatalf("window name: %v", err)
 	}
 
-	// Seed the cache workspace with RepoPath — matches reality (a workspace
-	// is registered before it's tagged) and keeps the record past the
-	// statestore's atelier-managed Save filter.
+	// Register the workspace first (with identity) so the cache record survives
+	// the statestore's atelier-managed Save filter — a bare Tag alone wouldn't.
 	workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
 		Session:    "vyrwu/demo",
-		RepoPath:   "/tmp/demo",
-		Kind:       "worktree",
+		Title:      "demo",
+		Root:       "/tmp/demo",
 		WindowName: wname,
 		Cwd:        "/tmp/demo",
-		Branch:     wname,
 	})
 
-	if err := workspace.SetTag(srv.Client, wid, "client-x"); err != nil {
+	if err := workspace.SetTag(srv.Client, "vyrwu/demo", "client-x"); err != nil {
 		t.Fatalf("SetTag: %v", err)
 	}
-	if got, _ := srv.Client.GetWindowOption(wid, workspace.OptWorkspaceTag); got != "client-x" {
-		t.Errorf("@workspace_tag = %q, want client-x", got)
+	// The tag is a SESSION option that resolves at window scope via tmux
+	// inheritance (the picker reads it per row). Assert via the
+	// inheritance-aware read.
+	if got := windowScopeOption(t, srv, wid, workspace.OptWorkspaceTag); got != "client-x" {
+		t.Errorf("@workspace_tag (window-scope inheritance) = %q, want client-x", got)
 	}
-	if got := cachedTag(t, "vyrwu/demo", wname); got != "client-x" {
-		t.Errorf("cached workspace.tag = %q, want client-x", got)
+	if got := cachedTag(t, "vyrwu/demo"); got != "client-x" {
+		t.Errorf("cached workspace Tag = %q, want client-x", got)
 	}
 
-	// Re-tag replaces the previous value (one tag per window).
-	if err := workspace.SetTag(srv.Client, wid, "infra"); err != nil {
+	// Re-tag replaces the previous value (one tag per workspace).
+	if err := workspace.SetTag(srv.Client, "vyrwu/demo", "infra"); err != nil {
 		t.Fatalf("re-tag: %v", err)
 	}
-	if got, _ := srv.Client.GetWindowOption(wid, workspace.OptWorkspaceTag); got != "infra" {
+	if got := windowScopeOption(t, srv, wid, workspace.OptWorkspaceTag); got != "infra" {
 		t.Errorf("re-tag @workspace_tag = %q, want infra", got)
 	}
+	if got := cachedTag(t, "vyrwu/demo"); got != "infra" {
+		t.Errorf("re-tag cached Tag = %q, want infra", got)
+	}
 
-	// Empty clears the option.
-	if err := workspace.SetTag(srv.Client, wid, ""); err != nil {
+	// Empty clears the option and the cache mirror.
+	if err := workspace.SetTag(srv.Client, "vyrwu/demo", ""); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
-	if got, _ := srv.Client.GetWindowOption(wid, workspace.OptWorkspaceTag); got != "" {
+	if got := windowScopeOption(t, srv, wid, workspace.OptWorkspaceTag); got != "" {
 		t.Errorf("after clear @workspace_tag = %q, want empty", got)
+	}
+	if got := cachedTag(t, "vyrwu/demo"); got != "" {
+		t.Errorf("after clear cached Tag = %q, want empty", got)
 	}
 }
 
-// cachedTag reads the persisted workspace.tag metadata for a window from
-// the on-disk statestore.
-func cachedTag(t *testing.T, session, window string) string {
+// cachedTag reads the persisted Workspace.Tag for a session from the on-disk
+// statestore.
+func cachedTag(t *testing.T, session string) string {
 	t.Helper()
 	st, err := statestore.Load()
 	if err != nil || st == nil {
 		t.Fatalf("statestore.Load: %v", err)
 	}
-	for _, ws := range st.Workspaces {
-		if ws.SessionName != session {
-			continue
-		}
-		for _, w := range ws.Windows {
-			if w.Name == window {
-				return w.Metadata[workspace.TagMetadataKey]
-			}
-		}
+	ws := st.FindWorkspace(session)
+	if ws == nil {
+		return ""
 	}
-	return ""
+	return ws.Tag
 }

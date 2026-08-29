@@ -22,11 +22,14 @@ var Manifest = &manifest.Manifest{
 		Invoke: "open",
 	},
 	Bindings: []manifest.Binding{
-		// M-c reopens the context picker so the user can switch context
+		// M-k reopens the context picker so the user can switch context
 		// from inside K9s (or anywhere — root and popup tables). The
 		// switch subcommand respawns the K9s popup-session on a real
 		// context change; same-context is a no-op + attach.
-		{Key: "M-c", Title: "Switch K9s context", Style: manifest.StylePicker, Invoke: "switch", AlsoInPopup: true},
+		//
+		// Was M-c before the v1 redesign; M-c is now "List Changes" (the
+		// cross-repo PR view). See REDESIGN.md §5 binding changes.
+		{Key: "M-k", Title: "Switch K9s context", Style: manifest.StylePicker, Invoke: "switch", AlsoInPopup: true},
 	},
 	UI: &manifest.UI{
 		Icon:        "胡",

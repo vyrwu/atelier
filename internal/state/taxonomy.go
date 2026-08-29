@@ -143,14 +143,15 @@ func Digits(s string) string {
 	return string(out)
 }
 
-// Listable reports whether a window with the given @repo_path /
-// @ai_workspace_kind is a real workspace — one the M-s picker lists and the
-// attention rollup counts. A window with neither is a raw shell, a spent
-// popup, or a workspace that lost its metadata: not something to route
-// attention to. Single owner of the predicate; workspace.Listable delegates
-// here so the picker, the rollup, and the invariants can't disagree.
-func Listable(repoPath, workspaceKind string) bool {
-	return repoPath != "" || workspaceKind != ""
+// Listable reports whether a window belongs to a real workspace — one the M-s
+// picker lists and the attention rollup counts. The marker is the session's
+// @workspace_id (resolved at window scope via tmux option inheritance). A
+// window without it is a raw shell, a spent popup, or a workspace that lost
+// its metadata: not something to route attention to. Single owner of the
+// predicate; workspace.Listable delegates here so the picker, the rollup, and
+// the invariants can't disagree.
+func Listable(workspaceID string) bool {
+	return workspaceID != ""
 }
 
 func allDigits(s string) bool {

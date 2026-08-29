@@ -28,7 +28,6 @@ func TestConcurrentWrites_DoNotClobberEachOther(t *testing.T) {
 		Workspaces: []Workspace{{
 			SessionName: "ws/test",
 			RepoPath:    "/tmp/fake",
-			Kind:        "default-branch",
 		}},
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -118,7 +117,6 @@ func TestConcurrentWrites_RemoveRenameDoNotClobberMetadata(t *testing.T) {
 			Workspaces: []Workspace{{
 				SessionName: "ws/test",
 				RepoPath:    "/tmp/fake",
-				Kind:        "worktree",
 				Windows: []Window{
 					{Name: "keep"},
 					{Name: "old"},

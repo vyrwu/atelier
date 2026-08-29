@@ -10,19 +10,19 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// TestSetRecap_WriteThroughToStatestore locks in FR-5.2: SetRecap
-// stamps both the tmux window option AND the on-disk cache, so the
-// recap survives `tmux kill-server`. This is the load-bearing
-// persistence guarantee for the entire restore feature.
+// TestSetRecap_WriteThroughToStatestore locks in FR-5.2: SetRecap stamps both
+// the tmux window option AND the on-disk cache, so the recap survives `tmux
+// kill-server`. This is the load-bearing persistence guarantee for restore.
 func TestSetRecap_WriteThroughToStatestore(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	srv := testtmux.New(t)
 	srv.NewSession("vyrwu/atelier")
-	// Mark the session as atelier-managed so the write-through scope
-	// check passes (write-through skips foreign sessions).
-	if _, err := srv.Client.Run("set-option", "-t", "vyrwu/atelier", "@repo_path", "/fake/repo"); err != nil {
-		t.Fatalf("seed @repo_path: %v", err)
+	// Mark the session atelier-managed (stamp @workspace_id) so the
+	// write-through scope check passes (it skips foreign sessions).
+	if _, err := srv.Client.Run("set-option", "-t", "vyrwu/atelier",
+		workspace.OptWorkspaceID, "vyrwu/atelier"); err != nil {
+		t.Fatalf("seed @workspace_id: %v", err)
 	}
 	out, err := srv.Client.Run("list-windows", "-t", "=vyrwu/atelier", "-F", "#{window_id}")
 	if err != nil {
@@ -33,6 +33,14 @@ func TestSetRecap_WriteThroughToStatestore(t *testing.T) {
 	if wid == "" {
 		t.Fatal("list-windows returned empty window id")
 	}
+	// Register the workspace first (real flows register at creation), giving
+	// the record identity so it survives the statestore's atelier-managed
+	// Save filter — a window mutation alone carries no identity.
+	wname, _ := srv.Client.DisplayMessageAt(wid, "#{window_name}")
+	workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
+		Session: "vyrwu/atelier", Title: "atelier", Root: "/tmp/atelier",
+		WindowName: wname, Cwd: "/tmp/atelier",
+	})
 
 	if err := workspace.SetRecap(srv.Client, wid, "wrote persistence layer"); err != nil {
 		t.Fatalf("SetRecap: %v", err)
@@ -43,8 +51,7 @@ func TestSetRecap_WriteThroughToStatestore(t *testing.T) {
 		t.Errorf("tmux @attention_recap not set: %q", v)
 	}
 
-	// Statestore side: the recap is in the cache, keyed by (session_name,
-	// window_name) — the tmux-id-agnostic persistent identity.
+	// Statestore side: keyed by (session_name, window_name).
 	s, err := statestore.Load()
 	if err != nil {
 		t.Fatalf("statestore.Load: %v", err)
@@ -66,21 +73,27 @@ func TestSetRecap_WriteThroughToStatestore(t *testing.T) {
 	}
 }
 
-// TestSetAttention_WriteThroughToStatestore locks in the parallel
-// guarantee for the attention flag — without persistence, a Claude
-// task that completed mid-restart leaves the user with no indication
-// that the recap is from before they last looked.
+// TestSetAttention_WriteThroughToStatestore locks in the parallel guarantee for
+// the attention flag — without persistence, a Claude task that completed
+// mid-restart leaves the user with no indication the recap is stale.
 func TestSetAttention_WriteThroughToStatestore(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	srv := testtmux.New(t)
 	srv.NewSession("repo-a")
-	if _, err := srv.Client.Run("set-option", "-t", "repo-a", "@repo_path", "/fake/repo"); err != nil {
-		t.Fatalf("seed @repo_path: %v", err)
+	if _, err := srv.Client.Run("set-option", "-t", "repo-a",
+		workspace.OptWorkspaceID, "repo-a"); err != nil {
+		t.Fatalf("seed @workspace_id: %v", err)
 	}
 	out, _ := srv.Client.Run("list-windows", "-t", "=repo-a", "-F", "#{window_id}")
 	wid := string(out)
 	wid = wid[:len(wid)-1]
+	// Register first so the record has identity and survives the Save filter.
+	wname, _ := srv.Client.DisplayMessageAt(wid, "#{window_name}")
+	workspace.RegisterCreatedWorkspace(workspace.NewWorkspaceInfo{
+		Session: "repo-a", Title: "repo-a", Root: "/tmp/repo-a",
+		WindowName: wname, Cwd: "/tmp/repo-a",
+	})
 
 	if err := workspace.SetAttention(srv.Client, wid, true); err != nil {
 		t.Fatalf("SetAttention: %v", err)

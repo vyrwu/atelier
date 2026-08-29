@@ -7,14 +7,13 @@ import (
 )
 
 // TestComputeDefaultBranch_FallsBackWhenSymrefMissing locks in the
-// fallback behavior: when origin/HEAD is NOT set as a local symref
-// (the case that hit us on the user's vyrwu/atelier repo — bg-pull
-// warmup silently skipped it forever), we probe origin/main and
-// origin/master via rev-parse.
+// fallback behavior used when materializing a worktree base branch: when
+// origin/HEAD is NOT set as a local symref (a repo cloned without
+// --set-upstream-head, or one where `git remote set-head` was never run),
+// computeDefaultBranch probes origin/main then origin/master.
 //
-// Without the fallback the user's freshness icon never appeared for
-// repos that were cloned without --set-upstream-head or via tooling
-// that didn't run `git remote set-head`.
+// AddWorktree relies on this to pick a sane base for a new worktree even
+// when origin/HEAD is absent.
 func TestComputeDefaultBranch_FallsBackWhenSymrefMissing(t *testing.T) {
 	root := t.TempDir()
 

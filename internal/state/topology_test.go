@@ -10,8 +10,8 @@ func TestCaptureTopology_CapturesWindowCapability(t *testing.T) {
 	h := newFakeHost()
 	h.setSessionsWithIDs("$1|vyrwu/atelier")
 	h.runOut["list-windows"] = strings.Join([]string{
-		windowLine("$1", "@2", "feat/x", "/repo", "auto", "1", "did a thing", "mytag", "open", liveDir),
-		windowLine("$1", "@3", "gone", "/repo", "", "0", "", "", "", "/no/such/dir/xyzzy"),
+		windowLine("$1", "@2", "1", "feat/x", "slug", liveDir, "/repo", "1", "1", "did a thing", "mytag", "open", liveDir),
+		windowLine("$1", "@3", "2", "gone", "", "", "/repo", "0", "0", "", "", "", "/no/such/dir/xyzzy"),
 	}, "\n")
 	h.setClients()
 
@@ -23,8 +23,9 @@ func TestCaptureTopology_CapturesWindowCapability(t *testing.T) {
 		t.Fatalf("windows = %d, want 2", len(top.Windows))
 	}
 	w0 := top.Windows[0]
-	if w0.Name != "feat/x" || w0.RepoPath != "/repo" || w0.WorkspaceKind != "auto" ||
-		!w0.Attention || w0.Recap != "did a thing" || w0.Tag != "mytag" || w0.ForgeState != "open" {
+	if w0.Name != "feat/x" || w0.WindowIndex != 1 || w0.WorkspaceID != "slug" || w0.Root != liveDir ||
+		w0.RepoPath != "/repo" || !w0.Driver || !w0.Attention || w0.Recap != "did a thing" ||
+		w0.Tag != "mytag" || w0.ForgeState != "open" {
 		t.Errorf("capability parse wrong: %+v", w0)
 	}
 	if !w0.PaneCwdLive {
@@ -39,14 +40,14 @@ func TestCaptureTopology_RecapWithPipeSurvives(t *testing.T) {
 	h := newFakeHost()
 	h.setSessionsWithIDs("$1|vyrwu/atelier")
 	// A recap containing '|' must not shift the fixed fields (why winSep is \x1f).
-	h.runOut["list-windows"] = windowLine("$1", "@2", "feat/x", "/repo", "auto", "1", "fixed A | improved B", "", "", "")
+	h.runOut["list-windows"] = windowLine("$1", "@2", "1", "feat/x", "slug", "/root", "/repo", "1", "1", "fixed A | improved B", "", "", "")
 	h.setClients()
 	top, err := CaptureTopology(h)
 	if err != nil {
 		t.Fatalf("CaptureTopology: %v", err)
 	}
 	w := top.Windows[0]
-	if w.RepoPath != "/repo" || w.WorkspaceKind != "auto" || !w.Attention || w.Recap != "fixed A | improved B" {
+	if w.RepoPath != "/repo" || w.WorkspaceID != "slug" || !w.Attention || w.Recap != "fixed A | improved B" {
 		t.Errorf("pipe in recap corrupted fields: %+v", w)
 	}
 }

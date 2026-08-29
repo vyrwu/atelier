@@ -19,13 +19,44 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/debuglog"
 	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 )
 
 const (
-	// Session-scoped options.
+	// Session-scoped workspace-identity options (the intent-workspace model).
+	// A workspace IS a tmux session; these stamp what it means.
+	//
+	//   OptWorkspaceID     — the stable slug; equals the session name. Its
+	//                        presence is THE marker that a session is an
+	//                        atelier-managed workspace (see Listable). Every
+	//                        atelier flow stamps it at creation.
+	//   OptWorkspaceTitle  — the human, renameable label (M-r edits this).
+	//   OptWorkspaceIntent — the free-text task the user typed at M-n.
+	//   OptWorkspaceRoot   — the workspace's dedicated dir (~/ateliers/<slug>)
+	//                        that worktrees symlink into and the agent runs from.
+	//
+	// They resolve when read at window scope too (tmux option inheritance:
+	// window → session → global), so the picker/topology read `#{@workspace_id}`
+	// per window and get the session's value.
+	OptWorkspaceID     = "@workspace_id"
+	OptWorkspaceTitle  = "@workspace_title"
+	OptWorkspaceIntent = "@workspace_intent"
+	OptWorkspaceRoot   = "@workspace_root"
+
+	// OptWorkspaceDriver marks the ONE driver-agent window in a workspace
+	// (window-scoped, "1"). The picker groups by session and renders the
+	// driver's attention/recap; the refresh loop writes attention only on the
+	// driver; the `multiple_drivers` invariant counts these. Inspection shells
+	// the user opens in the same session don't carry it, so they never count
+	// as a second agent or steal the workspace's attention slot.
+	OptWorkspaceDriver = "@workspace_driver"
+
+	// OptRepoPath is an optional single-repo hint (session-scoped). A workspace
+	// spans repos, so this is no longer identity — some flows read it to locate
+	// a repo for a one-repo workspace.
 	OptRepoPath = "@repo_path"
 
 	// Window-scoped options — attention + recap (FR-5.1 / 5.2).
@@ -42,20 +73,6 @@ const (
 	// Ephemeral: written by the refresh loop from the transcript classification,
 	// NOT persisted — a restart must not resurrect a stale "running".
 	OptAgentStatus = "@agent_status"
-
-	// Window-scoped options — async pull freshness (FR-7).
-	//   OptWorkspaceFreshnessTs — unix epoch of the most recent successful fetch.
-	//   OptWorkspaceBehind      — count of commits in origin/<default> not in this branch.
-	//   OptWorkspaceAhead       — count of commits in this branch not in origin/<default>.
-	//   OptWorkspacePullError   — short error message from the last failed _bg-pull.
-	//
-	// Set by `atelier tools workspaces _bg-pull` after every workspace
-	// open. Read by the status-line freshness segment and (later) by
-	// the picker freshness column.
-	OptWorkspaceFreshnessTs = "@workspace_freshness_ts"
-	OptWorkspaceBehind      = "@workspace_behind"
-	OptWorkspaceAhead       = "@workspace_ahead"
-	OptWorkspacePullError   = "@workspace_pull_error"
 
 	// OptWorkspaceCreatedTs is the unix epoch (seconds) when the workspace
 	// window was first created. Stamped by the lifecycle primitive at
@@ -94,18 +111,27 @@ const (
 // statestore.MetadataKeyToOptionName ("workspace.tag" → "@workspace_tag").
 const TagMetadataKey = "workspace.tag"
 
-// Workspace is a tmux window + cwd + derived/persisted metadata.
+// Workspace is a tmux window + cwd + derived/persisted metadata. In the
+// intent-workspace model the session-scoped identity fields (ID/Title/Intent/
+// Root) describe the workspace the window belongs to; the window fields
+// (Name/Cwd/…) describe the individual window (driver agent or shell).
 type Workspace struct {
 	PaneID    string `json:"pane_id"`
 	SessionID string `json:"session_id"`
 	WindowID  string `json:"window_id"`
-	Session   string `json:"session"` // session name
+	Session   string `json:"session"` // session name (== workspace id/slug)
 	Name      string `json:"name"`    // window name
 	Cwd       string `json:"cwd"`
 	Repo      string `json:"repo,omitempty"`
 	Branch    string `json:"branch,omitempty"`
 	Attention bool   `json:"attention,omitempty"`
 	Recap     string `json:"recap,omitempty"`
+
+	// Workspace-identity (session-scoped) fields.
+	ID     string `json:"id,omitempty"`     // @workspace_id
+	Title  string `json:"title,omitempty"`  // @workspace_title
+	Intent string `json:"intent,omitempty"` // @workspace_intent
+	Root   string `json:"root,omitempty"`   // @workspace_root
 }
 
 // AsJSON renders the workspace as JSON for `atelier workspace info`.
@@ -279,41 +305,88 @@ func SetRecapTS(h *tmuxhost.Client, windowID, recap string, ts int64) error {
 	return nil
 }
 
-// Listable reports whether a window carries enough atelier metadata to be
-// surfaced as a workspace: a real repo path (worktree kind) OR an AI
-// workspace-kind (multi-repo, which is repo-less so has no @repo_path).
-// Windows with neither are raw tmux windows or spent popups.
+// Listable reports whether a window belongs to an atelier-managed workspace:
+// its session carries a @workspace_id. Windows without it are raw tmux windows
+// or spent popups.
 //
-// This is the single inclusion predicate shared by the M-s picker
-// (which lists workspaces) and the status-line attention rollup (which
-// counts them). Keeping ONE predicate is load-bearing: when the two
-// diverged, a multi-repo workspace that lost its @ai_workspace_kind still
-// counted toward the ⏺ badge but never appeared in the picker — a phantom
-// "notification with no workspace". Callers pass the two option values they
-// already read; this package stays agnostic of the adapter-owned
-// `@ai_workspace_kind` option name.
-func Listable(repoPath, aiWorkspaceKind string) bool {
-	return state.Listable(repoPath, aiWorkspaceKind)
+// This is the single inclusion predicate shared by the M-s picker (which lists
+// workspaces) and the status-line attention rollup (which counts them).
+// Keeping ONE predicate is load-bearing: when the picker and the rollup
+// diverged, a workspace could count toward the ⏺ badge yet never appear in the
+// picker — a phantom "notification with no workspace". Delegates to
+// state.Listable so the picker, the rollup, and the invariants can't disagree.
+func Listable(workspaceID string) bool {
+	return state.Listable(workspaceID)
 }
 
-// SetTag assigns (or clears, when tag == "") the workspace tag on
-// windowID's window and mirrors it to the statestore so it survives a
-// tmux server restart. One tag per window: setting a new value replaces
-// the previous one. Mirrored via the generic metadata bag under
-// TagMetadataKey — restore re-stamps @workspace_tag from it.
-func SetTag(h *tmuxhost.Client, windowID, tag string) error {
+// SetTag assigns (or clears, when tag == "") a workspace's grouping tag. The
+// tag is a WORKSPACE-level (session-scoped) label now — one tag per workspace,
+// resolved at window scope via tmux option inheritance so the picker reads it
+// per row. Mirrored to the statestore Workspace so it survives a tmux restart.
+func SetTag(h *tmuxhost.Client, session, tag string) error {
 	if tag == "" {
-		if err := h.UnsetWindowOption(windowID, OptWorkspaceTag); err != nil {
+		if _, err := h.Run("set-option", "-t", session, "-u", OptWorkspaceTag); err != nil {
 			return err
 		}
-	} else {
-		if err := h.SetWindowOption(windowID, OptWorkspaceTag, tag); err != nil {
-			return err
+	} else if _, err := h.Run("set-option", "-t", session, OptWorkspaceTag, tag); err != nil {
+		return err
+	}
+	// Best-effort cache mirror (losing it only costs the tag on next restart).
+	_ = statestore.UpdateWorkspace(session, func(ws *statestore.Workspace) { ws.Tag = tag })
+	return nil
+}
+
+// StampWorkspaceIdentity writes the workspace-identity options (id, title,
+// intent, root) on the SESSION and mirrors title/intent/root into the
+// statestore so a rename or restore survives a tmux server restart. The id
+// equals the session name and is the marker Listable keys on. Empty title
+// falls back to the id at render time; empty intent/root are legitimate
+// (a workspace with no task text yet, or a not-yet-materialized root).
+func StampWorkspaceIdentity(h *tmuxhost.Client, session, id, title, intent, root string) error {
+	if id == "" {
+		return fmt.Errorf("workspace.StampWorkspaceIdentity: id required")
+	}
+	if _, err := h.Run("set-option", "-t", session, OptWorkspaceID, id); err != nil {
+		return err
+	}
+	set := func(opt, val string) {
+		if val == "" {
+			return
+		}
+		if _, err := h.Run("set-option", "-t", session, opt, val); err != nil {
+			debuglog.LogErr("workspace.StampWorkspaceIdentity "+opt, err)
 		}
 	}
-	// Best-effort cache mirror (same discipline as SetRecap/stampForge):
-	// losing this write only costs the tag on the next tmux restart.
-	_ = PersistWindowMetadata(h, windowID, TagMetadataKey, tag)
+	set(OptWorkspaceTitle, title)
+	set(OptWorkspaceIntent, intent)
+	set(OptWorkspaceRoot, root)
+	_ = statestore.UpdateWorkspace(session, func(ws *statestore.Workspace) {
+		if title != "" {
+			ws.Title = title
+		}
+		if intent != "" {
+			ws.Intent = intent
+		}
+		if root != "" {
+			ws.Root = root
+		}
+	})
+	return nil
+}
+
+// SetTitle renames a workspace's human label (the M-r rename). The session
+// NAME — the tmux target every switch/kill depends on — is untouched; only
+// @workspace_title and the cached Title move. Empty title clears the option
+// so the picker falls back to the id/slug.
+func SetTitle(h *tmuxhost.Client, session, title string) error {
+	if title == "" {
+		if _, err := h.Run("set-option", "-t", session, "-u", OptWorkspaceTitle); err != nil {
+			return err
+		}
+	} else if _, err := h.Run("set-option", "-t", session, OptWorkspaceTitle, title); err != nil {
+		return err
+	}
+	_ = statestore.UpdateWorkspace(session, func(ws *statestore.Workspace) { ws.Title = title })
 	return nil
 }
 
@@ -342,63 +415,60 @@ func SetScopePin(h *tmuxhost.Client, query string) error {
 // to debug — losing a single persistence write does not justify
 // failing the user-visible operation.
 //
-// Scoped to atelier-managed sessions: if the session does not have
-// @repo_path or @ai_workspace_kind stamped, we skip the cache
-// write. Without this, claude's notify-attention hook firing inside
-// a random user-created tmux session (no atelier metadata) would leak
-// that session into the cache, and restore would resurrect it on
-// every tmux start.
+// Scoped to atelier-managed sessions: if the session does not carry a
+// @workspace_id, we skip the cache write. Without this, an agent hook
+// firing inside a random user-created tmux session (no atelier metadata)
+// would leak that session into the cache, and restore would resurrect it
+// on every tmux start.
 func persistWindowOption(h *tmuxhost.Client, windowID string, mutate func(*statestore.Window)) {
 	session, window, err := resolveWindowIdentity(h, windowID)
 	if err != nil || session == "" || window == "" {
 		return
 	}
-	repoPath, kind := sessionAtelierScope(h, session)
-	if repoPath == "" && kind == "" {
+	id, title, intent, root := sessionWorkspaceIdentity(h, session)
+	if id == "" {
 		return // not atelier-managed; do not pollute the cache
 	}
-	// Backfill the workspace's scope alongside the window mutation so
-	// the resulting record survives the load/save filter (which drops
-	// workspaces with neither RepoPath nor Kind).
+	// A session stamped with @workspace_id but not yet a title/intent/root (a
+	// launcher heal, or a write-through that races creation) would otherwise be
+	// dropped by the load/save filter (statestore.managed() ignores the id).
+	// Seed a fallback Title from the id so the record — and this write-through —
+	// survives. Only seed empty fields; never clobber a title the user renamed.
+	if title == "" {
+		title = id
+	}
+	// Backfill the workspace identity alongside the window mutation.
 	_ = statestore.UpdateWorkspace(session, func(ws *statestore.Workspace) {
-		if ws.RepoPath == "" {
-			ws.RepoPath = repoPath
+		if ws.Title == "" {
+			ws.Title = title
 		}
-		if ws.Kind == "" {
-			ws.Kind = kind
+		if ws.Intent == "" {
+			ws.Intent = intent
+		}
+		if ws.Root == "" {
+			ws.Root = root
 		}
 	})
 	_ = statestore.UpdateWindow(session, window, mutate)
 }
 
-// sessionAtelierScope reads the session's atelier metadata. Returns
-// (repoPath, kind) — at least one must be non-empty for the session
-// to be considered atelier-managed. The caller uses these to backfill
-// the cache record's scope so it doesn't get filtered out.
-func sessionAtelierScope(h *tmuxhost.Client, sessionName string) (repoPath, kind string) {
-	if out, err := h.Run("show-option", "-t", sessionName, "-qv", OptRepoPath); err == nil {
-		repoPath = strings.TrimSpace(string(out))
+// sessionWorkspaceIdentity reads a session's workspace-identity options.
+// A non-empty id marks the session as an atelier-managed workspace.
+func sessionWorkspaceIdentity(h *tmuxhost.Client, sessionName string) (id, title, intent, root string) {
+	get := func(opt string) string {
+		out, err := h.Run("show-option", "-t", sessionName, "-qv", opt)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
 	}
-	// @ai_workspace_kind is a WINDOW option (plugin metadata, AI namespace)
-	// set on window 1 of multi-repo sessions. Sample that window.
-	//
-	// TODO(plugins-refactor): this is the last remaining plugin-namespace
-	// leak in core's "is this atelier-managed?" detection. When the
-	// workspaces tool moves into its own module (task #75), the right
-	// cut is a generic `@atelier_session=1` marker stamped at session
-	// creation by core, removing the need to peek at any plugin
-	// namespace from here.
-	if out, err := h.Run("show-window-options", "-v", "-t", sessionName+":1",
-		statestore.MetadataKeyToOptionName("ai.workspace_kind")); err == nil {
-		kind = strings.TrimSpace(string(out))
-	}
-	return repoPath, kind
+	return get(OptWorkspaceID), get(OptWorkspaceTitle), get(OptWorkspaceIntent), get(OptWorkspaceRoot)
 }
 
-// sessionIsAtelierManaged is a thin convenience over sessionAtelierScope.
+// sessionIsAtelierManaged reports whether a session carries a @workspace_id.
 func sessionIsAtelierManaged(h *tmuxhost.Client, sessionName string) bool {
-	repoPath, kind := sessionAtelierScope(h, sessionName)
-	return repoPath != "" || kind != ""
+	id, _, _, _ := sessionWorkspaceIdentity(h, sessionName)
+	return id != ""
 }
 
 // SetPersistedGlobal sets a tmux global option AND mirrors the value
@@ -461,15 +531,16 @@ func PersistWindowMetadata(h *tmuxhost.Client, windowID, key, value string) erro
 // convention; restore re-stamps every entry as a tmux window option
 // `@<plugin>_<field>` on rehydrate.
 type NewWorkspaceInfo struct {
-	Session    string // tmux session name (the persistence key)
-	RepoPath   string // repo root; empty for multi-repo sessions
-	Kind       string // "worktree" | "multi-repo"
+	Session    string // tmux session name == workspace id/slug (persistence key)
+	Title      string // human, renameable label
+	Intent     string // the free-text task the user typed at M-n
+	Root       string // ~/ateliers/<slug> — the workspace's dedicated dir
+	RepoPath   string // optional single-repo hint
 	WindowName string // tmux window name (the per-window key)
-	Cwd        string // worktree path the window opened at
+	Cwd        string // the driver window's cwd (the workspace root)
 	Branch     string // informational
 	// Metadata is plugin-namespaced window state to persist alongside
-	// the window — e.g. {"ai.prompt": "build foo", "ai.workspace_kind": "worktree"}.
-	// Empty/nil = no plugin metadata.
+	// the window — e.g. {"ai.prompt": "build foo"}. Empty/nil = none.
 	Metadata map[string]string
 }
 
@@ -485,11 +556,17 @@ type NewWorkspaceInfo struct {
 func RegisterCreatedWorkspace(info NewWorkspaceInfo) {
 	now := time.Now().Unix()
 	_ = statestore.UpdateWorkspace(info.Session, func(ws *statestore.Workspace) {
+		if info.Title != "" {
+			ws.Title = info.Title
+		}
+		if info.Intent != "" {
+			ws.Intent = info.Intent
+		}
+		if info.Root != "" {
+			ws.Root = info.Root
+		}
 		if info.RepoPath != "" {
 			ws.RepoPath = info.RepoPath
-		}
-		if info.Kind != "" {
-			ws.Kind = info.Kind
 		}
 		// Seed CreatedAt at creation time. Without this, a workspace
 		// the user creates and then M-q's WITHOUT switching away
@@ -579,6 +656,27 @@ func enrichWithMetadata(h *tmuxhost.Client, w *Workspace) {
 	if v, _ := h.GetWindowOption(w.WindowID, OptRecap); v != "" {
 		w.Recap = v
 	}
+	// The @workspace_* options are SESSION-scoped; they resolve at window scope
+	// only through tmux option inheritance, which `display-message '#{@opt}'`
+	// honors but `show-window-options -v` (GetWindowOption) does NOT — the
+	// latter errors on a session option. Read them via inheritedOption.
+	w.ID = inheritedOption(h, w.WindowID, OptWorkspaceID)
+	w.Title = inheritedOption(h, w.WindowID, OptWorkspaceTitle)
+	w.Intent = inheritedOption(h, w.WindowID, OptWorkspaceIntent)
+	w.Root = inheritedOption(h, w.WindowID, OptWorkspaceRoot)
+}
+
+// inheritedOption reads an option at a window target with tmux's
+// window→session→global inheritance (via display-message), so a SESSION-scoped
+// @option stamped on the session resolves when read against one of its windows.
+// GetWindowOption cannot do this (show-window-options rejects session options).
+// Empty string on any error or unset.
+func inheritedOption(h *tmuxhost.Client, windowID, opt string) string {
+	out, err := h.DisplayMessageAt(windowID, "#{"+opt+"}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 func gitOutput(dir string, args ...string) (string, error) {

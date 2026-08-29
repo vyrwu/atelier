@@ -22,13 +22,7 @@
 // absent).
 package integration
 
-// WorkspaceRef identifies a workspace window for a port query. The kernel
-// populates it from tmux/statestore; adapters treat it as read-only input.
-type WorkspaceRef struct {
-	WindowID string // tmux window id, e.g. "@3"
-	Cwd      string // worktree path (may be empty for non-git workspaces)
-	RepoPath string // @repo_path (empty for non-git)
-}
+import "time"
 
 // ForgeState is the kernel's normalized code-forge state vocabulary. Every
 // ForgeIntegration maps its native state onto one of these; the KERNEL owns
@@ -43,6 +37,55 @@ const (
 	ForgeMerged ForgeState = "merged" // merged
 	ForgeClosed ForgeState = "closed" // closed without merge
 )
+
+// CIStatus is the kernel's normalized continuous-integration verdict for a PR.
+// The KERNEL owns the glyph/color (ciGlyphs); adapters classify.
+type CIStatus string
+
+const (
+	CINone    CIStatus = ""        // no CI configured / no runs
+	CIPass    CIStatus = "pass"    // all required checks green
+	CIFail    CIStatus = "fail"    // at least one required check failing
+	CIPending CIStatus = "pending" // checks still running
+)
+
+// ReviewDecision is the kernel's normalized code-review verdict for a PR.
+// The KERNEL owns the glyph/color (reviewGlyphs); adapters classify.
+type ReviewDecision string
+
+const (
+	ReviewNone             ReviewDecision = ""                  // no review activity
+	ReviewApproved         ReviewDecision = "approved"          // approved
+	ReviewChangesRequested ReviewDecision = "changes_requested" // changes requested
+	ReviewRequired         ReviewDecision = "review_required"   // review requested, pending
+)
+
+// PullRequest is the rich per-PR record a ForgeIntegration reports. It replaces
+// the single-enum ForgeStatus: the M-c "List Changes" view renders every field,
+// and the M-s rollup counts PRs + derives per-workspace attention from CI/review
+// state. Adapters populate it; the KERNEL owns all rendering (glyphs, columns).
+type PullRequest struct {
+	Number         int
+	Repo           string // "owner/repo"
+	Title          string
+	State          ForgeState
+	CI             CIStatus
+	ReviewDecision ReviewDecision
+	Comments       int
+	URL            string
+	Branch         string
+	UpdatedAt      time.Time
+}
+
+// NeedsAttention reports whether a PR wants the user's eyes — failing CI or a
+// changes-requested review on an open PR. This is the PR half of the M-s
+// attention rollup (the drawing's <N-ATTENTION>). Pure.
+func (p PullRequest) NeedsAttention() bool {
+	if p.State != ForgeOpen && p.State != ForgeDraft {
+		return false
+	}
+	return p.CI == CIFail || p.ReviewDecision == ReviewChangesRequested
+}
 
 // forgeGlyphs is the kernel-owned glyph + 256-color palette index for each
 // renderable forge state. Single source of truth so the picker badge (ANSI)
@@ -68,24 +111,60 @@ func ForgeGlyph(state ForgeState) (glyph, color string, ok bool) {
 	return spec.Glyph, spec.Color, ok
 }
 
-// ForgeStatus is what a ForgeIntegration reports for one workspace.
-type ForgeStatus struct {
-	State ForgeState
+// ciGlyphs is the kernel-owned glyph + color for each CI verdict, using the
+// Codicon check/x/sync family: pass=check/green, fail=x/red, pending=sync/yellow.
+var ciGlyphs = map[CIStatus]struct{ Glyph, Color string }{
+	CIPass:    {"", "35"},  // codicon check, green
+	CIFail:    {"", "203"}, // codicon error, red
+	CIPending: {"", "221"}, // codicon sync, yellow
+}
+
+// CIGlyph returns the glyph + 256-color index for a CI verdict. ok=false for
+// CINone/unknown (absent column). Pure; KERNEL-owned.
+func CIGlyph(ci CIStatus) (glyph, color string, ok bool) {
+	spec, ok := ciGlyphs[ci]
+	return spec.Glyph, spec.Color, ok
+}
+
+// reviewGlyphs is the kernel-owned glyph + color for each review verdict:
+// approved=check-all/green, changes_requested=request-changes/red,
+// review_required=comment/grey.
+var reviewGlyphs = map[ReviewDecision]struct{ Glyph, Color string }{
+	ReviewApproved:         {"", "35"},  // codicon verified, green
+	ReviewChangesRequested: {"", "203"}, // codicon request-changes, red
+	ReviewRequired:         {"", "244"}, // codicon comment, grey
+}
+
+// ReviewGlyph returns the glyph + 256-color index for a review verdict.
+// ok=false for ReviewNone/unknown (absent column). Pure; KERNEL-owned.
+func ReviewGlyph(r ReviewDecision) (glyph, color string, ok bool) {
+	spec, ok := reviewGlyphs[r]
+	return spec.Glyph, spec.Color, ok
 }
 
 // ForgeIntegration is the port a code-forge adapter (GitHub, GitLab, …)
-// satisfies to enrich the workspace picker with per-workspace forge status
-// and an open-in-browser action. The kernel owns the badge slot, rendering,
-// sort order, caching, and refresh cadence; the adapter only classifies and
-// opens.
+// satisfies to feed the workspace pickers with pull-request data and act on it.
+// The kernel owns all presentation (glyphs, columns, sort order), caching, and
+// refresh cadence; the adapter only lists, opens, and (opt-in) closes.
+//
+// The port is repo-oriented, not window-oriented: List is batched per repo (one
+// query, not one-per-window) so it survives workspace × repos × PRs without
+// hitting the forge's rate limits. The kernel associates the returned PRs with
+// workspaces by matching worktree branches.
 type ForgeIntegration interface {
 	// Name is the adapter's identifier (e.g. "github"). Used in diagnostics.
 	Name() string
-	// Status classifies the workspace's forge item into a kernel ForgeState.
-	// Returning ForgeNone (or an error) clears the badge.
-	Status(WorkspaceRef) (ForgeStatus, error)
-	// Open opens the workspace's forge item (e.g. its PR) in a browser.
-	Open(WorkspaceRef) error
+	// List returns the pull requests for the repo checked out at repoPath, in
+	// ONE batched query. Best-effort: any absence (no gh, network failure,
+	// unparseable output) returns (nil, nil) — the Changes view degrades to
+	// "no PRs" rather than breaking.
+	List(repoPath string) ([]PullRequest, error)
+	// Open opens the given pull request in a browser.
+	Open(pr PullRequest) error
+	// Close closes a pull request WITHOUT merging — the first mutating forge
+	// operation. Call sites gate it behind [forge] allow_write + a confirm
+	// step. An adapter that doesn't support writes returns an error.
+	Close(pr PullRequest) error
 }
 
 // Set is the collection of active adapters, resolved from config at the

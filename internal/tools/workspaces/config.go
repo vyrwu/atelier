@@ -7,16 +7,22 @@ import (
 	"github.com/vyrwu/atelier/internal/config"
 )
 
-// Config is the workspaces plugin's own config. Lives under the
-// `[workspaces]` section of $XDG_CONFIG_HOME/atelier/config.toml.
+// Config is the workspaces plugin's own config, under the `[workspaces]`
+// section of $XDG_CONFIG_HOME/atelier/config.toml.
 type Config struct {
-	CodeRoot      string `toml:"code_root"`
-	WorktreeRoot  string `toml:"worktree_root"`
-	MultiRepoRoot string `toml:"multi_repo_root"`
-	// AutoTag controls whether workspace creation asks the AI to also
-	// suggest a grouping tag alongside the branch/session name (issue
-	// #56). Default true; M-t always overrides post-creation, so this is
-	// just the opt-out for users who don't want auto-suggested tags.
+	// CodeRoot is where owner/repo checkouts live — the repo index scanned by
+	// intent-first creation to pick which repos an intent touches.
+	CodeRoot string `toml:"code_root"`
+	// WorktreeRoot is where git worktrees are materialized (repo-local git
+	// bookkeeping): <root>/<owner>/<repo>/<branch>. They are symlinked into the
+	// per-workspace root.
+	WorktreeRoot string `toml:"worktree_root"`
+	// WorkspaceRoot is the base for per-workspace dedicated directories:
+	// <workspace_root>/<slug>. Worktrees symlink into it as <repo>/<branch> and
+	// the driver agent runs from it. Default ~/ateliers.
+	WorkspaceRoot string `toml:"workspace_root"`
+	// AutoTag controls whether creation asks the AI to also suggest a grouping
+	// tag alongside the workspace name. Default true; M-t always overrides.
 	AutoTag bool `toml:"auto_tag"`
 }
 
@@ -25,7 +31,7 @@ func DefaultConfig() Config {
 	return Config{
 		CodeRoot:      filepath.Join(home, "code", "github"),
 		WorktreeRoot:  filepath.Join(home, "code", ".worktrees", "github"),
-		MultiRepoRoot: filepath.Join(home, "code"),
+		WorkspaceRoot: filepath.Join(home, "ateliers"),
 		AutoTag:       true,
 	}
 }
@@ -37,6 +43,6 @@ func LoadConfig() (Config, error) {
 	}
 	cfg.CodeRoot = config.ExpandPath(cfg.CodeRoot)
 	cfg.WorktreeRoot = config.ExpandPath(cfg.WorktreeRoot)
-	cfg.MultiRepoRoot = config.ExpandPath(cfg.MultiRepoRoot)
+	cfg.WorkspaceRoot = config.ExpandPath(cfg.WorkspaceRoot)
 	return cfg, nil
 }

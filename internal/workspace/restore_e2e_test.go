@@ -5,6 +5,8 @@ package workspace_test
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/vyrwu/atelier/internal/statestore"
@@ -12,38 +14,48 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// TestRestore_RecreatesSessionsWindowsAndOptions is the load-bearing
-// integration test for the persistence story: write a cache, kill the
-// tmux server, start fresh, call Restore — and the user's workspaces +
-// per-window options come back exactly as they were.
-func TestRestore_RecreatesSessionsWindowsAndOptions(t *testing.T) {
+// TestRestore_RecreatesWorkspaceDriverAndOptions is the load-bearing
+// integration test for the intent-workspace persistence story: write a cache,
+// start a fresh tmux server, call Restore — and the workspace comes back as a
+// SESSION with a single driver window at its root, its identity options
+// stamped, its per-agent state (attention/recap/metadata) re-applied, and its
+// worktrees re-linked into the root as symlinks (NOT as one window per branch).
+func TestRestore_RecreatesWorkspaceDriverAndOptions(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("ATELIER_WORKSPACE_ROOT", t.TempDir())
 
-	// Stand up a temp worktree dir so restore's path-existence check
-	// passes. Use the test tempdir so it's auto-cleaned.
+	root := filepath.Join(t.TempDir(), "ws-root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real worktree dir on disk so ReconcileLayout links it (rather than
+	// reporting it dangling).
 	wt := filepath.Join(t.TempDir(), "worktree")
 	if err := os.MkdirAll(wt, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Write a cache as if a prior atelier session had populated it.
+	const createdTs int64 = 1729094400
 	cached := &statestore.State{
 		Workspaces: []statestore.Workspace{
 			{
 				SessionName: "vyrwu/atelier",
-				RepoPath:    wt,
-				Kind:        "worktree",
+				Title:       "Ship persistence",
+				Intent:      "make workspaces survive a restart",
+				Root:        root,
+				Tag:         "infra",
+				CreatedAt:   createdTs,
+				Worktrees: []statestore.Worktree{
+					{Repo: "vyrwu/atelier", Branch: "feat/persistence", Path: wt},
+				},
 				Windows: []statestore.Window{
 					{
-						Name:      "feat/persistence",
-						Cwd:       wt,
-						Branch:    "feat/persistence",
+						Name:      "atelier",
+						Cwd:       root,
 						Attention: true,
 						Recap:     "Wrote persistence layer",
-						RecapTs:   1729094400,
+						RecapTs:   createdTs,
 						Metadata: map[string]string{
-							"ai.prompt":            "build the cache",
-							"ai.workspace_kind":    "worktree",
 							"ai.active_session_id": "abc-123-def-456",
 						},
 					},
@@ -58,63 +70,73 @@ func TestRestore_RecreatesSessionsWindowsAndOptions(t *testing.T) {
 		t.Fatalf("seed cache: %v", err)
 	}
 
-	// Start a fresh tmux server (no sessions yet besides whatever
-	// testtmux creates by default).
 	srv := testtmux.New(t)
-
 	if err := workspace.Restore(srv.Client); err != nil {
 		t.Fatalf("workspace.Restore: %v", err)
 	}
 
 	// Session recreated.
-	has, err := srv.Client.HasSession("vyrwu/atelier")
-	if err != nil || !has {
+	if has, err := srv.Client.HasSession("vyrwu/atelier"); err != nil || !has {
 		t.Fatalf("session not recreated: has=%v err=%v", has, err)
 	}
 
-	// Session-level option.
-	if v, _ := srv.Client.Run("show-option", "-v", "-t", "vyrwu/atelier", "@repo_path"); string(v) != wt+"\n" {
-		t.Errorf("@repo_path: got %q want %q", string(v), wt+"\n")
-	}
-
-	// Find the recreated window's @ID so we can query its options.
-	out, err := srv.Client.Run("list-windows", "-t", "=vyrwu/atelier",
+	// Exactly ONE window (the driver) — worktrees are symlinks, not windows.
+	winOut, err := srv.Client.Run("list-windows", "-t", "=vyrwu/atelier",
 		"-F", "#{window_name}|#{window_id}")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var wid string
-	for _, line := range splitForTest(string(out)) {
-		if line == "" {
-			continue
-		}
-		parts := splitOnce(line, '|')
-		if parts[0] == "feat/persistence" {
-			wid = parts[1]
-			break
-		}
+	lines := nonEmptyLines(string(winOut))
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly 1 (driver) window, got %d: %v", len(lines), lines)
 	}
-	if wid == "" {
-		t.Fatalf("restored window not found in tmux. list-windows:\n%s", out)
+	wid := splitOnce(lines[0], '|')[1]
+
+	// Session-level identity options.
+	idChecks := map[string]string{
+		workspace.OptWorkspaceID:     "vyrwu/atelier",
+		workspace.OptWorkspaceTitle:  "Ship persistence",
+		workspace.OptWorkspaceIntent: "make workspaces survive a restart",
+		workspace.OptWorkspaceRoot:   root,
+		workspace.OptWorkspaceTag:    "infra",
+	}
+	for opt, want := range idChecks {
+		out, _ := srv.Client.Run("show-option", "-t", "vyrwu/atelier", "-qv", opt)
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("session option %s: got %q want %q", opt, got, want)
+		}
 	}
 
-	// Per-window options re-stamped. The `@ai_*` options come from
-	// the generic Metadata bag — restore translates each metadata
-	// key `<plugin>.<field>` to its tmux option `@<plugin>_<field>`
-	// (statestore.MetadataKeyToOptionName).
-	checks := map[string]string{
-		"@needs_attention":      "1",
-		"@attention_recap":      "Wrote persistence layer",
-		"@attention_recap_ts":   "1729094400",
-		"@ai_prompt":            "build the cache",
-		"@ai_workspace_kind":    "worktree",
-		"@ai_active_session_id": "abc-123-def-456",
+	// Driver window is marked.
+	if drv, _ := srv.Client.GetWindowOption(wid, workspace.OptWorkspaceDriver); drv != "1" {
+		t.Errorf("@workspace_driver on driver window = %q, want 1", drv)
 	}
-	for opt, want := range checks {
+
+	// Per-window options re-stamped from the primary window record. The
+	// @ai_* option comes from the generic Metadata bag (metadata key
+	// `<plugin>.<field>` → tmux option `@<plugin>_<field>`).
+	winChecks := map[string]string{
+		workspace.OptAttention:          "1",
+		workspace.OptRecap:              "Wrote persistence layer",
+		workspace.OptRecapTs:            strconv.FormatInt(createdTs, 10),
+		workspace.OptWorkspaceCreatedTs: strconv.FormatInt(createdTs, 10),
+		"@ai_active_session_id":         "abc-123-def-456",
+	}
+	for opt, want := range winChecks {
 		got, _ := srv.Client.GetWindowOption(wid, opt)
 		if got != want {
 			t.Errorf("window option %s: got %q want %q", opt, got, want)
 		}
+	}
+
+	// Worktree re-linked into the root as a symlink pointing at the real dir.
+	link := workspace.WorktreeLinkPath(root, "vyrwu/atelier", "feat/persistence")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("worktree symlink not created at %s: %v", link, err)
+	}
+	if target != wt {
+		t.Errorf("worktree symlink target = %q, want %q", target, wt)
 	}
 
 	// Globals.
@@ -123,18 +145,19 @@ func TestRestore_RecreatesSessionsWindowsAndOptions(t *testing.T) {
 	}
 }
 
-// TestRestore_Idempotent verifies running Restore twice in a row
-// produces no errors and doesn't create duplicate sessions. This is
-// the property that lets us put restore in `atelier init` and not
-// worry about source-file-the-config-twice scenarios.
+// TestRestore_Idempotent verifies running Restore twice in a row produces no
+// errors and doesn't create duplicate sessions. This is the property that lets
+// us put restore in `atelier init` and not worry about sourcing the config
+// twice.
 func TestRestore_Idempotent(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	wt := filepath.Join(t.TempDir(), "wt")
-	_ = os.MkdirAll(wt, 0o755)
+	t.Setenv("ATELIER_WORKSPACE_ROOT", t.TempDir())
+
+	root := t.TempDir()
 	_ = statestore.Save(&statestore.State{
 		Workspaces: []statestore.Workspace{
-			{SessionName: "x", RepoPath: wt, Kind: "worktree",
-				Windows: []statestore.Window{{Name: "main", Cwd: wt}}},
+			{SessionName: "x", Title: "x", Root: root,
+				Windows: []statestore.Window{{Name: "x", Cwd: root}}},
 		},
 	})
 
@@ -147,31 +170,25 @@ func TestRestore_Idempotent(t *testing.T) {
 	}
 
 	out, _ := srv.Client.Run("list-windows", "-t", "=x", "-F", "#{window_name}")
-	count := 0
-	for _, line := range splitForTest(string(out)) {
-		if line == "main" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("expected exactly 1 window named 'main', got %d. list-windows:\n%s",
-			count, out)
+	if got := len(nonEmptyLines(string(out))); got != 1 {
+		t.Errorf("expected exactly 1 window after two restores, got %d. list-windows:\n%s",
+			got, out)
 	}
 }
 
-// TestRestore_SkipsMissingWorktree verifies the "user `git worktree
-// remove`d the worktree behind atelier's back" scenario: cache says
-// workspace exists at /tmp/gone, restore sees the path is gone and
-// SKIPS that workspace rather than failing or creating a session
-// pointing at a non-existent directory.
-func TestRestore_SkipsMissingWorktree(t *testing.T) {
+// TestRestore_MaterializesRootWhenMissing verifies restore creates the
+// workspace's dedicated root when it doesn't exist on disk (a migrated
+// workspace, or a machine where ~/ateliers was cleared). The session must
+// still come back — the whole point of restore.
+func TestRestore_MaterializesRootWhenMissing(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("ATELIER_WORKSPACE_ROOT", t.TempDir())
+
+	root := filepath.Join(t.TempDir(), "not-yet-there")
 	_ = statestore.Save(&statestore.State{
 		Workspaces: []statestore.Workspace{
-			{SessionName: "ghost", RepoPath: "/nonexistent",
-				Kind: "worktree", Windows: []statestore.Window{
-					{Name: "main", Cwd: "/nonexistent/worktree"},
-				}},
+			{SessionName: "ghost", Title: "ghost", Root: root,
+				Windows: []statestore.Window{{Name: "ghost", Cwd: root}}},
 		},
 	})
 
@@ -180,21 +197,17 @@ func TestRestore_SkipsMissingWorktree(t *testing.T) {
 		t.Fatalf("Restore: %v", err)
 	}
 
-	has, _ := srv.Client.HasSession("ghost")
-	if has {
-		t.Error("Restore should NOT create a session whose worktree is missing")
+	if has, _ := srv.Client.HasSession("ghost"); !has {
+		t.Error("Restore should recreate the session and materialize its root")
+	}
+	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+		t.Errorf("root not materialized: %v", err)
 	}
 }
 
-// TestSyncCache_RemovesOrphans seeds the cache with a workspace that's
-// not in tmux, calls SyncCache, asserts the orphan is gone. This is
-// the property the session-closed / window-unlinked tmux hooks
-// depend on for cache hygiene.
-//
-// Critical: the "alive" entry's window NAME must match what tmux
-// actually has (testtmux's NewSession picks whatever shell default is).
-// Otherwise SyncCache would correctly remove the window-name-mismatch
-// as orphaned, which would in turn remove the empty workspace.
+// TestSyncCache_RemovesOrphans seeds the cache with a workspace that's not in
+// tmux, calls SyncCache, asserts the orphan is gone. This is the property the
+// session-closed tmux hook depends on for cache hygiene.
 func TestSyncCache_RemovesOrphans(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
@@ -203,14 +216,14 @@ func TestSyncCache_RemovesOrphans(t *testing.T) {
 
 	// Read the actual window name testtmux gave us so the cache lines up.
 	aliveWinOut, _ := srv.Client.Run("list-windows", "-t", "=alive", "-F", "#{window_name}")
-	aliveWinName := splitForTest(string(aliveWinOut))[0]
+	aliveWinName := nonEmptyLines(string(aliveWinOut))[0]
 
 	_ = statestore.Save(&statestore.State{
 		Workspaces: []statestore.Workspace{
-			{SessionName: "alive", RepoPath: "/r-alive", Kind: "worktree",
+			{SessionName: "alive", Title: "alive", Root: "/r-alive",
 				Windows: []statestore.Window{{Name: aliveWinName}}},
-			{SessionName: "ghost", RepoPath: "/r-ghost", Kind: "worktree",
-				Windows: []statestore.Window{{Name: "main"}}},
+			{SessionName: "ghost", Title: "ghost", Root: "/r-ghost",
+				Windows: []statestore.Window{{Name: "ghost"}}},
 		},
 	})
 
@@ -228,6 +241,16 @@ func TestSyncCache_RemovesOrphans(t *testing.T) {
 }
 
 // helpers — pulled inline to keep test-file dependency self-contained.
+func nonEmptyLines(s string) []string {
+	var out []string
+	for _, l := range splitForTest(s) {
+		if strings.TrimSpace(l) != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 func splitForTest(s string) []string {
 	var out []string
 	start := 0

@@ -102,13 +102,11 @@ func TestCheckWorktreeDirsExist_OrphanedEntry(t *testing.T) {
 			{
 				SessionName: "ws/gone",
 				RepoPath:    "/tmp/repo-gone",
-				Kind:        "default-branch",
 				Windows:     []statestore.Window{{Name: "main", Cwd: gone}},
 			},
 			{
 				SessionName: "ws/live",
 				RepoPath:    "/tmp/repo-live",
-				Kind:        "default-branch",
 				Windows:     []statestore.Window{{Name: "main", Cwd: live}},
 			},
 		},
@@ -138,7 +136,6 @@ func TestCheckWorktreeDirsExist_AllPresent(t *testing.T) {
 			{
 				SessionName: "ws/live",
 				RepoPath:    "/tmp/repo-live",
-				Kind:        "default-branch",
 				Windows:     []statestore.Window{{Name: "main", Cwd: live}},
 			},
 		},

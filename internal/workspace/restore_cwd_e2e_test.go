@@ -11,32 +11,30 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// TestRestore_WindowStartsAtCachedCwd locks the contract: after
-// restore, the recreated window's pane is at the cwd persisted in
-// the cache, NOT the cwd from which atelier was launched.
+// TestRestore_DriverStartsAtWorkspaceRoot locks the contract: after restore,
+// the recreated driver window's pane is at the workspace ROOT persisted in the
+// cache, NOT the cwd atelier was launched from.
 //
-// User-visible bug this guards against: launching `atelier` from
-// `~/code/atelier/` and resuming a `wawafertility/infrastructure`
-// workspace dumps you in `~/code/atelier/` instead of the
-// `wawafertility/infrastructure` checkout path. Frustrating —
-// the whole point of "resume" is to land where you left off.
-func TestRestore_WindowStartsAtCachedCwd(t *testing.T) {
+// User-visible bug this guards against: launching `atelier` from `~/code/…`
+// and resuming a workspace dumps you in `~/code/…` instead of the workspace's
+// dedicated root. The whole point of "resume" is to land where you left off.
+func TestRestore_DriverStartsAtWorkspaceRoot(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("ATELIER_WORKSPACE_ROOT", t.TempDir())
 
-	// Two distinct real directories to disambiguate "launch cwd"
-	// from "workspace cwd".
-	workspaceCwd := t.TempDir()
+	// Two distinct real directories to disambiguate "launch cwd" from
+	// "workspace root".
+	root := t.TempDir()
 	launchCwd := t.TempDir()
 	t.Chdir(launchCwd) // simulate atelier being launched from a non-workspace dir
 
-	// Seed cache.
 	if err := statestore.Save(&statestore.State{
 		Workspaces: []statestore.Workspace{{
 			SessionName: "fake/repo",
-			RepoPath:    workspaceCwd,
-			Kind:        "default-branch",
+			Title:       "fake",
+			Root:        root,
 			Windows: []statestore.Window{
-				{Name: "main", Cwd: workspaceCwd, Branch: "main"},
+				{Name: "repo", Cwd: root},
 			},
 		}},
 	}); err != nil {
@@ -50,20 +48,17 @@ func TestRestore_WindowStartsAtCachedCwd(t *testing.T) {
 		t.Fatalf("workspace.Restore: %v", err)
 	}
 
-	// Read the pane's start directory. tmux's #{pane_start_path}
-	// reports the directory passed to -c when the pane was created.
-	// (#{pane_current_path} reflects the shell's CURRENT cwd, which
-	// can drift if the shell init script cd's somewhere — we want
-	// to assert what the SESSION was started with, not where the
-	// shell ended up.)
+	// #{pane_start_path} reports the directory passed to -c when the pane was
+	// created. (#{pane_current_path} reflects the shell's CURRENT cwd, which
+	// can drift if the shell init cd's somewhere.)
 	out, err := srv.Client.Run("display-message", "-p",
-		"-t", "fake/repo:main", "#{pane_start_path}")
+		"-t", "fake/repo", "#{pane_start_path}")
 	if err != nil {
 		t.Fatalf("display-message pane_start_path: %v", err)
 	}
 	got := strings.TrimSpace(string(out))
-	if got != workspaceCwd {
+	if got != root {
 		t.Errorf("pane_start_path = %q, want %q (launched from %q)",
-			got, workspaceCwd, launchCwd)
+			got, root, launchCwd)
 	}
 }

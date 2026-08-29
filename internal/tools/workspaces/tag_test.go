@@ -2,9 +2,14 @@ package workspaces
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// ansiRE strips SGR color sequences so tests can assert on the visible text of
+// a styled row. Shared across the workspaces unit tests.
+var ansiRE = regexp.MustCompile(`\033\[[0-9;]*m`)
 
 // TestTagColor_StableAndInPalette: the color is a pure function of the tag
 // name — same name always maps to the same palette entry regardless of
@@ -113,40 +118,42 @@ func TestTagPickerItems(t *testing.T) {
 	}
 }
 
-// TestFormatTagPreview covers the M-t preview's focus states: a pending tag
-// (typed or hovered) renders its live pill leading "branch repo"; the clear-tag
-// row and the empty state both render "branch repo" with no pill (the tag
-// disappears, previewing removal).
+// TestFormatTagPreview covers the M-t preview's focus states, now
+// workspace-scoped: signature is (title, query, hovered). A pending tag (typed
+// query or hovered existing row) renders its live pill leading the workspace
+// title; the clear-tag row and the empty state both render the bare title with
+// no pill (the tag disappears, previewing removal).
 func TestFormatTagPreview(t *testing.T) {
+	const title = "My Workspace"
+
 	// Typed new tag → its pill leads, colored with the tag's stable color;
-	// order is pill < branch < repo.
-	got := formatTagPreview("mybranch", "myrepo", "36", "client-x", "")
+	// order is pill < title.
+	got := formatTagPreview(title, "client-x", "")
 	vis := ansiRE.ReplaceAllString(got, "")
 	iPill := strings.Index(vis, "#client-x")
-	iBranch := strings.Index(vis, "mybranch")
-	iRepo := strings.Index(vis, "myrepo")
-	if iPill < 0 || iBranch <= iPill || iRepo <= iBranch {
-		t.Errorf("want pill<branch<repo, got pill@%d branch@%d repo@%d in %q", iPill, iBranch, iRepo, vis)
+	iTitle := strings.Index(vis, title)
+	if iPill < 0 || iTitle <= iPill {
+		t.Errorf("want pill<title, got pill@%d title@%d in %q", iPill, iTitle, vis)
 	}
 	if !strings.Contains(got, "\033[3;38;5;"+tagColor("client-x")+"m") {
 		t.Errorf("typed tag must render its live pill color: %q", got)
 	}
 
 	// Hovering an existing tag row (no query) resolves to that tag's pill.
-	if got := formatTagPreview("mybranch", "myrepo", "36", "", "#billing"); !strings.Contains(got, "#billing") ||
+	if got := formatTagPreview(title, "", "#billing"); !strings.Contains(got, "#billing") ||
 		!strings.Contains(got, "\033[3;38;5;"+tagColor("billing")+"m") {
 		t.Errorf("hovered tag row must preview that tag's pill: %q", got)
 	}
 
-	// Clear-tag row focused → tag disappears: no pill, just "branch repo".
-	got = formatTagPreview("mybranch", "myrepo", "36", "", clearTagLabel)
-	if vis := ansiRE.ReplaceAllString(got, ""); strings.Contains(vis, "#") || vis != "Preview: mybranch myrepo" {
+	// Clear-tag row focused → tag disappears: no pill, just the title.
+	got = formatTagPreview(title, "", clearTagLabel)
+	if vis := ansiRE.ReplaceAllString(got, ""); strings.Contains(vis, "#") || vis != "Preview: "+title {
 		t.Errorf("clear preview must drop the pill, got %q", vis)
 	}
 
-	// Nothing resolvable → no pill, just the "Preview:" label + "branch repo".
-	got = formatTagPreview("mybranch", "myrepo", "36", "", "")
-	if vis := ansiRE.ReplaceAllString(got, ""); strings.Contains(vis, "#") || vis != "Preview: mybranch myrepo" {
-		t.Errorf("empty preview must be %q, got %q", "Preview: mybranch myrepo", vis)
+	// Nothing resolvable → no pill, just the "Preview:" label + title.
+	got = formatTagPreview(title, "", "")
+	if vis := ansiRE.ReplaceAllString(got, ""); strings.Contains(vis, "#") || vis != "Preview: "+title {
+		t.Errorf("empty preview must be %q, got %q", "Preview: "+title, vis)
 	}
 }

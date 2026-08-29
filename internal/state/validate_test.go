@@ -96,10 +96,10 @@ func TestValidate_MisroutedAttention(t *testing.T) {
 			{ID: "$2", Name: "_atelier_claude_1_2", Kind: KindPopup},
 		},
 		Windows: []Window{
-			{SessionID: "$2", WindowID: "@5", Attention: true},                              // on a popup window → misrouted
-			{SessionID: "$1", WindowID: "@9", Attention: true},                              // workspace but non-listable → phantom
-			{SessionID: "$1", WindowID: "@2", Attention: true, RepoPath: "/r"},              // listable + attention → legit, no violation
-			{SessionID: "$1", WindowID: "@3", WorkspaceKind: "multi-repo", Attention: true}, // listable via kind → legit
+			{SessionID: "$2", WindowID: "@5", Attention: true},                                     // on a popup window → misrouted
+			{SessionID: "$1", WindowID: "@9", Attention: true},                                     // workspace but non-listable (no @workspace_id) → phantom
+			{SessionID: "$1", WindowID: "@2", Attention: true, WorkspaceID: "slug"},                // listable + attention → legit, no violation
+			{SessionID: "$1", WindowID: "@3", Attention: true, WorkspaceID: "other", Driver: true}, // listable driver + attention → legit
 		},
 	}
 	if n := countCode(Validate(top), VMisroutedAttention); n != 2 {
@@ -114,14 +114,89 @@ func TestValidate_DeadWorktree(t *testing.T) {
 			{ID: "$2", Name: "_atelier_claude_1_2", Kind: KindPopup},
 		},
 		Windows: []Window{
-			{SessionID: "$1", WindowID: "@2", RepoPath: "/r", PaneCwd: "/gone", PaneCwdLive: false}, // dead → violation
-			{SessionID: "$1", WindowID: "@3", RepoPath: "/r", PaneCwd: "/live", PaneCwdLive: true},  // live → ok
-			{SessionID: "$1", WindowID: "@4", RepoPath: "", PaneCwd: "/gone", PaneCwdLive: false},   // no repo (multi-repo/raw) → skip
-			{SessionID: "$2", WindowID: "@5", RepoPath: "/r", PaneCwd: "/gone", PaneCwdLive: false}, // popup session → skip
+			{SessionID: "$1", WindowID: "@2", PaneCwd: "/gone", PaneCwdLive: false}, // dead → violation
+			{SessionID: "$1", WindowID: "@3", PaneCwd: "/live", PaneCwdLive: true},  // live → ok
+			{SessionID: "$1", WindowID: "@4", PaneCwd: "", PaneCwdLive: true},       // empty cwd → skip
+			{SessionID: "$2", WindowID: "@5", PaneCwd: "/gone", PaneCwdLive: false}, // popup session → skip
 		},
 	}
 	if n := countCode(Validate(top), VDeadWorktree); n != 1 {
 		t.Fatalf("want 1 dead-worktree, got %d: %+v", n, Validate(top))
+	}
+}
+
+func TestValidate_WorkspaceRootMissing(t *testing.T) {
+	live := t.TempDir() // exists on disk
+	top := &Topology{
+		Sessions: []Session{
+			{ID: "$1", Name: "vyrwu/atelier", Kind: KindWorkspace},
+			{ID: "$2", Name: "wawa/infra", Kind: KindWorkspace},
+			{ID: "$3", Name: "_atelier_claude_1_2", Kind: KindPopup},
+		},
+		Windows: []Window{
+			// driver whose root dir is gone → report-only violation
+			{SessionID: "$1", WindowID: "@2", WorkspaceID: "slug1", Driver: true, Root: "/no/such/atelier/root/xyzzy"},
+			// driver whose root exists → ok
+			{SessionID: "$2", WindowID: "@3", WorkspaceID: "slug2", Driver: true, Root: live},
+			// non-driver window with a missing root → skipped (only driver windows checked)
+			{SessionID: "$1", WindowID: "@4", WorkspaceID: "slug1", Driver: false, Root: "/also/gone"},
+			// popup driver-looking window → skipped (not a workspace session)
+			{SessionID: "$3", WindowID: "@5", WorkspaceID: "slug3", Driver: true, Root: "/popup/gone"},
+		},
+	}
+	if n := countCode(Validate(top), VWorkspaceRootMissing); n != 1 {
+		t.Fatalf("want 1 workspace-root-missing, got %d: %+v", n, Validate(top))
+	}
+	// It is report-only, not fixable.
+	for _, v := range Validate(top) {
+		if v.Code == VWorkspaceRootMissing && v.Fixable {
+			t.Error("workspace-root-missing must be report-only (not fixable)")
+		}
+	}
+}
+
+func TestValidate_MultipleDrivers(t *testing.T) {
+	top := &Topology{
+		Sessions: []Session{
+			{ID: "$1", Name: "vyrwu/atelier", Kind: KindWorkspace},
+			{ID: "$2", Name: "wawa/infra", Kind: KindWorkspace},
+		},
+		Windows: []Window{
+			// $1 has two driver windows → violation (a workspace has one agent)
+			{SessionID: "$1", WindowID: "@2", WorkspaceID: "slug1", Driver: true},
+			{SessionID: "$1", WindowID: "@3", WorkspaceID: "slug1", Driver: true},
+			// a non-driver inspection shell in the same session does NOT count
+			{SessionID: "$1", WindowID: "@4", WorkspaceID: "slug1", Driver: false},
+			// $2 has a single driver → ok
+			{SessionID: "$2", WindowID: "@5", WorkspaceID: "slug2", Driver: true},
+		},
+	}
+	if n := countCode(Validate(top), VMultipleDrivers); n != 1 {
+		t.Fatalf("want 1 multiple-drivers, got %d: %+v", n, Validate(top))
+	}
+	// Report-only: which extra driver to demote is a human judgment call.
+	for _, v := range Validate(top) {
+		if v.Code == VMultipleDrivers {
+			if v.Fixable {
+				t.Error("multiple-drivers must be report-only (not fixable)")
+			}
+			if v.Subject != "$1" {
+				t.Errorf("multiple-drivers subject = %q, want the offending session $1", v.Subject)
+			}
+		}
+	}
+}
+
+func TestValidate_SingleDriverNoViolation(t *testing.T) {
+	top := &Topology{
+		Sessions: []Session{{ID: "$1", Name: "vyrwu/atelier", Kind: KindWorkspace}},
+		Windows: []Window{
+			{SessionID: "$1", WindowID: "@2", WorkspaceID: "slug", Driver: true},
+			{SessionID: "$1", WindowID: "@3", WorkspaceID: "slug", Driver: false}, // inspection shell
+		},
+	}
+	if n := countCode(Validate(top), VMultipleDrivers); n != 0 {
+		t.Fatalf("single-driver workspace must not flag multiple-drivers, got %d: %+v", n, Validate(top))
 	}
 }
 

@@ -9,93 +9,98 @@ import (
 	"github.com/vyrwu/atelier/internal/integration"
 )
 
-// tagAwareSysPrompt is the sentinel the mock keys on for the two-line
-// contract: any prompt mentioning "grouping tag" (matching the kernel's
-// branchNamingWithTagSysPrompt / sessionNamingWithTagSysPrompt).
-const tagAwareSysPrompt = "Format: <type>/<desc> then a grouping tag"
-
 func TestAdapter_SatisfiesPort(t *testing.T) {
 	var _ integration.AIIntegration = New()
+	var _ integration.ForgeIntegration = New()
 	if New().Name() != "mock" {
 		t.Errorf("Name = %q, want mock", New().Name())
 	}
 }
 
-// These mirror the kernel's naming-validation regexes (workspaces
-// conventionalBranchRe / autoSessionNameRe). The mock's GenerateName must
-// satisfy them so auto-mode works with `[ai] provider = "mock"` — the
-// proof that the AI port is genuinely swappable.
-var (
-	branchRe  = regexp.MustCompile(`^(feat|fix|chore|refactor|docs|test|perf|style)/[a-z0-9-]+$`)
-	sessionRe = regexp.MustCompile(`^auto/[a-z0-9-]+$`)
-)
-
-func TestGenerateName_BranchFormat(t *testing.T) {
-	got, err := New().GenerateName(context.Background(), "Format: <type>/<desc>", "Add dark mode toggle!!!")
+func TestSummarizeWorkspace(t *testing.T) {
+	prs := []integration.PullRequest{{Number: 1}, {Number: 2}}
+	got, err := New().SummarizeWorkspace(context.Background(), "ship it", "mock recap", prs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !branchRe.MatchString(got) {
-		t.Errorf("GenerateName = %q, does not match conventional branch regex", got)
+	if want := "mock workspace summary (2 PRs)"; got != want {
+		t.Errorf("SummarizeWorkspace = %q, want %q", got, want)
+	}
+
+	// Deterministic across calls.
+	again, _ := New().SummarizeWorkspace(context.Background(), "ship it", "mock recap", prs)
+	if again != got {
+		t.Errorf("SummarizeWorkspace not deterministic: %q vs %q", again, got)
+	}
+
+	// Nothing to summarize → empty.
+	if empty, _ := New().SummarizeWorkspace(context.Background(), "", "", nil); empty != "" {
+		t.Errorf("SummarizeWorkspace(empty) = %q, want empty", empty)
 	}
 }
 
-func TestGenerateName_SessionFormat(t *testing.T) {
-	// The session naming prompt specifies the `auto/` format.
-	got, err := New().GenerateName(context.Background(), "Format: auto/<short-desc>", "wire up the multi repo thing")
+// The mock's GenerateName satisfies the kernel's intent-first naming CONTRACT
+// (four KEY: value lines) deterministically — the proof the AI naming port is
+// genuinely swappable with `[ai] provider = "mock"`. slugRe mirrors the slug
+// the kernel's parseWorkspacePlan sanitizes to.
+var slugRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+// keyLine extracts the value of a "KEY: value" line from the mock's output.
+func keyLine(out, key string) string {
+	for _, ln := range strings.Split(out, "\n") {
+		if v, ok := strings.CutPrefix(ln, key+": "); ok {
+			return strings.TrimSpace(v)
+		}
+		if ln == key+":" {
+			return ""
+		}
+	}
+	return ""
+}
+
+func TestGenerateName_KeyContract(t *testing.T) {
+	got, err := New().GenerateName(context.Background(), workspaceNamingSentinel,
+		"REPO INDEX:\nwawa/web-app\nEXISTING TAGS: (none)\nINTENT: Add dark mode toggle!!!")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sessionRe.MatchString(got) {
-		t.Errorf("GenerateName = %q, does not match auto-session regex", got)
+	for _, key := range []string{"TITLE", "SLUG", "TAG", "REPOS"} {
+		if !strings.Contains(got, key+":") {
+			t.Errorf("output missing %s line:\n%s", key, got)
+		}
+	}
+	if slug := keyLine(got, "SLUG"); !slugRe.MatchString(slug) {
+		t.Errorf("SLUG %q is not a clean slug", slug)
+	}
+	// REPOS echoes the first indexed repo so the sandbox materializes a worktree.
+	if repos := keyLine(got, "REPOS"); repos != "wawa/web-app" {
+		t.Errorf("REPOS = %q, want wawa/web-app (first in index)", repos)
 	}
 }
 
 func TestGenerateName_Deterministic(t *testing.T) {
-	a, _ := New().GenerateName(context.Background(), "x", "same intent")
-	b, _ := New().GenerateName(context.Background(), "x", "same intent")
+	in := "REPO INDEX:\n(none)\nEXISTING TAGS: (none)\nINTENT: same intent"
+	a, _ := New().GenerateName(context.Background(), workspaceNamingSentinel, in)
+	b, _ := New().GenerateName(context.Background(), workspaceNamingSentinel, in)
 	if a != b {
 		t.Errorf("GenerateName not deterministic: %q vs %q", a, b)
 	}
 }
 
-func TestGenerateName_EmptyIntentFallsBack(t *testing.T) {
-	got, _ := New().GenerateName(context.Background(), "x", "!!! ??? ")
-	if !branchRe.MatchString(got) {
-		t.Errorf("empty-ish intent should still yield a valid name, got %q", got)
+func TestGenerateName_ReusesMentionedTag(t *testing.T) {
+	got, _ := New().GenerateName(context.Background(), workspaceNamingSentinel,
+		"REPO INDEX:\n(none)\nEXISTING TAGS: billing, infra\nINTENT: billing webhook 500s on retry")
+	if tag := keyLine(got, "TAG"); tag != "billing" {
+		t.Errorf("TAG = %q, want billing (intent mentions it)", tag)
+	}
+	// No mentioned tag → empty.
+	got, _ = New().GenerateName(context.Background(), workspaceNamingSentinel,
+		"REPO INDEX:\n(none)\nEXISTING TAGS: billing, infra\nINTENT: add dark mode toggle")
+	if tag := keyLine(got, "TAG"); tag != "" {
+		t.Errorf("TAG = %q, want empty (no existing tag mentioned)", tag)
 	}
 }
 
-// The tag-aware two-line contract: line 1 is the name derived from the
-// unwrapped INTENT body (not the EXISTING TAGS preamble), line 2 echoes a
-// mentioned existing tag or is empty.
-func TestGenerateName_TagAware_NameFromIntentBody(t *testing.T) {
-	got, _ := New().GenerateName(context.Background(), tagAwareSysPrompt,
-		"EXISTING TAGS: billing, infra\nINTENT: add dark mode toggle")
-	name, tag, ok := strings.Cut(got, "\n")
-	if !ok {
-		t.Fatalf("want two lines, got %q", got)
-	}
-	if name != "feat/add-dark-mode-toggle" {
-		t.Errorf("name = %q, want feat/add-dark-mode-toggle (must ignore the EXISTING TAGS wrapper)", name)
-	}
-	if tag != "" {
-		t.Errorf("tag = %q, want empty (intent mentions no existing tag)", tag)
-	}
-}
-
-func TestGenerateName_TagAware_ReusesMentionedTag(t *testing.T) {
-	got, _ := New().GenerateName(context.Background(), tagAwareSysPrompt,
-		"EXISTING TAGS: billing, infra\nINTENT: billing webhook 500s on retry")
-	_, tag, _ := strings.Cut(got, "\n")
-	if tag != "billing" {
-		t.Errorf("tag = %q, want billing (intent mentions it)", tag)
-	}
-}
-
-func TestGenerateName_SingleLineWhenNotTagAware(t *testing.T) {
-	got, _ := New().GenerateName(context.Background(), "Format: <type>/<desc>", "add dark mode")
-	if strings.Contains(got, "\n") {
-		t.Errorf("non-tag-aware prompt must yield one line, got %q", got)
-	}
-}
+// workspaceNamingSentinel stands in for the kernel's workspace-naming system
+// prompt (the mock keys only on the wrapped intent, so any value works).
+const workspaceNamingSentinel = "name a workspace"

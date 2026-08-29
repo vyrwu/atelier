@@ -106,5 +106,12 @@ func Render(w io.Writer, opts RenderOptions) (*plugin.DiscoveryResult, error) {
 	fmt.Fprintln(w)
 	fmt.Fprint(w, RestoreBlock())
 
+	// Launcher default screen: bundled/full mode only (an embedded --bare user
+	// drives their own tmux and shouldn't get a popup on every attach).
+	if opts.IncludeTheme {
+		fmt.Fprintln(w)
+		fmt.Fprint(w, WelcomeBlock())
+	}
+
 	return res, nil
 }

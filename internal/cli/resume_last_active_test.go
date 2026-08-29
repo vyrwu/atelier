@@ -45,7 +45,6 @@ func TestResolveLaunchSession_FallbackOnEmptyLastActive(t *testing.T) {
 		Workspaces: []statestore.Workspace{{
 			SessionName: "some/other",
 			RepoPath:    "/tmp/whatever",
-			Kind:        "default-branch",
 		}},
 	}); err != nil {
 		t.Fatalf("seed: %v", err)

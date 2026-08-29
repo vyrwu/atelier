@@ -77,7 +77,8 @@ func TestWriteState_RendersWindowCapability(t *testing.T) {
 	top := &state.Topology{
 		Sessions: []state.Session{{ID: "$1", Name: "vyrwu/atelier", Kind: state.KindWorkspace}},
 		Windows: []state.Window{
-			{SessionID: "$1", WindowID: "@2", Name: "feat/x", RepoPath: "/r", WorkspaceKind: "auto",
+			{SessionID: "$1", WindowID: "@2", Name: "feat/x", RepoPath: "/r",
+				WorkspaceID: "vyrwu/atelier", Root: "/ws/root", Driver: true,
 				Attention: true, Recap: "summary", Tag: "wip", ForgeState: "open",
 				PaneCwd: "/gone", PaneCwdLive: false},
 		},
@@ -86,7 +87,7 @@ func TestWriteState_RendersWindowCapability(t *testing.T) {
 	var buf bytes.Buffer
 	writeStateText(&buf, top, state.Validate(top))
 	s := buf.String()
-	for _, want := range []string{"WINDOWS", "feat/x", "attn", "kind=auto", "tag=wip", "forge=open", "CWD-GONE", "recap"} {
+	for _, want := range []string{"WINDOWS", "feat/x", "attn", "ws=vyrwu/atelier", "driver", "tag=wip", "forge=open", "CWD-GONE", "recap"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("windows section missing %q; got:\n%s", want, s)
 		}
@@ -101,7 +102,8 @@ func TestWriteState_RendersWindowCapability(t *testing.T) {
 	if err := json.Unmarshal(jbuf.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(got.Windows) != 1 || !got.Windows[0].Attention || got.Windows[0].PaneCwdLive || got.Windows[0].WorkspaceKind != "auto" {
+	if len(got.Windows) != 1 || !got.Windows[0].Attention || got.Windows[0].PaneCwdLive ||
+		got.Windows[0].WorkspaceID != "vyrwu/atelier" || got.Windows[0].Root != "/ws/root" || !got.Windows[0].Driver {
 		t.Errorf("window JSON wrong: %+v", got.Windows)
 	}
 }

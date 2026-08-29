@@ -33,8 +33,19 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 		Workspaces: []Workspace{
 			{
 				SessionName: "vyrwu/atelier",
+				Title:       "vyrwu/atelier",
+				Intent:      "build statestore",
+				Root:        "/Users/u/ateliers/vyrwu-atelier",
 				RepoPath:    "/Users/u/code/github/vyrwu/atelier",
-				Kind:        "worktree",
+				Worktrees: []Worktree{
+					{Repo: "vyrwu/atelier", Branch: "feat/persistence",
+						Path: "/Users/u/code/.worktrees/.../feat/persistence",
+						Link: "/Users/u/ateliers/vyrwu-atelier/feat-persistence"},
+				},
+				PRs: []PR{
+					{Number: 42, Repo: "vyrwu/atelier", Title: "add statestore",
+						State: "open", CI: "pass", Registered: true},
+				},
 				Windows: []Window{
 					{Name: "main", Cwd: "/Users/u/code/github/vyrwu/atelier", Branch: "main"},
 					{
@@ -91,6 +102,27 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 	if out.Globals["k8s_active"] != "prod-aws" {
 		t.Errorf("global not preserved: %+v", out.Globals)
 	}
+	ws := out.Workspaces[0]
+	if ws.Title != "vyrwu/atelier" || ws.Intent != "build statestore" ||
+		ws.Root != "/Users/u/ateliers/vyrwu-atelier" {
+		t.Errorf("workspace identity not preserved: %+v", ws)
+	}
+	if len(ws.Worktrees) != 1 {
+		t.Fatalf("worktrees not preserved: %+v", ws.Worktrees)
+	}
+	wt := ws.Worktrees[0]
+	if wt.Repo != "vyrwu/atelier" || wt.Branch != "feat/persistence" ||
+		wt.Link != "/Users/u/ateliers/vyrwu-atelier/feat-persistence" {
+		t.Errorf("worktree fields not preserved: %+v", wt)
+	}
+	if len(ws.PRs) != 1 {
+		t.Fatalf("prs not preserved: %+v", ws.PRs)
+	}
+	pr := ws.PRs[0]
+	if pr.Number != 42 || pr.Repo != "vyrwu/atelier" || pr.State != "open" ||
+		pr.CI != "pass" || !pr.Registered {
+		t.Errorf("pr fields not preserved: %+v", pr)
+	}
 }
 
 // TestLoad_SchemaMismatch_TreatedAsEmpty locks in the "no migrations,
@@ -142,7 +174,7 @@ func TestLoad_MalformedJSON_ReturnsError(t *testing.T) {
 func TestSave_AtomicViaTempRename(t *testing.T) {
 	path := setupCacheDir(t)
 	first := &State{Workspaces: []Workspace{
-		{SessionName: "first", RepoPath: "/r", Kind: "worktree"},
+		{SessionName: "first", RepoPath: "/r"},
 	}}
 	if err := Save(first); err != nil {
 		t.Fatal(err)
@@ -164,11 +196,11 @@ func TestSave_AtomicViaTempRename(t *testing.T) {
 }
 
 // TestUpdateWindow_OnNewWorkspace verifies UpdateWindow's
-// auto-create-workspace path. The created workspace lacks
-// RepoPath/Kind, so the load-side filter drops it. This documents
-// the intended interaction: callers must seed RepoPath/Kind via
-// UpdateWorkspace (or RegisterCreatedWorkspace) before UpdateWindow
-// payloads will survive a round-trip.
+// auto-create-workspace path. The created workspace lacks any workspace
+// identity (Title/Intent/Root/RepoPath/Worktrees), so the load-side filter
+// drops it. This documents the intended interaction: callers must seed
+// identity via UpdateWorkspace (or RegisterCreatedWorkspace) before
+// UpdateWindow payloads will survive a round-trip.
 func TestUpdateWindow_OnNewWorkspace_RequiresScopeToPersist(t *testing.T) {
 	setupCacheDir(t)
 	err := UpdateWindow("repo-a", "feat/x", func(w *Window) {
@@ -178,9 +210,9 @@ func TestUpdateWindow_OnNewWorkspace_RequiresScopeToPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, _ := Load()
-	// No RepoPath/Kind on the workspace → filter drops it on load.
+	// No identity on the workspace → filter drops it on load.
 	if s != nil && len(s.Workspaces) != 0 {
-		t.Errorf("workspace without RepoPath/Kind should be filtered, got %+v", s.Workspaces)
+		t.Errorf("workspace without identity should be filtered, got %+v", s.Workspaces)
 	}
 }
 
@@ -188,7 +220,7 @@ func TestUpdateWindow_MutatesExistingAtelierWorkspace(t *testing.T) {
 	setupCacheDir(t)
 	// Seed with a properly-scoped workspace.
 	_ = Save(&State{Workspaces: []Workspace{
-		{SessionName: "repo-a", RepoPath: "/r", Kind: "worktree",
+		{SessionName: "repo-a", RepoPath: "/r",
 			Windows: []Window{{Name: "main", Recap: "old"}},
 		},
 	}})
@@ -224,8 +256,8 @@ func TestUpdateGlobal_SetAndDelete(t *testing.T) {
 func TestRemoveSession_DropsWorkspace(t *testing.T) {
 	setupCacheDir(t)
 	_ = Save(&State{Workspaces: []Workspace{
-		{SessionName: "a", RepoPath: "/r-a", Kind: "worktree"},
-		{SessionName: "b", RepoPath: "/r-b", Kind: "worktree"},
+		{SessionName: "a", RepoPath: "/r-a"},
+		{SessionName: "b", RepoPath: "/r-b"},
 	}})
 	_ = RemoveSession("a")
 	s, _ := Load()
@@ -237,11 +269,11 @@ func TestRemoveSession_DropsWorkspace(t *testing.T) {
 func TestRemoveWindow_DropsWindow_AndRemovesEmptyWorkspace(t *testing.T) {
 	setupCacheDir(t)
 	_ = Save(&State{Workspaces: []Workspace{
-		{SessionName: "a", RepoPath: "/r-a", Kind: "worktree", Windows: []Window{
+		{SessionName: "a", RepoPath: "/r-a", Windows: []Window{
 			{Name: "main"},
 			{Name: "feat/x"},
 		}},
-		{SessionName: "b", RepoPath: "/r-b", Kind: "worktree", Windows: []Window{{Name: "only"}}},
+		{SessionName: "b", RepoPath: "/r-b", Windows: []Window{{Name: "only"}}},
 	}})
 	// Drop one window from `a`; workspace `a` remains with one window.
 	_ = RemoveWindow("a", "main")
@@ -260,7 +292,7 @@ func TestRemoveWindow_DropsWindow_AndRemovesEmptyWorkspace(t *testing.T) {
 func TestRenameWindow_UpdatesName(t *testing.T) {
 	setupCacheDir(t)
 	_ = Save(&State{Workspaces: []Workspace{
-		{SessionName: "a", RepoPath: "/r", Kind: "worktree",
+		{SessionName: "a", RepoPath: "/r",
 			Windows: []Window{{Name: "old", Recap: "carry over"}},
 		},
 	}})
@@ -291,21 +323,23 @@ func TestFindWindow_ReturnsPointerOrNil(t *testing.T) {
 }
 
 // TestLoad_FiltersNonAtelierWorkspaces verifies the load-side scope
-// filter: legacy / leaked entries without RepoPath or Kind get
-// silently dropped. This is the migration path for caches that
-// accumulated random tmux sessions before the write-through scope
-// check landed.
+// filter: leaked entries carrying no workspace identity
+// (Title/Intent/Root/RepoPath/Worktrees) get silently dropped. This is
+// the self-heal path for caches that accumulated random tmux sessions
+// before the write-through scope check landed.
 func TestLoad_FiltersNonAtelierWorkspaces(t *testing.T) {
 	path := setupCacheDir(t)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A v3 (current-schema) cache so Load goes straight through the filter
+	// without the v2 migration (which would derive a title for every row).
 	bogus := `{
-  "schema_version": 2,
+  "schema_version": 3,
   "workspaces": [
     {"session_name":"random-shell", "windows":[{"name":"zsh"}]},
-    {"session_name":"real-ws", "repo_path":"/repo", "kind":"worktree", "windows":[{"name":"main"}]},
-    {"session_name":"multi-repo-ws", "kind":"multi-repo", "windows":[{"name":"1"}]},
+    {"session_name":"real-ws", "repo_path":"/repo", "windows":[{"name":"main"}]},
+    {"session_name":"intent-ws", "intent":"ship the thing", "windows":[{"name":"1"}]},
     {"session_name":"another-shell", "windows":[{"name":"x","attention":true}]}
   ]
 }`
@@ -320,7 +354,7 @@ func TestLoad_FiltersNonAtelierWorkspaces(t *testing.T) {
 		t.Fatalf("expected 2 atelier-managed workspaces, got %d: %+v",
 			len(s.Workspaces), s)
 	}
-	want := map[string]bool{"real-ws": true, "multi-repo-ws": true}
+	want := map[string]bool{"real-ws": true, "intent-ws": true}
 	for _, ws := range s.Workspaces {
 		if !want[ws.SessionName] {
 			t.Errorf("unexpected workspace kept: %q", ws.SessionName)
@@ -336,7 +370,7 @@ func TestSave_FiltersNonAtelierWorkspaces(t *testing.T) {
 	in := &State{Workspaces: []Workspace{
 		{SessionName: "ghost"},                                         // dropped
 		{SessionName: "real", RepoPath: "/r"},                          // kept
-		{SessionName: "multi", Kind: "multi-repo"},                     // kept
+		{SessionName: "intent", Intent: "ship the thing"},              // kept
 		{SessionName: "another-ghost", Windows: []Window{{Name: "x"}}}, // dropped
 	}}
 	if err := Save(in); err != nil {
@@ -391,7 +425,7 @@ func TestCanonicalSessionName(t *testing.T) {
 func TestRemoveWindow_MangledKeyMatchesDottedSlug(t *testing.T) {
 	setupCacheDir(t)
 	_ = Save(&State{Workspaces: []Workspace{
-		{SessionName: "vyrwu/cloudnativedenmark.dk", RepoPath: "/r", Kind: "worktree",
+		{SessionName: "vyrwu/cloudnativedenmark.dk", RepoPath: "/r",
 			Windows: []Window{{Name: "feat/x"}}},
 	}})
 	if err := RemoveWindow("vyrwu/cloudnativedenmark_dk", "feat/x"); err != nil {
@@ -406,9 +440,9 @@ func TestRemoveWindow_MangledKeyMatchesDottedSlug(t *testing.T) {
 func TestRemoveSession_MangledKeyMatchesDottedSlug(t *testing.T) {
 	setupCacheDir(t)
 	_ = Save(&State{Workspaces: []Workspace{
-		{SessionName: "vyrwu/cloudnativedenmark.dk", RepoPath: "/r", Kind: "worktree",
+		{SessionName: "vyrwu/cloudnativedenmark.dk", RepoPath: "/r",
 			Windows: []Window{{Name: "feat/x"}}},
-		{SessionName: "vyrwu/atelier", RepoPath: "/r2", Kind: "worktree",
+		{SessionName: "vyrwu/atelier", RepoPath: "/r2",
 			Windows: []Window{{Name: "main"}}},
 	}})
 	if err := RemoveSession("vyrwu/cloudnativedenmark_dk"); err != nil {

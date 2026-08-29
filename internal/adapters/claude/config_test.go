@@ -30,6 +30,9 @@ func TestDefaultConfig_ModelResolution(t *testing.T) {
 	if got := c.RecapModel(); got != "haiku" {
 		t.Errorf("RecapModel default (inherits model) = %q, want haiku", got)
 	}
+	if got := c.SummaryModel(); got != "haiku" {
+		t.Errorf("SummaryModel default (inherits model) = %q, want haiku", got)
+	}
 }
 
 // No config file → defaults, with prompt constants filled in.
@@ -42,11 +45,17 @@ func TestLoadConfig_NoFile(t *testing.T) {
 	if c.NamingModel() != "sonnet" || c.RecapModel() != "haiku" {
 		t.Errorf("no-file models: naming=%q recap=%q, want sonnet/haiku", c.NamingModel(), c.RecapModel())
 	}
+	if c.SummaryModel() != "haiku" {
+		t.Errorf("no-file summary model = %q, want haiku", c.SummaryModel())
+	}
 	if c.Prompts.Recap != DefaultRecapSystemPrompt {
 		t.Error("recap prompt should fall back to DefaultRecapSystemPrompt")
 	}
-	if c.Prompts.MultiRepo != DefaultMultiRepoSystemPrompt {
-		t.Error("multi_repo prompt should fall back to DefaultMultiRepoSystemPrompt")
+	if c.Prompts.Workspace != DefaultWorkspaceSystemPrompt {
+		t.Error("workspace prompt should fall back to DefaultWorkspaceSystemPrompt")
+	}
+	if c.Prompts.Summary != DefaultSummarySystemPrompt {
+		t.Error("summary prompt should fall back to DefaultSummarySystemPrompt")
 	}
 }
 
@@ -91,7 +100,7 @@ func TestLoadConfig_TaskOverrides(t *testing.T) {
 }
 
 func TestLoadConfig_PromptOverrides(t *testing.T) {
-	writeAIConfig(t, "[ai.prompts]\nrecap = \"custom recap\"\nmulti_repo = \"custom multi\"\n")
+	writeAIConfig(t, "[ai.prompts]\nrecap = \"custom recap\"\nworkspace = \"custom workspace\"\nsummary = \"custom summary\"\n")
 	c, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +108,10 @@ func TestLoadConfig_PromptOverrides(t *testing.T) {
 	if c.Prompts.Recap != "custom recap" {
 		t.Errorf("Prompts.Recap = %q, want custom recap", c.Prompts.Recap)
 	}
-	if c.Prompts.MultiRepo != "custom multi" {
-		t.Errorf("Prompts.MultiRepo = %q, want custom multi", c.Prompts.MultiRepo)
+	if c.Prompts.Workspace != "custom workspace" {
+		t.Errorf("Prompts.Workspace = %q, want custom workspace", c.Prompts.Workspace)
+	}
+	if c.Prompts.Summary != "custom summary" {
+		t.Errorf("Prompts.Summary = %q, want custom summary", c.Prompts.Summary)
 	}
 }
