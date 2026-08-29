@@ -39,7 +39,7 @@ const (
 
 func summaryIndentCells() int { return timeColCells + attnColCells + forgeColCells }
 
-const zeroWidthSpace = "​"
+const zeroWidthSpace = "\u200b"
 
 // formatSummaryLine renders the workspace summary as an italic dim-grey line
 // under the title (fzf multi-line item). Empty summary → a blank (present)

@@ -251,23 +251,3 @@ func stripEqualsPrefix(s string) string {
 	}
 	return s
 }
-
-// lastWindowIndex returns the highest window index in `session`.
-func lastWindowIndex(h *tmuxhost.Client, session string) int {
-	out, err := h.Run("list-windows", "-t", "="+session, "-F", "#I")
-	if err != nil {
-		return 0
-	}
-	last := 0
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var n int
-		if _, err := fmt.Sscanf(line, "%d", &n); err == nil && n > last {
-			last = n
-		}
-	}
-	return last
-}
