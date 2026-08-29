@@ -2,9 +2,9 @@
 
 This is the load-bearing integration doc. Atelier exposes shell-runnable
 data emitters as its **public statusline API**. You plug them into your
-tmux `window-status-format` (or anywhere else that accepts `#(...)`
-shell-out) to surface atelier's per-workspace state in whatever visual
-style you want.
+tmux `status-left` / `window-status-format` (or anywhere else that accepts
+`#(...)` shell-out) to surface atelier's state in whatever visual style
+you want.
 
 If you're using the bundled launcher (`atelier` command), these are
 already wired for you. Everyone else: this is how.
@@ -13,10 +13,11 @@ already wired for you. Everyone else: this is how.
 > **Upgrading to the intent-workspace release? Re-source your tmux.conf.**
 > The v1 redesign **changed the keybindings** (`M-c` is now List Changes,
 > the k9s context switcher moved to `M-k`, `M-r` renames a workspace, and
-> `M-u` clone-from-URL is gone). `atelier init --bare` emits the new
-> binding block, but your running tmux server keeps the *old* bindings
-> until you reload — so an embedded (`--bare`) setup will still fire the
-> pre-redesign bindings after you upgrade the binary. Reload with:
+> `M-u` clone-from-URL is gone) and **moved the bar to the top** showing the
+> workspace *description* instead of the repo name. `atelier init --bare`
+> emits the new binding block, but your running tmux server keeps the *old*
+> bindings until you reload — so an embedded (`--bare`) setup will still fire
+> the pre-redesign bindings after you upgrade the binary. Reload with:
 >
 > ```bash
 > tmux source-file ~/.config/tmux/tmux.conf   # or your config path
@@ -27,19 +28,20 @@ already wired for you. Everyone else: this is how.
 
 ---
 
-## The two emitters
+## The emitters
 
 Both are subcommands of the `atelier` binary. They print to stdout
 and exit 0 in all states (so tmux `#(...)` never produces noise).
 
 > [!NOTE]
-> **The git-freshness (ahead/behind) segment is retired.** It was a
-> per-*branch* signal, and a workspace is no longer a branch checkout —
-> the driver agent runs at the workspace root, which spans repos. The
-> "is there unpushed/unmerged work" signal now lives in the **PR state**
-> in the `M-c` Changes view. `atelier status freshness` is no longer part
-> of the stamped statusline (its input options are no longer populated,
-> so it renders nothing); don't wire it into new configs.
+> **The git-freshness (ahead/behind) and per-window forge (PR) badges are
+> retired from the statusline.** Both were per-*branch* signals, and a
+> workspace is no longer a branch checkout — the driver agent runs at the
+> workspace root, which spans repos. "Is there unpushed/unmerged work" now
+> lives as **PR state** in the `M-c` Changes view, and PRs are an aggregate
+> on the workspace record (rendered in the `M-s` rollup and `M-c`), not a
+> per-window tmux option. `atelier status freshness` and `atelier status
+> forge` are gone; don't wire them into new configs.
 
 ### `atelier status attention count`
 
@@ -60,94 +62,88 @@ transcript each tick — not a hook the agent installs). It clears
 automatically when the user opens that window (via `after-select-window`
 hook) or attaches to its popup (via `client-session-changed` hook).
 
-### `atelier status forge '<forge_state>'`
+### `atelier status description '<session>'`
 
-Renders the workspace's code-forge (PR/MR) status as a colored Nerd
-Font glyph. The single argument is the window's cached `@forge_state`,
-classified by the active forge adapter (GitHub, …) and refreshed in the
-background (`SpawnForgeRefresh`) on every workspace-land event and on
-picker open. When no forge integration is configured the option is
-unset and the emitter renders nothing.
+Prints the current workspace's **description** — its intent-derived title
+(`@workspace_title`) — for the left of the bar. The single argument is the
+session whose description to show; the bundled theme passes
+`#{client_session}` (the focused client's session). Falls back to the
+session name when the option is unset (e.g. the launcher's `default`
+session), so the bar is never blank.
 
-| Argument | Source | Type |
+| Argument | Source | Meaning |
 |---|---|---|
-| `forge_state` | `#{@forge_state}` | one of `open` / `draft` / `merged` / `closed` (empty = no PR) |
+| `session` | `#{client_session}` | the session whose `@workspace_title` to render |
 
-**Output shapes** — each state renders a distinct Nerd Font v3 Codicon
-(shared with the picker badge), reinforced by a 256-palette color that
-resolves against the user's theme:
-
-| State | Glyph (Codicon) | Output |
-|---|---|---|
-| No PR / no forge integration (`forge_state` empty) | — | `` (empty) |
-| Open PR | git-pull-request `U+EA64` | ` #[fg=colour35]<glyph>#[default]` (green) |
-| Draft PR | git-pull-request-draft `U+EBDB` | ` #[fg=colour244]<glyph>#[default]` (grey) |
-| Merged | git-merge `U+EAFE` | ` #[fg=colour141]<glyph>#[default]` (purple) |
-| Closed | git-pull-request-closed `U+EBDA` | ` #[fg=colour203]<glyph>#[default]` (red) |
-
-The glyph + color come from the kernel-owned spec (`integration.ForgeGlyph`),
-so this status-line badge and the workspace picker's badge always match.
+It reads `@workspace_title` via `show-options` (a direct target read) rather
+than a `#{@workspace_title}` status FORMAT, because a session user-option
+does not resolve inside a status format on every tmux version (3.4). Output
+is the raw title text (no color codes) — wrap it in your own `#[...]`
+directives to style it, as the bundled theme does with `#[bold]`.
 
 ---
 
 ## Worked examples
 
-### Vanilla tmux
+### Vanilla tmux — atelier-style top bar
 
 Add to your `~/.config/tmux/tmux.conf` after sourcing atelier:
 
 ```tmux
 run-shell 'atelier init --bare | tmux source-file -'
 
-# Show only the active window in the status bar, with atelier's
-# attention rollup next to the window name, then the forge PR badge.
-set -g window-status-current-format "#W #(atelier status attention count)#(atelier status forge '#{@forge_state}')"
+# Bar at the top: the workspace description + attention rollup on the left,
+# the clock on the right. No per-window chrome.
+set -g status-position top
+set -g status-left " #[bold]#(atelier status description '#{client_session}')#[nobold]  #(atelier status attention count) "
+set -g status-right " %H:%M "
+set -g window-status-format ""
+set -g window-status-current-format ""
 ```
 
-### Idempotent stamping (recommended)
+### Keep your own bar, just add the attention rollup (stamping)
 
-Hand-writing the emitters into your format gets tedious. Atelier
-ships a stamp command that injects the canonical segments after
-`#W` in your existing format:
+If you'd rather keep your existing per-window bar and only add atelier's
+attention rollup, the stamp command injects it after `#W` in your existing
+`window-status-current-format`:
 
 ```tmux
 run-shell 'atelier init --bare | tmux source-file -'
 
-# Set whatever format you want. Atelier's stamp-statusline (run via
-# init) will inject the attention + forge segments AFTER `#W` and
-# before any other content. Safe to re-source the config any number
-# of times — the stamp strips prior injections before adding the
-# canonical segments.
+# Set whatever format you want. Atelier's stamp-statusline (run via init)
+# injects the attention segment AFTER `#W` and before any other content.
+# Safe to re-source any number of times — the stamp strips a prior
+# injection before re-adding the canonical segment.
 set -g window-status-current-format "#W"
 ```
 
-The stamp re-injects the canonical segments AFTER `#W` and any trailing
-color/glyph blocks (so the icons land in the right segment of a
-powerline-style format), stripping any prior atelier injection first.
-Segments are injected into `window-status-current-format` ONLY, so the
-bar reflects the focused workspace; inactive windows render nothing
-(keep `window-status-format ""`). The global `attention count` rollup
-still surfaces how many background workspaces are waiting.
+The stamp re-injects the segment AFTER `#W` and any trailing color/glyph
+blocks (so the icon lands in the right segment of a powerline-style
+format), stripping any prior atelier injection first. It targets
+`window-status-current-format` ONLY, so the bar reflects the focused
+workspace; keep `window-status-format ""` so inactive windows render
+nothing. The global `attention count` rollup still surfaces how many
+background workspaces are waiting.
 
 ### Powerline-style
 
 ```tmux
 # Your existing powerline-style format, with `#W` somewhere in it:
-set -g window-status-current-format "#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]"
+set -g window-status-current-format "#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]"
 
 # Atelier's stamp finds `#W ` + the trailing color/arrow block and
-# injects after the arrow, so the icons render in the NEXT segment
+# injects after the arrow, so the icon renders in the NEXT segment
 # rather than inside the colored name box.
 run-shell 'atelier init --bare | tmux source-file -'
 ```
 
 Final format (after stamp):
 ```
-#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]#(atelier status attention count)#(atelier status forge '#{@forge_state}')
+#[fg=brightblack,bg=blue]#[fg=white,bg=blue] #W #[fg=blue,bg=brightblack]#(atelier status attention count)
 ```
 
-Only two segments are injected now; the freshness icon that used to sit
-between `#W` and the attention rollup is gone.
+Only the attention segment is injected now; the freshness and forge icons
+that used to follow it are gone.
 
 ### Dracula
 
@@ -160,16 +156,13 @@ the same stamp logic works against dracula's status format. See
 
 ## Where the data comes from
 
-Atelier writes the per-workspace tmux options consumed by these
-emitters:
+Atelier writes the per-workspace tmux options consumed by these emitters:
 
 - `@needs_attention` — set by atelier's observer loop when a workspace's
   agent is blocked waiting on you; cleared by atelier's
   `after-select-window` and `client-session-changed` hooks.
-- `@forge_state` — set by the forge-refresh worker
-  (`SpawnForgeRefresh`), which classifies each workspace's PR via
-  the active forge adapter. Fires on every workspace-land event and on
-  picker open; per-repo batched queries are TTL-throttled.
+- `@workspace_title` — the workspace's renameable description, set at
+  creation (from the intent) and edited by `M-r`. Session-scoped.
 
 All four atelier hooks (`window-unlinked`, `session-closed`,
 `after-select-window`, `client-session-changed`) are emitted by
@@ -181,32 +174,30 @@ All four atelier hooks (`window-unlinked`, `session-closed`,
 
 Both emitters are fast and side-effect-free:
 
-- `forge` is pure — it maps the pre-cached `@forge_state`
-  argument to a glyph. The forge query happens out-of-band in the
-  refresh worker, never in the emitter.
+- `description` does one `tmux show-options` (~2ms typical).
 - `attention count` does one `tmux list-windows -a` (~5ms typical)
   and counts matching lines.
 
 tmux invokes `#(...)` shell-outs once per `status-interval` (default
-15s; atelier sets it to 3s in its `StatuslineBlock`). 8 windows ×
-0.3 Hz × 2 emitters = ~5 invocations/second. Trivial.
+15s; atelier sets it to 3s in its `StatuslineBlock`). A couple of
+invocations every 3s is trivial.
 
 ---
 
 ## What you can't customize through these emitters
 
-If you want to change the icons or colors themselves (e.g. swap ✔ for
+If you want to change the icons or colors themselves (e.g. swap ⏺ for
 something else), the emitters are the wrong layer — they hardcode the
 output strings. Fork the emitter logic, or wrap them in your own shell
 function and post-process the output:
 
 ```bash
-# in some script atelier_forge on PATH:
-out=$(atelier status forge "$@")
-echo "${out/ /  }"  # your preferred spacing/glyph
+# in some script atelier_attn on PATH:
+out=$(atelier status attention count)
+echo "${out/⏺/●}"  # your preferred glyph
 ```
 
-Then in tmux: `#(atelier_forge '#{@forge_state}')`.
+Then in tmux: `#(atelier_attn)`.
 
 Atelier's API stability promise is on the **arg shape and output
 shape contract**, not on the specific glyphs/colors. Wrap if you
@@ -220,8 +211,11 @@ need different visuals.
 core bindings, the four hooks above, the `stamp-statusline` injection,
 the background refresh loop, and workspace restore. It does **not** emit:
 
-- The bundled **theme** (`window-status-*` formats, palette, clipboard,
-  behavioral defaults) — you own the visual layer.
+- The bundled **theme** (top bar, `status-left` description, `window-status-*`
+  formats, palette, clipboard, behavioral defaults) — you own the visual
+  layer. In `--bare` mode the attention rollup reaches you via the
+  `stamp-statusline` injection into your own `window-status-current-format`,
+  not `status-left`.
 - The **launcher default screen**. In the bundled launcher, a
   `client-attached` hook runs `atelier internal welcome`, which opens the
   `M-n` intent creator on attach when you have no workspaces yet (and

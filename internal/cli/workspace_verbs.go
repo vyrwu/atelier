@@ -90,7 +90,7 @@ func worktreeAddCmd() *cobra.Command {
 			if _, err := os.Stat(repoPath); err != nil {
 				return fmt.Errorf("repo %q not found at %s", repo, repoPath)
 			}
-			wtPath := filepath.Join(workspace.WorktreeRootBase(), repo, branch)
+			wtPath := filepath.Join(workspace.WorktreeRootBase(), repo, workspace.WorktreeDirName(branch))
 			wt, err := workspace.AddWorktree(h, ws.Session, ws.Root, repoPath, repo, branch, wtPath)
 			if err != nil {
 				return err

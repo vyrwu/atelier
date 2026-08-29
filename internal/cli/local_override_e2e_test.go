@@ -159,13 +159,15 @@ func TestLocalOverride_AbsentIsSilentNoOp(t *testing.T) {
 	}
 
 	// Atelier's default status-left must still be in place since
-	// no override file existed to replace it.
+	// no override file existed to replace it. The redesigned bar shows the
+	// workspace description (not the repo/session #S), so the description
+	// emitter is the marker that atelier's default survived.
 	got, err := srv.Client.Run("show-options", "-gv", "status-left")
 	if err != nil {
 		t.Fatalf("show-options status-left: %v", err)
 	}
 	gotTrim := strings.TrimRight(string(got), "\n")
-	if !strings.Contains(gotTrim, "#S") {
+	if !strings.Contains(gotTrim, "atelier status description") {
 		t.Errorf("atelier default status-left lost without an override file: got %q",
 			gotTrim)
 	}
@@ -177,11 +179,10 @@ func TestLocalOverride_AbsentIsSilentNoOp(t *testing.T) {
 // sets a custom window-status-current-format in their override
 // file, stamp-statusline (which runs in StatuslineBlock, emitted
 // AFTER ThemeBlock that sources the override) must re-inject
-// atelier's attention + forge segments into the user's
-// custom format.
+// atelier's attention segment into the user's custom format.
 //
-// Locks the contract: user overrides win on style, atelier
-// segments are always present regardless of user format choice.
+// Locks the contract: user overrides win on style, the atelier
+// attention rollup is always present regardless of user format choice.
 func TestLocalOverride_PreservesAtelierStatuslineSegments(t *testing.T) {
 	srv := testtmux.New(t)
 	prebuildBinaries(t, srv)
@@ -193,8 +194,8 @@ func TestLocalOverride_PreservesAtelierStatuslineSegments(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	// User sets a totally custom window-status-current-format. It
-	// must NOT include atelier segments; stamp-statusline is
-	// supposed to add them.
+	// must NOT include the atelier segment; stamp-statusline is
+	// supposed to add it.
 	if err := os.WriteFile(filepath.Join(localDir, "tmux.conf.local"),
 		[]byte("set -g window-status-current-format '#[bold]CUSTOM:#W#[nobold]'\n"),
 		0o644); err != nil {
@@ -219,7 +220,7 @@ func TestLocalOverride_PreservesAtelierStatuslineSegments(t *testing.T) {
 
 	// stamp-statusline runs via `run-shell -b` (background) from
 	// StatuslineBlock, so injection completes shortly AFTER source-file
-	// returns. Poll until segments appear or timeout.
+	// returns. Poll until the segment appears or timeout.
 	var gotStr string
 	ok := pollFor(t, 5*time.Second, func() bool {
 		out, err := srv.Client.Run("show-options", "-gv", "window-status-current-format")
@@ -227,11 +228,10 @@ func TestLocalOverride_PreservesAtelierStatuslineSegments(t *testing.T) {
 			return false
 		}
 		gotStr = strings.TrimRight(string(out), "\n")
-		return strings.Contains(gotStr, "atelier status attention") &&
-			strings.Contains(gotStr, "atelier status forge")
+		return strings.Contains(gotStr, "atelier status attention")
 	})
 	if !ok {
-		t.Errorf("timed out waiting for stamp-statusline to inject atelier segments; final value: %q", gotStr)
+		t.Errorf("timed out waiting for stamp-statusline to inject the atelier segment; final value: %q", gotStr)
 	}
 	// User's custom layout must survive the re-injection.
 	if !strings.Contains(gotStr, "CUSTOM:") {

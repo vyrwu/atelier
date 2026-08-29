@@ -180,17 +180,19 @@ provider = %q
 [forge]
 provider = "mock"
 
-# lazygit as a config launcher (per-workspace git TUI) — shows in M-; and
-# on M-g, opens in the workspace's worktree. Requires lazygit on PATH.
+# lazygit as a config launcher (per-repo git TUI) — shows in M-; and on M-g.
+# A workspace can span several worktrees, so it always pops a picker to choose
+# WHICH worktree to open lazygit in (worktree-open), fresh each time (popup =
+# none). Requires lazygit on PATH.
 [tools.lazygit]
-launch       = "lazygit"
-popup        = "workspace"
+launch       = "atelier tools workspaces worktree-open lazygit"
+popup        = "none"
 key          = "M-g"
 requires     = ["lazygit"]
 icon         = "枝"
 accent_color = "140"
 title        = "Lazygit"
-description  = "Per-workspace lazygit"
+description  = "Per-worktree lazygit"
 `, l.CodeRoot, l.WorktreeRoot, l.MultiRoot, l.WorkspaceRoot, ai)
 	return os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o644)
 }
@@ -327,7 +329,7 @@ func (l *Layout) buildRepo(r *Repo) error {
 }
 
 func (l *Layout) buildWorktree(slug, work string, wt Worktree) error {
-	path := filepath.Join(l.WorktreeRoot, slug, wt.Branch)
+	path := filepath.Join(l.WorktreeRoot, slug, workspace.WorktreeDirName(wt.Branch))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -396,7 +398,7 @@ func (l *Layout) seedState(sc *Scenario) error {
 		wtByRepoBranch := map[string]string{} // "repo\x00branch" -> real worktree path
 		wtByRepo := map[string]string{}       // repo -> any worktree path in this ws
 		for _, wt := range ws.Worktrees {
-			wtPath := filepath.Join(l.WorktreeRoot, wt.RepoSlug, wt.Branch)
+			wtPath := filepath.Join(l.WorktreeRoot, wt.RepoSlug, workspace.WorktreeDirName(wt.Branch))
 			link, err := workspace.LinkWorktree(root, wtPath, wt.RepoSlug, wt.Branch)
 			if err != nil {
 				return fmt.Errorf("workspace %s: link worktree %s@%s: %w", ws.Slug, wt.RepoSlug, wt.Branch, err)

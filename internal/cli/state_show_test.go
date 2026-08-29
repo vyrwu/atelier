@@ -79,7 +79,7 @@ func TestWriteState_RendersWindowCapability(t *testing.T) {
 		Windows: []state.Window{
 			{SessionID: "$1", WindowID: "@2", Name: "feat/x", RepoPath: "/r",
 				WorkspaceID: "vyrwu/atelier", Root: "/ws/root", Driver: true,
-				Attention: true, Recap: "summary", Tag: "wip", ForgeState: "open",
+				Attention: true, Recap: "summary", Tag: "wip",
 				PaneCwd: "/gone", PaneCwdLive: false},
 		},
 		LiveSidWid: map[string]bool{"1_2": true},
@@ -87,7 +87,7 @@ func TestWriteState_RendersWindowCapability(t *testing.T) {
 	var buf bytes.Buffer
 	writeStateText(&buf, top, state.Validate(top))
 	s := buf.String()
-	for _, want := range []string{"WINDOWS", "feat/x", "attn", "ws=vyrwu/atelier", "driver", "tag=wip", "forge=open", "CWD-GONE", "recap"} {
+	for _, want := range []string{"WINDOWS", "feat/x", "attn", "ws=vyrwu/atelier", "driver", "tag=wip", "CWD-GONE", "recap"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("windows section missing %q; got:\n%s", want, s)
 		}

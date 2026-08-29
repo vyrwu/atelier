@@ -220,27 +220,27 @@ func checkEscapeTime(h *tmuxhost.Client) CheckResult {
 		Detail: fmt.Sprintf("%dms", ms)}
 }
 
-// checkStatuslineFormat verifies atelier's attention segment survives
-// in `window-status-current-format` — the ONLY format it's injected into
-// (inactive windows render nothing). The bundled launcher stamps this on
-// every startup, but a host-config statusline (in plugin mode) can
-// overwrite it. This catches the silent breakage where the rollup just
-// stops rendering.
+// checkStatuslineFormat verifies atelier's attention rollup survives in the
+// statusline. It lives in one of two places depending on mode: the bundled
+// theme puts it in `status-left`; plugin mode injects it non-destructively
+// into `window-status-current-format` (after #W) via stamp-statusline. Either
+// location satisfies the check — this catches the silent breakage where a
+// host config drops the rollup and it just stops rendering.
 func checkStatuslineFormat(h *tmuxhost.Client) CheckResult {
-	v, err := h.Run("show-options", "-gv", "window-status-current-format")
-	if err != nil {
-		return CheckResult{Name: "statusline segments", Status: StatusSkip,
-			Detail: "no tmux server running on this socket"}
+	for _, opt := range []string{"status-left", "window-status-current-format"} {
+		v, err := h.Run("show-options", "-gv", opt)
+		if err != nil {
+			return CheckResult{Name: "statusline segments", Status: StatusSkip,
+				Detail: "no tmux server running on this socket"}
+		}
+		if strings.Contains(string(v), "atelier status attention") {
+			return CheckResult{Name: "statusline segments", Status: StatusPass,
+				Detail: "attention segment present"}
+		}
 	}
-	out := string(v)
-	hasAttn := strings.Contains(out, "atelier status attention")
-	if !hasAttn {
-		return CheckResult{Name: "statusline segments", Status: StatusFail,
-			Detail:      "attention segment not present",
-			Remediation: "in bundled mode this auto-injects on startup; in plugin mode add `run-shell 'atelier internal stamp-statusline'` to your tmux.conf"}
-	}
-	return CheckResult{Name: "statusline segments", Status: StatusPass,
-		Detail: "attention segment present"}
+	return CheckResult{Name: "statusline segments", Status: StatusFail,
+		Detail:      "attention segment not present",
+		Remediation: "in bundled mode this auto-injects on startup; in plugin mode add `run-shell 'atelier internal stamp-statusline'` to your tmux.conf"}
 }
 
 // checkStatestoreParseable surfaces a corrupt cache before the user

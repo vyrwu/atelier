@@ -15,6 +15,7 @@ import (
 	"github.com/vyrwu/atelier/internal/initgen"
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/manifest"
+	"github.com/vyrwu/atelier/internal/notify"
 	"github.com/vyrwu/atelier/internal/repoindex"
 	"github.com/vyrwu/atelier/internal/spinner"
 	"github.com/vyrwu/atelier/internal/textprompt"
@@ -63,14 +64,14 @@ func NewCommand() *cobra.Command {
 }
 
 // promptIntent shows the single free-text INPUT field ("what are we doing
-// today?") — a rectangular prompt box, not a fuzzy picker: this is text entry,
-// not selection. Returns (intent, cancelled); Esc / Ctrl-C cancel.
+// today?") — a rectangular bubbletea textarea, not a fuzzy picker: this is text
+// entry, not selection, and carries no legend. Returns (intent, cancelled);
+// Esc / Ctrl-C cancel.
 func promptIntent() (string, bool) {
 	intent, err := textprompt.Read(textprompt.Options{
-		Title:  "What are we doing today?",
-		Prompt: "> ",
-		Accent: "35", // green
-		Footer: "Enter · create   Esc · cancel   ⌃W · del word   ⌃U · clear",
+		Title:       Manifest.UI.Icon + " What are we doing today?",
+		Placeholder: "Describe the task…",
+		Accent:      "35", // green
 	})
 	if err != nil {
 		return "", true
@@ -117,7 +118,7 @@ func runCreate(h *tmuxhost.Client, intent string) error {
 		for _, r := range repos {
 			sp.SetStatus(fmt.Sprintf("Adding %s...", r.Slug))
 			branch := slug
-			wtPath := filepath.Join(workspaceWorktreeRoot(), r.Slug, branch)
+			wtPath := filepath.Join(workspaceWorktreeRoot(), r.Slug, workspace.WorktreeDirName(branch))
 			if _, err := workspace.AddWorktree(h, session, root, r.Path, r.Slug, branch, wtPath); err != nil {
 				debuglog.LogErr("workspaces.new: AddWorktree "+r.Slug, err)
 			}
@@ -133,7 +134,7 @@ func runCreate(h *tmuxhost.Client, intent string) error {
 	})
 	session := workspace.SessionName(slug)
 	if err != nil && err != errWorkspaceExists {
-		_, _ = h.Run("display-message", fmt.Sprintf("✗ workspace create failed: %v", err))
+		notify.Show(notify.Error, fmt.Sprintf("workspace create failed: %v", err))
 		return err
 	}
 

@@ -260,6 +260,19 @@ func stampSweep(h *tmuxhost.Client, now time.Time) {
 	_ = h.SetGlobalOption(optForgeSweptTs, strconv.FormatInt(now.Unix(), 10))
 }
 
+// workspaceOpenPRCount counts a workspace's PRs in the OPEN state (not draft/
+// merged/closed) — the number shown beside the open-PR glyph in the M-s row.
+// Pure.
+func workspaceOpenPRCount(prs []statestore.PR) int {
+	n := 0
+	for _, pr := range prs {
+		if integration.ForgeState(pr.State) == integration.ForgeOpen {
+			n++
+		}
+	}
+	return n
+}
+
 // workspaceForgeRollup summarizes a workspace's PRs for the M-s row: the count
 // and the leading (lowest-rank) state for the badge. Pure.
 func workspaceForgeRollup(prs []statestore.PR) (count int, lead integration.ForgeState) {

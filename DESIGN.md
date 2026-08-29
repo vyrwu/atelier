@@ -49,7 +49,7 @@ atelier mcp serve                  # stdio MCP server wrapping the verbs above (
 atelier tools list                 # list registered tools + their capabilities
 atelier tools <name> <action>      # e.g. atelier tools k8s open
 atelier ai open | set-prompt | recap        # drive the configured AI integration
-atelier status attention count | forge …    # status-line emitters
+atelier status attention count | description …  # status-line emitters
 atelier state show [--json] | sync | restore   # topology + invariant report / cache ops
 atelier reconcile [--fix]          # report (default) / repair invariant violations
 atelier init [--bare]              # generate the tmux.conf snippet
@@ -95,9 +95,10 @@ report-only. So a healthy server with pending attention correctly reports
 also pull-based on its own — it only runs when invoked. A single long-lived
 process (`atelier tools workspaces _refresh-loop`, started from the generated
 config via `run-shell -b`) closes that gap on a heartbeat. Each tick it (1)
-refreshes freshness + forge badge *data* (rendering was already continuous; only
-the data was event-tied), TTL-throttled — with per-repo fetch dedup and a
-per-tick cap — so most ticks stamp nothing, (2) runs a **loop-safe** reconcile
+refreshes the aggregate forge (PR) *data* on each workspace record (rendering in
+M-s/M-c was already continuous; only the data was event-tied), TTL-throttled —
+with per-repo fetch dedup and a per-tick cap — so most ticks fetch nothing,
+(2) runs a **loop-safe** reconcile
 (`ReconcileLoop`) so misrouted/phantom attention and orphan popups repair
 themselves without a manual run, and (3) is the **workspace observer**: for each
 active workspace it re-reads the agent's session transcript and, in one cheap

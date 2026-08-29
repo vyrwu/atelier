@@ -10,6 +10,7 @@ import (
 
 	"github.com/vyrwu/atelier/internal/adapters/mock"
 	"github.com/vyrwu/atelier/internal/statestore"
+	"github.com/vyrwu/atelier/internal/workspace"
 )
 
 // hydrateAcme hydrates the built-in scenario into an isolated temp root.
@@ -239,7 +240,7 @@ func TestHydrate_ReposAndWorktreesAreRealGit(t *testing.T) {
 			t.Errorf("%s: HEAD = %q, want main", r.Slug, got)
 		}
 		for _, wt := range r.Worktrees {
-			wtPath := filepath.Join(l.WorktreeRoot, r.Slug, wt.Branch)
+			wtPath := filepath.Join(l.WorktreeRoot, r.Slug, workspace.WorktreeDirName(wt.Branch))
 			if got := gitOut(t, wtPath, "rev-parse", "--abbrev-ref", "HEAD"); got != wt.Branch {
 				t.Errorf("%s worktree %s: HEAD = %q", r.Slug, wt.Branch, got)
 			}
@@ -260,7 +261,7 @@ func TestHydrate_TerraformDivergence(t *testing.T) {
 
 func TestHydrate_HelmWorktreeDirty(t *testing.T) {
 	l := hydrateAcme(t)
-	wt := filepath.Join(l.WorktreeRoot, "acme-platform/helm-charts/feat/bump-ingress-nginx")
+	wt := filepath.Join(l.WorktreeRoot, "acme-platform/helm-charts/feat-bump-ingress-nginx")
 	if status := gitOut(t, wt, "status", "--porcelain"); status == "" {
 		t.Error("helm worktree expected dirty (values drift), got clean")
 	}
@@ -271,7 +272,7 @@ func TestHydrate_HelmWorktreeDirty(t *testing.T) {
 
 func TestHydrate_SoftClosedMarker(t *testing.T) {
 	l := hydrateAcme(t)
-	marker := filepath.Join(l.WorktreeRoot, "acme-platform/platform-scripts/fix/ci-cache-key/.atelier-soft-closed")
+	marker := filepath.Join(l.WorktreeRoot, "acme-platform/platform-scripts/fix-ci-cache-key/.atelier-soft-closed")
 	if _, err := os.Stat(marker); err != nil {
 		t.Errorf("soft-closed marker missing: %v", err)
 	}
@@ -332,13 +333,14 @@ func TestHydrate_SeedsStatestore(t *testing.T) {
 		t.Errorf("eks driver ai.prompt = %q, want the intent", driver.Metadata["ai.prompt"])
 	}
 
-	// Worktree symlinks materialized: <root>/<repo-name>/<branch> -> real path.
-	link := filepath.Join(ws.Root, "terraform-infra", "feat/eks-1-30-upgrade")
+	// Worktree symlinks materialized: <root>/<repo-name>/<flat-branch> -> real
+	// path (branch slashes flattened to dashes — flat within a repo).
+	link := filepath.Join(ws.Root, "terraform-infra", "feat-eks-1-30-upgrade")
 	target, err := os.Readlink(link)
 	if err != nil {
 		t.Fatalf("worktree symlink missing: %v", err)
 	}
-	wantTarget := filepath.Join(l.WorktreeRoot, "acme-platform/terraform-infra/feat/eks-1-30-upgrade")
+	wantTarget := filepath.Join(l.WorktreeRoot, "acme-platform/terraform-infra/feat-eks-1-30-upgrade")
 	if target != wantTarget {
 		t.Errorf("symlink %q -> %q, want %q", link, target, wantTarget)
 	}
@@ -376,7 +378,7 @@ func TestHydrate_WritesConfigWithIntegrations(t *testing.T) {
 		t.Fatalf("read config.toml: %v", err)
 	}
 	cfg := string(data)
-	for _, want := range []string{l.CodeRoot, l.WorkspaceRoot, "workspace_root", "[ai]", `provider = "claude"`, "[forge]", `provider = "mock"`, "[tools.lazygit]", `launch       = "lazygit"`} {
+	for _, want := range []string{l.CodeRoot, l.WorkspaceRoot, "workspace_root", "[ai]", `provider = "claude"`, "[forge]", `provider = "mock"`, "[tools.lazygit]", `launch       = "atelier tools workspaces worktree-open lazygit"`} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("config.toml missing %q:\n%s", want, cfg)
 		}
@@ -428,7 +430,7 @@ func TestHydrate_WritesMockForgeFixture(t *testing.T) {
 	// The mock forge queries the real worktree dir (repoQueryDir); the helm
 	// ingress worktree must map to an open PR so the badge refresh reproduces
 	// it offline.
-	dir := filepath.Join(l.WorktreeRoot, "acme-platform/helm-charts/feat/bump-ingress-nginx")
+	dir := filepath.Join(l.WorktreeRoot, "acme-platform/helm-charts/feat-bump-ingress-nginx")
 	entries := fixture[dir]
 	if len(entries) != 1 || entries[0].State != "open" {
 		t.Errorf("fixture[%q] = %+v, want a single open PR", dir, entries)

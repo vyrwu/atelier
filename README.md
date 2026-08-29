@@ -71,9 +71,9 @@ rehydrates on tmux restart.
   block; atelier binds a key, opens it in a popup, and owns the window state.
   No Go, no plugin protocol, no recompile.
 - **Unopinionated statusline.** atelier emits attention (an agent is blocked
-  waiting on you) and a code-forge PR badge as `#(atelier status …)` commands you
-  embed in your own statusline. Works with vanilla tmux, Dracula, or Powerline;
-  it supplies data, not visuals.
+  waiting on you) and the current workspace's description as `#(atelier status …)`
+  commands you embed in your own statusline. Works with vanilla tmux, Dracula, or
+  Powerline; it supplies data, not visuals.
 - **Persistent state.** Workspaces, worktrees, PRs, recap text, and attention
   flags are written through to disk. `M-q` detaches while the server keeps
   running, so background agents survive.
@@ -138,8 +138,8 @@ nord setup is unaffected. This is the author's daily driver; see
 atelier doctor      # check tmux and every tool's requirements
 ```
 
-For wiring the attention rollup and forge PR badge into your statusline format,
-see [docs/EMBEDDING.md](docs/EMBEDDING.md).
+For wiring the attention rollup and workspace description into your statusline
+format, see [docs/EMBEDDING.md](docs/EMBEDDING.md).
 
 <details>
 <summary>Reference tmux configs</summary>
@@ -297,7 +297,7 @@ does not change; it drives whatever adapter is installed.
 
 ### 3. A built-in tool (a PR)
 
-Tools with pre-launch logic (k8s / pg / aws context and auth pickers) are Go
+Tools with pre-launch logic (k8s / eks / pg context and auth pickers) are Go
 packages under `internal/tools/<name>` exposing `Manifest` + `AddCommands`,
 registered in `internal/tools/all`, and dispatched via `atelier tools <name>`.
 See [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -47,10 +47,11 @@ brew update
 brew upgrade atelier
 atelier version              # should report v0.2.0
 atelier doctor               # tmux + every plugin OK
-atelier status freshness '0' '0' '' '1729094400' '/fake/repo'
-                             # should print " #[fg=green]✔#[default]"
 atelier status attention count
                              # should print "" or " #[fg=yellow]⏺ N#[default]"
+atelier status description 'some-session'
+                             # should print the session's @workspace_title
+                             # (or the session name as a fallback)
 ```
 
 If both emitters work, the public embedding API is intact. If
@@ -164,13 +165,15 @@ any of them requires a major version bump (post-v1.0) or a `BREAKING
 CHANGE:` commit:
 
 1. **Statusline data emitters** (see [docs/EMBEDDING.md](docs/EMBEDDING.md)):
-   - `atelier status freshness <behind> <ahead> <pull_error> <freshness_ts> <repo_path>`
    - `atelier status attention count`
-   - `atelier status forge <forge_state>`
+   - `atelier status description <session>`
 
    These are invoked from user tmux configs via `#(...)`. The arg
    shape, exit code, and output format are part of the contract
    (glyphs/colors are not — wrap the emitter if you need different visuals).
+   (The retired `freshness` and `forge` emitters are gone — freshness was a
+   per-branch signal, and forge is now an aggregate in the `M-c` view, not a
+   per-window statusline badge.)
 
 2. **Launcher config schema** (`[tools.<name>]` in config.toml):
    The fields a user's launcher block may set (`launch`, `popup`,

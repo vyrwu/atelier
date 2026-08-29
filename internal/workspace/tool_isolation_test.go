@@ -45,9 +45,10 @@ func TestTools_DoNotReimplementWindowManagement(t *testing.T) {
 		// methods (Respawn already exists; ensure-with-env doesn't).
 		"internal/tools/k8s/k8s.go:respawn-pane": "TODO: lift into popup.SessionGlobal (Respawn-style with env)",
 		"internal/tools/k8s/k8s.go:new-session":  "TODO: same — k8s creates its own popup session with env vars",
+		"internal/tools/eks/eks.go:respawn-pane": "TODO: same as k8s — eks owns its singleton shell popup + respawn-on-context; candidate for a shared kubectx primitive",
+		"internal/tools/eks/eks.go:new-session":  "TODO: same as k8s — eks creates its own popup session with env vars",
 		"internal/tools/pg/pg.go:respawn-pane":   "TODO: same as k8s",
 		"internal/tools/pg/pg.go:new-session":    "TODO: same as k8s",
-		"internal/tools/aws/aws.go:respawn-pane": "TODO: aws respawns the CALLER pane under granted assume; tool-specific, candidate for popup.RespawnCallerPane(target, cmd)",
 
 		// toolselector's "Shell" dispatch navigates to window :1.
 		"internal/tools/toolselector/selector.go:select-window": "TODO: lift to workspace.LandOnWindow(\":1\") or similar; the special case is invocable as navigation",

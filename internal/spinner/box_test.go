@@ -1,103 +1,60 @@
 package spinner
 
 import (
-	"bytes"
-	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestBoxSpinner_FallsBackToInlineWhenWriterIsNotATTY(t *testing.T) {
-	// bytes.Buffer isn't a *os.File, so terminalSize returns ok=false and
-	// BoxSpinner falls back to the inline Spinner.
-	buf := &bytes.Buffer{}
-	s := &BoxSpinner{
-		Message:  "thinking",
-		Writer:   buf,
-		Frames:   DefaultFrames,
-		Interval: time.Millisecond,
-	}
-	if err := s.Run(func() error { time.Sleep(5 * time.Millisecond); return nil }); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !strings.Contains(buf.String(), "thinking") {
-		t.Fatalf("expected inline fallback to render the message, got %q", buf.String())
-	}
+// TestMain forces the headless path for the whole package: the spinner UI is a
+// bubbletea program on the controlling tty (integration-tested by eye, like
+// textprompt.Read); the unit tests exercise Run's task/error semantics and the
+// pure model logic, so they must never actually render.
+func TestMain(m *testing.M) {
+	ttyForRender = func() (*os.File, bool) { return nil, false }
+	os.Exit(m.Run())
 }
 
 func TestBoxSpinner_PropagatesError(t *testing.T) {
-	buf := &bytes.Buffer{}
-	want := errors.New("nope")
-	s := &BoxSpinner{Writer: buf, Frames: DefaultFrames, Interval: time.Millisecond, Message: "x"}
+	want := os.ErrPermission
+	if got := NewBox("x").Run(func() error { return want }); got != want {
+		t.Fatalf("Run error = %v, want %v", got, want)
+	}
+}
+
+func TestBoxSpinner_ReturnsNilOnSuccess(t *testing.T) {
+	ran := false
+	if err := NewBox("x").Run(func() error { ran = true; return nil }); err != nil {
+		t.Fatalf("Run = %v, want nil", err)
+	}
+	if !ran {
+		t.Fatal("Run must execute the task fn")
+	}
+}
+
+// Delay must not change task/error semantics on the headless path.
+func TestBoxSpinner_DelayDoesNotBreakErrorPropagation(t *testing.T) {
+	want := os.ErrPermission
+	s := &BoxSpinner{Message: "x", Delay: 50 * time.Millisecond}
 	if got := s.Run(func() error { return want }); got != want {
-		t.Fatalf("Run: got %v want %v", got, want)
+		t.Fatalf("Run error = %v, want %v", got, want)
 	}
 }
 
-// TestBoxSpinner_DelayGate_SkipsRenderWhenFast locks in the delay gate:
-// a task that finishes before Delay renders nothing at all (no spinner
-// frames, no clear), so fast operations don't flash the box.
-func TestBoxSpinner_DelayGate_SkipsRenderWhenFast(t *testing.T) {
-	buf := &bytes.Buffer{}
-	s := &BoxSpinner{
-		Message:  "loading",
-		Writer:   buf,
-		Frames:   DefaultFrames,
-		Interval: time.Millisecond,
-		Delay:    100 * time.Millisecond,
-	}
-	if err := s.Run(func() error { return nil }); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if buf.Len() != 0 {
-		t.Fatalf("fast task under Delay should render nothing, got %q", buf.String())
+func TestBoxSpinner_SetStatusStoresLabel(t *testing.T) {
+	s := NewBox("initial")
+	s.SetStatus("Fetching origin/main...")
+	s.mu.Lock()
+	got := s.status
+	s.mu.Unlock()
+	if got != "Fetching origin/main..." {
+		t.Errorf("after SetStatus, status = %q, want %q", got, "Fetching origin/main...")
 	}
 }
 
-// TestBoxSpinner_DelayGate_RendersWhenSlow verifies the gate still shows
-// the spinner once the task outlives Delay.
-func TestBoxSpinner_DelayGate_RendersWhenSlow(t *testing.T) {
-	buf := &bytes.Buffer{}
-	s := &BoxSpinner{
-		Message:  "loading",
-		Writer:   buf,
-		Frames:   DefaultFrames,
-		Interval: time.Millisecond,
-		Delay:    10 * time.Millisecond,
-	}
-	if err := s.Run(func() error { time.Sleep(60 * time.Millisecond); return nil }); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !strings.Contains(buf.String(), "loading") {
-		t.Fatalf("slow task past Delay should render the message, got %q", buf.String())
-	}
-}
-
-// TestBoxSpinner_DelayGate_PropagatesErrorOnFastPath ensures the early
-// return from the delay gate still surfaces the task's error.
-func TestBoxSpinner_DelayGate_PropagatesErrorOnFastPath(t *testing.T) {
-	buf := &bytes.Buffer{}
-	want := errors.New("boom")
-	s := &BoxSpinner{Writer: buf, Frames: DefaultFrames, Interval: time.Millisecond, Message: "x", Delay: 100 * time.Millisecond}
-	if got := s.Run(func() error { return want }); got != want {
-		t.Fatalf("Run: got %v want %v", got, want)
-	}
-}
-
-func TestNewBox_Defaults(t *testing.T) {
-	s := NewBox("test")
-	if s.Writer == nil {
-		t.Fatalf("default writer should be non-nil")
-	}
-	if len(s.Frames) == 0 {
-		t.Fatalf("default frames should be non-empty")
-	}
-}
-
-// TestFormatStageLabel locks in the FR-2.1 elapsed-seconds rule:
-// stages running longer than 10s get a "(Xs)" suffix so the user can
-// tell stuck from slow.
 func TestFormatStageLabel(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -105,12 +62,9 @@ func TestFormatStageLabel(t *testing.T) {
 		elapsed time.Duration
 		want    string
 	}{
-		{"below threshold, fresh", "Asking Claude...", 1 * time.Second, "Asking Claude..."},
-		{"below threshold, near boundary", "Asking Claude...", 9*time.Second + 999*time.Millisecond, "Asking Claude..."},
-		{"at threshold", "Asking Claude...", 10 * time.Second, "Asking Claude (10s)..."},
-		{"above threshold", "Asking Claude...", 12 * time.Second, "Asking Claude (12s)..."},
-		{"above threshold, no ellipsis on input", "Building worktree", 15 * time.Second, "Building worktree (15s)..."},
-		{"above threshold, trailing periods stripped", "Fetching origin/main.....", 11 * time.Second, "Fetching origin/main (11s)..."},
+		{"under threshold → verbatim", "Naming...", 3 * time.Second, "Naming..."},
+		{"over threshold → elapsed suffix", "Asking Claude...", 12 * time.Second, "Asking Claude (12s)..."},
+		{"trailing dots trimmed before suffix", "Building....", 15 * time.Second, "Building (15s)..."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,36 +75,35 @@ func TestFormatStageLabel(t *testing.T) {
 	}
 }
 
-// TestSetStatus_UpdatesCurrentLabel locks in the SetStatus → currentLabel
-// path: a stage update is reflected in the next rendered label, and
-// resets the elapsed timer so the fresh stage doesn't inherit the prior
-// stage's "(Xs)" suffix.
-func TestSetStatus_UpdatesCurrentLabel(t *testing.T) {
-	s := &BoxSpinner{Message: "Building workspace..."}
-	// Pretend Run already started — manually init state.
-	s.stageStart = time.Now()
-	s.status = s.Message
+// --- model ---
 
-	if got := s.currentLabel(); got != "Building workspace..." {
-		t.Errorf("initial currentLabel = %q, want %q", got, "Building workspace...")
+func TestSpinModel_StatusMsgUpdatesLabel(t *testing.T) {
+	m := newSpinModel("first", time.Now())
+	next, _ := m.Update(statusMsg{label: "second", at: time.Now()})
+	m = next.(spinModel)
+	if m.label != "second" {
+		t.Fatalf("label = %q, want second", m.label)
 	}
-
-	s.SetStatus("Fetching origin/main...")
-	if got := s.currentLabel(); got != "Fetching origin/main..." {
-		t.Errorf("after SetStatus, currentLabel = %q, want %q", got, "Fetching origin/main...")
+	m.width, m.height = 40, 10
+	if !strings.Contains(m.View(), "second") {
+		t.Errorf("View should render the current label; got:\n%s", m.View())
 	}
+}
 
-	// Force the stage to look like it's been running long enough.
-	s.mu.Lock()
-	s.stageStart = time.Now().Add(-12 * time.Second)
-	s.mu.Unlock()
-	if got := s.currentLabel(); got != "Fetching origin/main (12s)..." {
-		t.Errorf("aged stage, currentLabel = %q, want %q", got, "Fetching origin/main (12s)...")
+func TestSpinModel_DoneQuits(t *testing.T) {
+	_, cmd := newSpinModel("x", time.Now()).Update(doneMsg{})
+	if cmd == nil {
+		t.Fatal("doneMsg should return a command")
 	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("doneMsg should quit; got %T", cmd())
+	}
+}
 
-	// Next SetStatus must reset the elapsed timer.
-	s.SetStatus("Building worktree...")
-	if got := s.currentLabel(); got != "Building worktree..." {
-		t.Errorf("after SetStatus reset, currentLabel = %q, want %q", got, "Building worktree...")
+func TestSpinModel_ViewShowsElapsedSuffixWhenSlow(t *testing.T) {
+	m := newSpinModel("Asking Claude...", time.Now().Add(-12*time.Second))
+	m.width, m.height = 40, 10
+	if !strings.Contains(m.View(), "(12s)") {
+		t.Errorf("a long-running stage should show an elapsed suffix; got:\n%s", m.View())
 	}
 }

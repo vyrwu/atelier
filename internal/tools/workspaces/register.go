@@ -16,10 +16,12 @@ var Manifest = &manifest.Manifest{
 	PrimaryInvoke: "sessions",
 	Binding: &manifest.Binding{
 		Key:   "M-n",
-		Title: "New workspace",
-		// StyleFull → a bordered popup framing the free-text intent INPUT
-		// (M-n is text entry, not a picker; see internal/textprompt).
-		Style:       manifest.StyleFull,
+		Title: "New Workspace",
+		// StyleInput → a compact, centered, rounded-border FLOATING box
+		// (border title "New Workspace") framing the free-text intent input
+		// (M-n is text entry, not a picker; see internal/textprompt — a
+		// bubbletea textarea).
+		Style:       manifest.StyleInput,
 		Invoke:      "new",
 		AlsoInPopup: true,
 	},
@@ -65,6 +67,8 @@ func AddCommands(root *cobra.Command) {
 	// Intent-creation internals.
 	root.AddCommand(BuildCommand())
 	root.AddCommand(NameCommand())
+	// Worktree opener (lazygit et al. pick a worktree first).
+	root.AddCommand(WorktreeOpenCommand())
 	// M-s picker internals.
 	root.AddCommand(SessionListCommand())
 	root.AddCommand(DeletePromptCommand())

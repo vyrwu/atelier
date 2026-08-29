@@ -38,15 +38,44 @@ the agent.
   `mcp`, `[ai.models] summary`, and `[ai.prompts] workspace` / `summary`;
   `[ai.prompts] multi_repo` is replaced by `[ai.prompts] workspace`. `[forge]`
   gains `allow_write` (default true).
+* **statusline:** the bundled bar moved to the **top** and now shows the current
+  workspace's **description** (its intent-derived title) in `status-left`
+  instead of the repo/session name — a workspace is an intent, not a repo. The
+  `atelier status forge` emitter is removed (see Removed). Embedders: re-source
+  your tmux.conf; the new public emitter is `atelier status description
+  <session>`.
 
 ### Features
 
-* **workspaces:** `M-n` intent-first creation — type the task; atelier names the
-  workspace, AI-selects the repos it touches, creates a worktree per repo, and
-  opens the driver agent at the workspace root.
-* **workspaces:** `M-s` aggregate picker — one row per workspace with rollups
-  (attention, forge, PR count) and a workspace-level summary; `M-r` renames,
-  `M-x` deletes (confirm enumerates the worktrees + PRs destroyed).
+* **workspaces:** `M-n` intent-first creation — type the task in a floating,
+  titled ("New Workspace") free-text box (a `bubbles/textarea` in its editor
+  styling: line numbers, gutter, cursor-line highlight; Enter submits,
+  Shift/Alt+Enter or Ctrl-J for a newline); atelier names the workspace,
+  AI-selects the repos it touches, creates a worktree per repo, and opens the
+  driver agent at the workspace root.
+* **statusline:** the bundled bar sits at the top and leads with the current
+  workspace's description + the global attention rollup, clock at the right; no
+  repo/branch and no per-window chrome. `atelier status description <session>`
+  is the emitter behind it.
+* **ui:** notifications and the progress spinner are now bubbletea/bubbles
+  popups — a centered, auto-dismissing toast (`internal/notify`) for
+  create-failed / no-forge, and a `bubbles/spinner` progress box — matching the
+  M-n intent prompt's look.
+* **tools:** workspace-scoped popups (popupshell, the agent) open in the active
+  workspace dir (`@workspace_root`), not the wandered pane cwd.
+* **tools:** lazygit always pops a worktree picker first (a workspace spans
+  worktrees; its root is symlinks, not a repo) — `atelier tools workspaces
+  worktree-open` resolves the workspace and opens the tool inside the chosen
+  worktree.
+* **workspaces:** worktree directories are flat within a repo — a slashed branch
+  ("feat/x") lands as "feat-x", never nested under feat/.
+* **tools:** new **EKS** tool (`M-e`, M-; menu) — pick a context, `granted
+  assume` its admin role, point kubectl at the matching cluster, and drop into
+  an authed shell. The k9s tool, but a kubectl shell instead of the k9s TUI.
+* **workspaces:** `M-s` aggregate picker — one row per workspace: age, a single
+  attention dot, an open-PR count beside the pull-request glyph, the title, then
+  a trailing tag pill, over a workspace-level summary line; `M-r` renames, `M-x`
+  deletes (confirm enumerates the worktrees + PRs destroyed).
 * **workspaces:** `M-c` List Changes — cross-repo PR view with per-PR CI, review
   decision, and comment count; `M-o` opens a PR, `M-c` closes it (confirm-gated,
   requires `[forge] allow_write`).
@@ -73,6 +102,15 @@ the agent.
 * **statusline:** the git-freshness (ahead/behind) segment — it was a per-branch
   signal with no window to attach to now that the agent runs at the workspace
   root. The unpushed/unmerged-work signal now lives in the PR state in `M-c`.
+* **statusline:** the per-window forge (PR) badge and its `atelier status forge`
+  emitter + `@forge_state` tmux option — forge state is now an aggregate on the
+  workspace record, rendered in the `M-s` rollup and `M-c` view, not a
+  per-window bar badge.
+* **tools:** the M-; menu's "Select / New / Recover Workspace" entries — those
+  are top-level M-s / M-n / M-c gestures, not tools. `Pgcenter` is removed too
+  (it dispatched to a command that never existed).
+* **tools:** the AWS Assume profile picker (`aws`) — superseded by the new EKS
+  assume-role shell (see Features).
 
 ## [0.9.0](https://github.com/vyrwu/atelier/compare/v0.8.0...v0.9.0) (2026-08-17)
 

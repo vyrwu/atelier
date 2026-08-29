@@ -58,9 +58,11 @@ func CodeRootBase() string {
 }
 
 // WorktreeRootBase returns the directory git worktrees are materialized under
-// (<root>/<owner>/<repo>/<branch>). Honors $ATELIER_WORKTREE_ROOT then
-// [workspaces] worktree_root, default ~/code/.worktrees/github. Single source of
-// truth alongside CodeRootBase / WorkspaceRootBase.
+// (<root>/<owner>/<repo>/<flat-branch>, where the branch leaf is flattened by
+// WorktreeDirName so worktrees within a repo stay a flat list). Honors
+// $ATELIER_WORKTREE_ROOT then [workspaces] worktree_root, default
+// ~/code/.worktrees/github. Single source of truth alongside CodeRootBase /
+// WorkspaceRootBase.
 func WorktreeRootBase() string {
 	if v := os.Getenv("ATELIER_WORKTREE_ROOT"); v != "" {
 		return v
@@ -151,12 +153,24 @@ func EnsureWorkspaceRoot(root string) error {
 	return nil
 }
 
+// WorktreeDirName flattens a branch name into a SINGLE path segment for the
+// worktree's on-disk directory and its symlink under the workspace root: a
+// slashed branch ("feat/x") lands as a flat dir ("feat-x") instead of nesting
+// (repo/feat/x). The git branch name itself is untouched — only the directory
+// leaf is flattened. Pure. Callers that build a worktree path or link leaf
+// from a branch MUST route it through here so worktrees within a repo stay
+// flat. Empty → empty.
+func WorktreeDirName(branch string) string {
+	return strings.ReplaceAll(branch, "/", "-")
+}
+
 // WorktreeLinkPath is the symlink path a worktree gets under the workspace root:
-// <root>/<repo-name>/<branch>. repo-name is the last segment of the "owner/repo"
-// slug — the drawing shows "helm-charts/feat/x", not "wawa/helm-charts/feat/x".
-// Branch may contain slashes, which nest as subdirectories under the link.
+// <root>/<repo-name>/<flat-branch>. repo-name is the last segment of the
+// "owner/repo" slug — the drawing shows "helm-charts/feat-x", not
+// "wawa/helm-charts/feat/x". The branch is flattened (WorktreeDirName) so
+// worktrees within a repo are a flat list, never nested under feat/ etc.
 func WorktreeLinkPath(root, repo, branch string) string {
-	return filepath.Join(root, filepath.Base(repo), branch)
+	return filepath.Join(root, filepath.Base(repo), WorktreeDirName(branch))
 }
 
 // LinkWorktree (re)creates the symlink <root>/<repo>/<branch> → wtPath. Replaces

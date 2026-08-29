@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
@@ -20,59 +19,43 @@ func StatusCommand() *cobra.Command {
 		Short: "Status-line data emitters + hook entry points",
 	}
 	c.AddCommand(attentionStatusCmd())
-	c.AddCommand(forgeStatusCmd())
+	c.AddCommand(descriptionStatusCmd())
 	return c
 }
 
-// forgeStatusCmd is the per-window forge (PR) badge emitter. Invoked from
-// window-status-current-format with the window's cached @forge_state inlined
-// via tmux's #{...} expansion:
-//
-//	set -ag window-status-current-format "#(atelier status forge '#{@forge_state}')"
-//
-// Outputs the state's colored glyph, or empty when the window has no forge
-// item (ForgeNone) or no forge integration is configured. Sits AFTER the
-// attention rollup in the current-window format.
-//
-// @forge_state is populated/refreshed by the forge-refresh path
-// (workspace.SpawnForgeRefresh, fired at each workspace-land event and on
-// picker open); this emitter only renders the cached value.
-func forgeStatusCmd() *cobra.Command {
+// descriptionStatusCmd is the current-workspace description emitter for the
+// bundled status-left: `atelier status description <session>` prints the
+// session's @workspace_title (the intent-derived description shown top-left),
+// falling back to the session name. Reads via show-options (a direct target
+// read) rather than a `#{@workspace_title}` status format, which doesn't
+// resolve a session user-option on every tmux version (3.4). Best-effort:
+// any error prints the session name so the bar never goes blank.
+func descriptionStatusCmd() *cobra.Command {
+	var socket string
 	c := &cobra.Command{
-		Use:    forgeEmitter + " <forge_state>",
-		Short:  "Per-window forge (PR) badge for window-status-current-format",
+		Use:    "description <session>",
+		Short:  "Current workspace's description (title) for the status line",
 		Hidden: true,
-		// Best-effort: an empty/absent @forge_state must render nothing,
-		// never error — this runs on every status redraw.
-		Args: cobra.MaximumNArgs(1),
+		Args:   cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			state := ""
+			session := ""
 			if len(args) > 0 {
-				state = args[0]
+				session = strings.TrimSpace(args[0])
 			}
-			if out := formatForgeIcon(state); out != "" {
-				fmt.Fprint(cmd.OutOrStdout(), out)
+			if session == "" {
+				return
 			}
+			title := session
+			if out, err := tmuxhost.New(socket).Run("show-options", "-t", session, "-qv", workspace.OptWorkspaceTitle); err == nil {
+				if t := strings.TrimSpace(string(out)); t != "" {
+					title = t
+				}
+			}
+			fmt.Fprint(cmd.OutOrStdout(), title)
 		},
 	}
+	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	return c
-}
-
-// formatForgeIcon renders the status-line forge (PR) segment from a window's
-// cached @forge_state. Pure helper for unit testing.
-//
-//	Empty        — no forge item (ForgeNone) or forge integration absent
-//	 <glyph>     — open (green) / draft (grey) / merged (purple) / closed (red)
-//
-// Leading space so it doesn't kiss the segment before it. Uses the
-// kernel-owned glyph + 256-color spec (integration.ForgeGlyph) so the
-// status-line badge matches the picker badge exactly.
-func formatForgeIcon(state string) string {
-	glyph, color, ok := integration.ForgeGlyph(integration.ForgeState(strings.TrimSpace(state)))
-	if !ok {
-		return ""
-	}
-	return fmt.Sprintf(" #[fg=colour%s]%s#[default]", color, glyph)
 }
 
 func attentionStatusCmd() *cobra.Command {

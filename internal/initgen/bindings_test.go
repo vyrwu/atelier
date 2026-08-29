@@ -202,26 +202,34 @@ func TestThemeBlock_DistroGradeDefaults(t *testing.T) {
 	}
 }
 
-// TestThemeBlock_HidesInactiveWindows locks the "only the current workspace
-// in the bar" contract. A repo session holds one window per worktree, so any
-// non-empty window-status-format renders background branch names in the bar
-// (the bug the user hit). It must be empty so ONLY the focused workspace
-// renders via window-status-current-format; the global ⏺N attention rollup
-// covers background workspaces that need the user. Regressing to the
-// attention-conditional form or " #W " prints non-focused windows again.
-func TestThemeBlock_HidesInactiveWindows(t *testing.T) {
+// TestThemeBlock_TopStatuslineShowsDescription locks the redesigned bar: it
+// sits at the TOP and shows the current WORKSPACE's description (its
+// intent-derived title) + the global ⏺N attention rollup in status-left, with
+// the clock at the right. No repo/branch (#S), no per-window rendering: a repo
+// session holds one window per worktree, so any non-empty window-status-format
+// would flood the bar with background branch names (the bug the user hit). All
+// three window-status formats are empty; the workspace lives in status-left.
+func TestThemeBlock_TopStatuslineShowsDescription(t *testing.T) {
 	b := ThemeBlock()
-	if !strings.Contains(b, `set -g window-status-format ""`) {
-		t.Errorf("window-status-format must be empty so inactive windows render nothing; block:\n%s", b)
+	if !strings.Contains(b, `set -g status-position top`) {
+		t.Errorf("statusline must be at the top; block:\n%s", b)
 	}
-	if strings.Contains(b, `@needs_attention, #W`) {
-		t.Error("window-status-format must not surface background attention windows (prints non-focused windows regression)")
+	for _, empty := range []string{
+		`set -g window-status-format ""`,
+		`set -g window-status-current-format ""`,
+	} {
+		if !strings.Contains(b, empty) {
+			t.Errorf("missing %q — no per-window chrome; the workspace lives in status-left; block:\n%s", empty, b)
+		}
 	}
-	if strings.Contains(b, `set -g window-status-format " #W "`) {
-		t.Error("window-status-format ' #W ' renders EVERY window name in the bar (flood regression)")
+	if !strings.Contains(b, "atelier status description") {
+		t.Errorf("status-left must show the workspace description; block:\n%s", b)
 	}
-	if !strings.Contains(b, `set -g window-status-current-format "#[bold] #W #[nobold]"`) {
-		t.Errorf("window-status-current-format missing/changed — current workspace must still render; block:\n%s", b)
+	if !strings.Contains(b, "atelier status attention count") {
+		t.Errorf("status-left must carry the global attention rollup; block:\n%s", b)
+	}
+	if strings.Contains(b, "#S") {
+		t.Errorf("statusline must NOT show the repo/session name (#S) — a workspace is an intent, not a repo; block:\n%s", b)
 	}
 }
 

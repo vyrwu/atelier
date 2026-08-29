@@ -70,21 +70,19 @@ func SelectCommand() *cobra.Command {
 				byKind[e.Kind] = e
 			}
 
-			// alt-n / alt-s / alt-r: swap to sibling workspace pickers
-			// without leaving the popup. fzf's `become(...)` exec()s the
-			// command in place of fzf, so the popup-session pty survives
-			// and the new picker takes over. Same pattern as
-			// dispatchExecInPlace below — picker → picker is exec-in-place.
-			// Tmux's popup-table M-n binding doesn't reach inside fzf
-			// because display-popup -E hands raw stdin to fzf; fzf
-			// processes every key against its own --bind table first.
+			// alt-n / alt-s: swap to a sibling workspace gesture (create /
+			// switch) without leaving the popup. fzf's `become(...)` exec()s the
+			// command in place of fzf, so the popup-session pty survives and the
+			// new view takes over. Same pattern as dispatchExecInPlace below.
+			// Tmux's popup-table M-n binding doesn't reach inside fzf because
+			// display-popup -E hands raw stdin to fzf; fzf processes every key
+			// against its own --bind table first.
 			args := fzfstyle.Args("⌘ ", "Select Tool", "172",
 				fzfstyle.WithDelimiter("\t"),
 				fzfstyle.WithNth("1"),
 				fzfstyle.WithBind("alt-;", "abort"),
-				fzfstyle.WithBind("alt-n", "become(atelier tools workspaces pick)"),
+				fzfstyle.WithBind("alt-n", "become(atelier tools workspaces new)"),
 				fzfstyle.WithBind("alt-s", "become(atelier tools workspaces sessions)"),
-				fzfstyle.WithBind("alt-r", "become(atelier tools workspaces recover)"),
 			)
 			picked, err := fzf.Pick(lines, args...)
 			if err != nil {
@@ -110,10 +108,11 @@ func SelectCommand() *cobra.Command {
 	return c
 }
 
-// buildEntries returns the menu order matching bash's tool selector:
-// Shell, Popup, K9s, AWS, Lazygit, Claude, Pgcli, Pgcenter, Workspace
-// Selector, Workspace Creator. Falls back to plugin order for any
-// non-canonical tools.
+// buildEntries returns the selector menu order: Shell, Popup, K9s, AWS,
+// Lazygit, Claude, Pgcli, then any community tools in plugin order. The
+// workspace gestures (create/switch/changes) are NOT tools here — they have
+// their own top-level bindings (M-n/M-s/M-c), so they're deliberately absent
+// from the tool menu.
 func buildEntries(plugins []plugin.Plugin) []entry {
 	// Only plugins that explicitly register a tool (Manifest.Tool) appear
 	// in the selector. Discovered-but-not-a-tool plugins (providers like
@@ -149,24 +148,23 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 		Kind:        shellEntryKind,
 	})
 
-	// Canonical order matching bash tmux_tool_selector.
+	// Canonical selector order. Workspace gestures are intentionally NOT here
+	// (they have top-level M-n/M-s/M-c bindings, not tool-menu entries).
 	canonical := []string{
 		"popupshell",
 		"k8s",
-		"aws",
+		"eks",
 		"lazygit",
 		"claude",
 		"ghdash",
 		"ghenhance",
-		"pgcli", // pg subcommands surfaced separately
-		"pgcenter",
+		"pgcli",
 		"ccusage",
-		"workspaces-selector", // virtual: "Select Workspace" from workspaces tool
-		"workspaces-creator",  // virtual: "New Workspace" from workspaces tool
-		"workspaces-recover",  // virtual: "Recover Workspace" from workspaces tool
 	}
 
-	seen := map[string]bool{"toolselector": true}
+	// toolselector never lists itself; workspaces is driven by its top-level
+	// M-n/M-s/M-c bindings, not a tool-menu entry, so it's suppressed too.
+	seen := map[string]bool{"toolselector": true, "workspaces": true}
 	for _, key := range canonical {
 		switch key {
 		case "claude":
@@ -195,62 +193,9 @@ func buildEntries(plugins []plugin.Plugin) []entry {
 					Plugin:      p,
 				})
 				seen["pg-pgcli"] = true
-				// `pg` is fully represented by its two virtual entries —
-				// suppress the plain `pg` entry from the trailing community
-				// loop.
+				// `pg` is fully represented by its pgcli entry — suppress the
+				// plain `pg` entry from the trailing community loop.
 				seen["pg"] = true
-			}
-		case "pgcenter":
-			if p, ok := byName["pg"]; ok && !seen["pg-pgcenter"] {
-				entries = append(entries, entry{
-					Icon:        "監",
-					Name:        "Pgcenter",
-					Description: "Singleton pgcenter popup",
-					AccentColor: "131",
-					Kind:        "pg:pgcenter",
-					Plugin:      p,
-				})
-				seen["pg-pgcenter"] = true
-				seen["pg"] = true
-			}
-		case "workspaces-selector":
-			if p, ok := byName["workspaces"]; ok && !seen["workspaces-selector"] {
-				entries = append(entries, entry{
-					Icon:        "栽",
-					Name:        "Select Workspace",
-					Description: "Pick an existing workspace session",
-					AccentColor: "168",
-					Kind:        "workspaces:sessions",
-					Plugin:      p,
-				})
-				seen["workspaces-selector"] = true
-				seen["workspaces"] = true
-			}
-		case "workspaces-creator":
-			if p, ok := byName["workspaces"]; ok && !seen["workspaces-creator"] {
-				entries = append(entries, entry{
-					Icon:        "製",
-					Name:        "New Workspace",
-					Description: "Create a new worktree workspace",
-					AccentColor: "108",
-					Kind:        "workspaces:pick",
-					Plugin:      p,
-				})
-				seen["workspaces-creator"] = true
-				seen["workspaces"] = true
-			}
-		case "workspaces-recover":
-			if p, ok := byName["workspaces"]; ok && !seen["workspaces-recover"] {
-				entries = append(entries, entry{
-					Icon:        "復",
-					Name:        "Recover Workspace",
-					Description: "Pick or delete a past/present worktree",
-					AccentColor: "141",
-					Kind:        "workspaces:recover",
-					Plugin:      p,
-				})
-				seen["workspaces-recover"] = true
-				seen["workspaces"] = true
 			}
 		default:
 			if p, ok := byName[key]; ok && !seen[key] {

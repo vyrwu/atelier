@@ -18,10 +18,18 @@ type trackingClient struct {
 	attached      string // captured session from Attach
 	attachErr     error  // simulate attach failure
 	ensureErr     error  // simulate NewSessionWithCommand failure
+	workspaceRoot string // returned for `show-options ... @workspace_root`
 }
 
 func (c *trackingClient) Run(args ...string) ([]byte, error) {
 	c.calls = append(c.calls, "Run "+strings.Join(args, " "))
+	if c.workspaceRoot != "" && len(args) > 0 && args[0] == "show-options" {
+		for _, a := range args {
+			if a == "@workspace_root" {
+				return []byte(c.workspaceRoot), nil
+			}
+		}
+	}
 	return nil, nil
 }
 func (c *trackingClient) HasSession(name string) (bool, error) {
@@ -167,6 +175,23 @@ func TestOpenWorkspaceScopedWithCmd_EmptyFnCmdFallsBackToDefault(t *testing.T) {
 	if c.createCmd != "the-default" {
 		t.Errorf("empty fn cmd should fall back to DefaultCmd. got %q want %q",
 			c.createCmd, "the-default")
+	}
+}
+
+// TestOpenWorkspaceScoped_OpensInWorkspaceRoot locks request #1: a
+// workspace-scoped popup opens in the parent session's @workspace_root (the
+// active workspace dir), not the pane cwd — the launch command is prefixed
+// with `cd <root>`.
+func TestOpenWorkspaceScoped_OpensInWorkspaceRoot(t *testing.T) {
+	c := newTrackingClient()
+	c.workspaceRoot = "/home/u/ateliers/fix-the-bug"
+	spec := &WorkspaceScoped{Tool: "popupshell", DefaultCmd: "$SHELL"}
+
+	if err := OpenWorkspaceScoped(c, spec); err != nil {
+		t.Fatalf("OpenWorkspaceScoped: %v", err)
+	}
+	if !strings.Contains(c.createCmd, `cd "/home/u/ateliers/fix-the-bug"`) {
+		t.Errorf("popup should open in @workspace_root; create cmd = %q", c.createCmd)
 	}
 }
 

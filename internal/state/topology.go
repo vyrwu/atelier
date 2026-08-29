@@ -36,10 +36,15 @@ type Session struct {
 
 // Window is a tmux window and the kernel-owned capability state stamped on it.
 // The capability fields model the program's behavior (attention, AI summary,
-// workspace kind, tag, forge badge, worktree) — a stable, delivery-agnostic
-// view. Today they are sourced from tmux @options in CaptureTopology; if that
-// delivery ever changes (a daemon), only the capture layer changes, not this
-// model or the validators over it.
+// workspace kind, tag, worktree) — a stable, delivery-agnostic view. Today
+// they are sourced from tmux @options in CaptureTopology; if that delivery
+// ever changes (a daemon), only the capture layer changes, not this model or
+// the validators over it.
+//
+// Forge (PR) state is deliberately NOT here: in the intent-workspace model a
+// workspace spans multiple repos/PRs, so PRs live as an aggregate on the
+// statestore workspace record (rendered by M-s/M-c), not as a per-window
+// tmux option.
 type Window struct {
 	SessionID   string // $N
 	WindowID    string // @N
@@ -52,7 +57,6 @@ type Window struct {
 	Attention   bool   // @needs_attention == "1"
 	Recap       string // @attention_recap — the AI summary
 	Tag         string // @workspace_tag
-	ForgeState  string // @forge_state
 	// PaneCwd is the window's active pane cwd (pane_current_path). For a driver
 	// window this is normally the workspace root, but the user can cd elsewhere.
 	// PaneCwdLive is os.Stat'd in CaptureTopology so Validate stays pure over
@@ -119,27 +123,33 @@ type Host interface {
 // all '|'-free.
 const clientListFormat = "#{client_name}|#{session_id}|#{window_id}|#{client_tty}|#{client_session}"
 
-// winSep separates window-capture fields. It is the ASCII Unit Separator, not
-// '|', because several window fields are free text (AI recap, tag, paths) that
-// can legitimately contain '|'; \x1f never appears in branch names, filesystem
-// paths, or AI summaries, so no field can shift another (protecting the
-// invariant-critical fields that follow).
-const winSep = "\x1f"
+// winSep separates window-capture fields. It MUST be a printable character:
+// tmux sanitizes control/whitespace bytes (\x1f, tab) in `-F` output (replacing
+// them with `_` or `\OOO` across tmux 3.3–3.5), so a control-char separator
+// collapses every row to one field and empties the topology. `|` round-trips
+// verbatim. The one free-text field that can contain `|` — the AI recap — is
+// placed LAST and parsed with SplitN, so a stray `|` there can't shift the
+// invariant-critical fixed fields; every other field is a slug, id, int, path,
+// or controlled token (none contain `|`).
+const winSep = "|"
+
+// winFields is the field count (for SplitN).
+const winFields = 12
 
 // windowCaptureFormat reads every window's structural ids + the kernel-owned
 // capability state in a single list-windows call. The @workspace_* / @repo_path
 // options are session-scoped but resolve through inheritance in a window's
-// format context.
+// format context. @attention_recap is LAST (see winSep).
 var windowCaptureFormat = strings.Join([]string{
 	"#{session_id}", "#{window_id}", "#{window_index}", "#{window_name}",
 	"#{@workspace_id}", "#{@workspace_root}", "#{@repo_path}", "#{@workspace_driver}",
-	"#{@needs_attention}", "#{@attention_recap}", "#{@workspace_tag}", "#{@forge_state}",
-	"#{pane_current_path}",
+	"#{@needs_attention}", "#{@workspace_tag}",
+	"#{pane_current_path}", "#{@attention_recap}",
 }, winSep)
 
 func parseWindow(line string) (Window, bool) {
-	f := strings.Split(line, winSep)
-	if len(f) < 13 {
+	f := strings.SplitN(line, winSep, winFields)
+	if len(f) < winFields {
 		return Window{}, false
 	}
 	idx := 0
@@ -156,10 +166,9 @@ func parseWindow(line string) (Window, bool) {
 		RepoPath:    f[6],
 		Driver:      strings.TrimSpace(f[7]) == "1",
 		Attention:   strings.TrimSpace(f[8]) == "1",
-		Recap:       f[9],
-		Tag:         f[10],
-		ForgeState:  f[11],
-		PaneCwd:     f[12],
+		Tag:         f[9],
+		PaneCwd:     f[10],
+		Recap:       f[11],
 	}
 	w.PaneCwdLive = paneCwdLive(w.PaneCwd)
 	return w, true

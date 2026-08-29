@@ -97,6 +97,19 @@ func TestWorkspaceForgeRollup(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOpenPRCount(t *testing.T) {
+	prs := []statestore.PR{
+		{State: "open"}, {State: "open"}, {State: "draft"},
+		{State: "merged"}, {State: "closed"},
+	}
+	if got := workspaceOpenPRCount(prs); got != 2 {
+		t.Errorf("workspaceOpenPRCount = %d, want 2 (open only, not draft/merged/closed)", got)
+	}
+	if got := workspaceOpenPRCount(nil); got != 0 {
+		t.Errorf("workspaceOpenPRCount(nil) = %d, want 0", got)
+	}
+}
+
 func TestWorkspacePRAttention(t *testing.T) {
 	prs := []statestore.PR{
 		{State: "open", CI: "fail"},                          // attention

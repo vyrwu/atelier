@@ -88,14 +88,22 @@ func BuildWorkspaceList(h *tmuxhost.Client) ([]WorkspaceRow, error) {
 	// option in its own session context, so it's robust everywhere.
 	ident := sessionIdentities(h)
 
-	// Per-window state (these ARE window-scoped and read reliably per window).
+	// Per-window state (window-scoped, read reliably per window). The field
+	// separator MUST be a printable char: tmux sanitizes control/whitespace
+	// bytes (\x1f, tab) in `-F` output (to `_` or `\OOO`) across 3.3–3.5, which
+	// would collapse every row to one field. Use `|` and put the one free-text
+	// field (@attention_recap) LAST so a stray `|` in it can't shift the fixed
+	// fields (SplitN absorbs it). All other fields are slugs/ids/ints/controlled
+	// tokens with no `|`.
+	const fieldSep = "|"
+	const nFields = 10
 	format := strings.Join([]string{
 		"#{session_id}", "#{session_name}", "#{window_index}",
 		"#{" + workspace.OptWorkspaceDriver + "}",
 		"#{" + workspace.OptAttention + "}", "#{" + workspace.OptAgentStatus + "}",
-		"#{" + workspace.OptRecap + "}", "#{" + workspace.OptRecapTs + "}",
-		"#{" + workspace.OptWorkspaceCreatedTs + "}", "#{window_id}",
-	}, "\x1f")
+		"#{" + workspace.OptRecapTs + "}", "#{" + workspace.OptWorkspaceCreatedTs + "}",
+		"#{window_id}", "#{" + workspace.OptRecap + "}",
+	}, fieldSep)
 	out, err := h.Run("list-windows", "-a", "-F", format)
 	if err != nil {
 		return nil, err
@@ -107,13 +115,13 @@ func BuildWorkspaceList(h *tmuxhost.Client) ([]WorkspaceRow, error) {
 		if line == "" {
 			continue
 		}
-		f := strings.Split(line, "\x1f")
-		if len(f) < 10 {
+		f := strings.SplitN(line, fieldSep, nFields)
+		if len(f) < nFields {
 			continue
 		}
 		sid, session, idxStr := f[0], f[1], f[2]
 		driver := f[3]
-		attention, status, recap, recapTs, createdTs, wid := f[4], f[5], f[6], f[7], f[8], f[9]
+		attention, status, recapTs, createdTs, wid, recap := f[4], f[5], f[6], f[7], f[8], f[9]
 		id := ident[session]
 		wsID, title, tag := id.id, id.title, id.tag
 		if strings.HasPrefix(session, "_") || !workspace.Listable(wsID) {
@@ -180,7 +188,7 @@ func BuildWorkspaceList(h *tmuxhost.Client) ([]WorkspaceRow, error) {
 			title = session
 		}
 
-		prCount, lead := workspaceForgeRollup(agg.prs)
+		_, lead := workspaceForgeRollup(agg.prs)
 		prAttn := workspacePRAttention(agg.prs)
 		attnCount := prAttn
 		if agg.attention {
@@ -198,40 +206,46 @@ func BuildWorkspaceList(h *tmuxhost.Client) ([]WorkspaceRow, error) {
 		}
 		timeCol := fmt.Sprintf("\033[38;5;103m%3s\033[0m ", ageText)
 
-		// ATTN column: current marker, else attention count, else running/idle.
+		// ATTN column: current marker, else a SINGLE attention dot (no count —
+		// blocked is blocked, however many things want you), else running/idle.
 		var attnCol string
 		switch {
 		case agg.current:
 			attnCol = "\033[1;31m❯\033[0m  "
 		case attnCount > 0:
-			attnCol = fmt.Sprintf("\033[33m%d⏺\033[0m ", attnCount)
+			attnCol = "\033[33m⏺\033[0m  "
 		case agg.running:
 			attnCol = "\033[34m⏺\033[0m  "
 		default:
 			attnCol = "\033[90m○\033[0m  "
 		}
 
-		// FORGE column: "NPR" in the lead-state color, else blank.
-		forgeCol := "     "
-		if showForge && prCount > 0 {
-			_, color, ok := integration.ForgeGlyph(lead)
-			if !ok {
-				color = "244"
+		// FORGE column: "<N><open-PR glyph>" in the open (green) color when the
+		// workspace has open PRs, else blank.
+		forgeCol := strings.Repeat(" ", forgeColCells)
+		if showForge {
+			if openCount := workspaceOpenPRCount(agg.prs); openCount > 0 {
+				glyph, color, ok := integration.ForgeGlyph(integration.ForgeOpen)
+				if !ok {
+					glyph, color = "PR", "35"
+				}
+				plain := fmt.Sprintf("%d%s ", openCount, glyph)
+				styled := fmt.Sprintf("\033[38;5;%sm%d%s\033[0m ", color, openCount, glyph)
+				forgeCol = padVisible(styled, plain, forgeColCells)
 			}
-			forgeCol = fmt.Sprintf("\033[38;5;%sm%dPR\033[0m ", color, prCount)
-			forgeCol = padVisible(forgeCol, fmt.Sprintf("%dPR ", prCount), forgeColCells)
 		}
 
 		weight := ""
 		if agg.current {
 			weight = "1;"
 		}
-		tagLead := ""
+		// Tag pill trails the title (grouping is secondary to the title itself).
+		tagTrail := ""
 		if pill := strings.TrimSpace(renderTagPill(agg.tag)); pill != "" {
-			tagLead = pill + " "
+			tagTrail = " " + pill
 		}
-		display := fmt.Sprintf("%s%s%s%s\033[%s38;5;255m%s\033[0m",
-			timeCol, attnCol, forgeCol, tagLead, weight, title)
+		display := fmt.Sprintf("%s%s%s\033[%s38;5;255m%s\033[0m%s",
+			timeCol, attnCol, forgeCol, weight, title, tagTrail)
 
 		summary := agg.summary
 		if summary == "" {

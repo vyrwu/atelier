@@ -104,7 +104,9 @@ func TestSeed_HydrateThenRestore(t *testing.T) {
 	}
 
 	// 6. Soft-closed worktree on disk (for M-r) but not a live window.
-	marker := filepath.Join(layout.WorktreeRoot, "acme-platform/platform-scripts/fix/ci-cache-key/.atelier-soft-closed")
+	// Worktree dirs are FLAT within a repo: branch "fix/ci-cache-key" → dir
+	// "fix-ci-cache-key" (WorktreeDirName), never nested under fix/.
+	marker := filepath.Join(layout.WorktreeRoot, "acme-platform/platform-scripts/fix-ci-cache-key/.atelier-soft-closed")
 	if _, err := os.Stat(marker); err != nil {
 		t.Errorf("soft-closed marker missing: %v", err)
 	}

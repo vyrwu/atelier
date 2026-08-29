@@ -70,10 +70,10 @@ func (f *fakeHost) Run(args ...string) ([]byte, error) {
 			if len(ff) < 2 {
 				continue
 			}
-			// windowCaptureFormat has 13 fields; only sid/wid are structural
+			// windowCaptureFormat has 12 fields; only sid/wid are structural
 			// here, the rest empty (matches the many CaptureTopology tests that
 			// seed windows via f.windows as "$sid @wid").
-			rec := make([]string, 13)
+			rec := make([]string, 12)
 			rec[0], rec[1] = ff[0], ff[1]
 			lines = append(lines, strings.Join(rec, winSep))
 		}
@@ -83,14 +83,15 @@ func (f *fakeHost) Run(args ...string) ([]byte, error) {
 }
 
 // windowLine builds an enriched list-windows capture line for tests that need
-// capability fields. Order matches windowCaptureFormat (the intent-workspace
-// model): sid, wid, windowIndex, name, @workspace_id, @workspace_root,
-// @repo_path, @workspace_driver, @needs_attention, @attention_recap,
-// @workspace_tag, @forge_state, pane_current_path.
-func windowLine(sid, wid, idx, name, workspaceID, root, repoPath, driver, attention, recap, tag, forge, paneCwd string) string {
+// capability fields. Args are in logical order; the JOIN order matches
+// windowCaptureFormat (the free-text @attention_recap is emitted LAST — see
+// winSep): sid, wid, windowIndex, name, @workspace_id, @workspace_root,
+// @repo_path, @workspace_driver, @needs_attention, @workspace_tag,
+// pane_current_path, @attention_recap.
+func windowLine(sid, wid, idx, name, workspaceID, root, repoPath, driver, attention, recap, tag, paneCwd string) string {
 	return strings.Join([]string{
 		sid, wid, idx, name, workspaceID, root, repoPath, driver,
-		attention, recap, tag, forge, paneCwd,
+		attention, tag, paneCwd, recap,
 	}, winSep)
 }
 

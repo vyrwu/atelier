@@ -251,7 +251,15 @@ func OpenWorkspaceScopedWithCmd(h Client, spec *WorkspaceScoped, fn func(ctx Par
 			return err
 		}
 	}
-	if err := spec.EnsureWithCmd(h, ctx.SessionID, ctx.WindowID, ctx.Cwd, cmd); err != nil {
+	// Open in the workspace's dedicated dir (@workspace_root), not wherever the
+	// driver pane has cd'd — a workspace-scoped popup should always target the
+	// active workspace dir. Falls back to the pane cwd when the parent isn't an
+	// atelier workspace (e.g. launched from a plain session).
+	startDir := ctx.Cwd
+	if root := workspaceRootDir(h, ctx.SessionID); root != "" {
+		startDir = root
+	}
+	if err := spec.EnsureWithCmd(h, ctx.SessionID, ctx.WindowID, startDir, cmd); err != nil {
 		return err
 	}
 	name := spec.SessionName(ctx.SessionID, ctx.WindowID)
@@ -261,8 +269,25 @@ func OpenWorkspaceScopedWithCmd(h Client, spec *WorkspaceScoped, fn func(ctx Par
 	return h.Attach(name)
 }
 
+// workspaceRootDir returns the parent session's @workspace_root — the
+// dedicated workspace directory a workspace-scoped popup should open in.
+// Empty when the parent isn't an atelier workspace (no such option), so the
+// caller falls back to the pane cwd. Read is a direct session-target
+// show-options (robust across tmux versions, unlike a session user-option in
+// a format).
+func workspaceRootDir(h Client, sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	out, err := h.Run("show-options", "-t", sessionID, "-qv", "@workspace_root")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // SessionGlobal describes a popup tool that has a single backing session
-// shared across the tmux server (k9s, pgcli, pgcenter).
+// shared across the tmux server (k9s, pgcli).
 type SessionGlobal struct {
 	Tool        string
 	DefaultCmd  string

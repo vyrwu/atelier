@@ -71,10 +71,13 @@ func internalWelcomeCmd() *cobra.Command {
 				}
 			}
 			_ = h.SetGlobalOption("@atelier_welcome_ts", strconv.FormatInt(time.Now().Unix(), 10))
-			// Bordered popup framing the M-n intent input (matches the M-n
-			// binding's StyleFull geometry).
+			// Compact, centered, titled floating box framing the M-n intent
+			// input. Mirrors the M-n binding's manifest.StyleInput geometry
+			// (-b rounded -S fg=colour103 -T "New Workspace" -w60% -h30%, no
+			// -y anchor → centered) so the welcome path and the keybind path
+			// look identical.
 			_, err := h.Run("display-popup", "-b", "rounded", "-S", "fg=colour103",
-				"-T", "#[align=centre] New Workspace ", "-w100%", "-h99%", "-y", "S",
+				"-T", "#[align=centre] New Workspace ", "-w60%", "-h30%",
 				"-E", "atelier tools workspaces new")
 			return err
 		},
@@ -244,48 +247,46 @@ func internalStampStatuslineCmd() *cobra.Command {
 //
 // Referenced by:
 //   - atelierStatuslineRe (regex stripping prior injections)
-//   - attentionSegment / forgeSegment (canonical segment builders)
+//   - attentionSegment (canonical segment builder)
 //   - status.go (cobra subcommand `Use` fields)
 //
 // Adding/renaming an emitter here also updates atelierStatuslineRe (which
-// strips prior injections) since the regex is built from these consts.
+// strips prior injections) since the regex is built from this const.
 const (
 	attentionEmitter = "attention"
-	forgeEmitter     = "forge"
 )
 
-// atelierStatuslineRe matches any of atelier's `#(...)` injections in
-// a window-status-format value, optionally preceded by whitespace, so
-// we can strip prior copies before re-adding. Built from the emitter
-// const block so adding/renaming an emitter touches one location.
+// atelierStatuslineRe matches atelier's `#(...)` injection in a
+// window-status-format value, optionally preceded by whitespace, so we can
+// strip prior copies before re-adding. Built from the emitter const so
+// renaming the emitter touches one location.
 var atelierStatuslineRe = regexp.MustCompile(
-	`\s*#\(atelier status (` + attentionEmitter + `|` + forgeEmitter + `)[^)]*\)`)
+	`\s*#\(atelier status ` + attentionEmitter + `[^)]*\)`)
 
-// attentionSegment / forgeSegment are the canonical atelier additions.
-// Built from the emitter consts so the regex above and the cobra
-// subcommand `Use` fields can't drift apart.
+// attentionSegment is the canonical atelier addition — the global ⏺N
+// attention rollup. Built from the emitter const so the regex above and the
+// cobra subcommand `Use` field can't drift apart.
+//
+// In the bundled theme the rollup lives in status-left; this segment is the
+// PLUGIN-mode delivery, injected non-destructively into the user's existing
+// window-status-current-format (after #W) so plugin users still get the
+// rollup without atelier owning their whole bar.
 func attentionSegment() string {
 	return `#(atelier status ` + attentionEmitter + ` count)`
 }
 
-// forgeSegment renders the current window's cached @forge_state as a colored
-// PR glyph. Sits AFTER the attention rollup in window-status-current-format.
-func forgeSegment() string {
-	return `#(atelier status ` + forgeEmitter + ` '#{@forge_state}')`
-}
-
 func stampStatusline(h *tmuxhost.Client) error {
-	// Only the current format gets segments — inactive windows render
+	// Only the current format gets the segment — inactive windows render
 	// nothing (window-status-format is empty), so the bar reflects only
-	// the focused workspace. The ⏺N attention rollup is global and
-	// covers background windows that need the user.
+	// the focused workspace. The ⏺N rollup is global and covers background
+	// windows that need the user.
 	for _, opt := range []struct {
 		name     string
 		segments []string
 	}{
 		{
 			name:     "window-status-current-format",
-			segments: []string{attentionSegment(), forgeSegment()},
+			segments: []string{attentionSegment()},
 		},
 	} {
 		curBytes, err := h.Run("show-options", "-gv", opt.name)

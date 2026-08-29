@@ -43,21 +43,36 @@ func TestCanonicalPath(t *testing.T) {
 }
 
 // TestWorktreeLinkPath locks the symlink layout policy: <root>/<repo-base>/
-// <branch>, where repo-base is the LAST segment of the owner/repo slug and the
-// branch's slashes nest as subdirectories.
+// <flat-branch>, where repo-base is the LAST segment of the owner/repo slug and
+// the branch is FLATTENED (slashes → dashes) so worktrees within a repo are a
+// flat list, never nested under feat/.
 func TestWorktreeLinkPath(t *testing.T) {
 	root := "/home/u/ateliers/ws"
 	cases := []struct {
 		repo, branch, want string
 	}{
-		{"wawa/helm-charts", "feat/x", "/home/u/ateliers/ws/helm-charts/feat/x"},
+		{"wawa/helm-charts", "feat/x", "/home/u/ateliers/ws/helm-charts/feat-x"},
 		{"vyrwu/atelier", "main", "/home/u/ateliers/ws/atelier/main"},
-		{"atelier", "feat/a/b", "/home/u/ateliers/ws/atelier/feat/a/b"},
+		{"atelier", "feat/a/b", "/home/u/ateliers/ws/atelier/feat-a-b"},
 	}
 	for _, c := range cases {
 		if got := WorktreeLinkPath(root, c.repo, c.branch); got != c.want {
 			t.Errorf("WorktreeLinkPath(%q,%q,%q) = %q, want %q",
 				root, c.repo, c.branch, got, c.want)
+		}
+	}
+}
+
+func TestWorktreeDirName(t *testing.T) {
+	cases := map[string]string{
+		"feat/x":   "feat-x",
+		"feat/a/b": "feat-a-b",
+		"main":     "main",
+		"":         "",
+	}
+	for in, want := range cases {
+		if got := WorktreeDirName(in); got != want {
+			t.Errorf("WorktreeDirName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

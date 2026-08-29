@@ -167,8 +167,8 @@ func TestReconcile_ClearsMisroutedAttentionOnPopup(t *testing.T) {
 	// Parent $1@2 is live (popup not orphan); the popup's own window @14 wrongly
 	// carries attention.
 	h.runOut["list-windows"] = strings.Join([]string{
-		windowLine("$1", "@2", "1", "feat/x", "slug", "", "/repo", "1", "0", "", "", "", ""),
-		windowLine("$7", "@14", "1", "cd", "", "", "", "0", "1", "", "", "", ""),
+		windowLine("$1", "@2", "1", "feat/x", "slug", "", "/repo", "1", "0", "", "", ""),
+		windowLine("$7", "@14", "1", "cd", "", "", "", "0", "1", "", "", ""),
 	}, "\n")
 	h.setClients()
 
@@ -199,8 +199,8 @@ func TestReconcileLoop_RepairsSafeButSkipsRacyHook(t *testing.T) {
 	h := newFakeHost()
 	h.setSessionsWithIDs("$1|vyrwu/atelier", "$7|_atelier_claude_1_2")
 	h.runOut["list-windows"] = strings.Join([]string{
-		windowLine("$1", "@2", "1", "feat/x", "slug", "", "/repo", "1", "0", "", "", "", ""),
-		windowLine("$7", "@14", "1", "cd", "", "", "", "0", "1", "", "", "", ""), // popup window carries attention
+		windowLine("$1", "@2", "1", "feat/x", "slug", "", "/repo", "1", "0", "", "", ""),
+		windowLine("$7", "@14", "1", "cd", "", "", "", "0", "1", "", "", ""), // popup window carries attention
 	}, "\n")
 	h.setClients() // no popup client → VHookArmedAtRest predicate holds
 	h.runOut["show-hooks"] = "client-detached[0] run-shell -b foo ; set-hook -ug client-detached"

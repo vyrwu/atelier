@@ -26,11 +26,11 @@ func TestBuiltins_ToolFlagContract(t *testing.T) {
 		}
 	}
 
-	// Only the pre-launch-logic pickers stay compiled-in. Simpler tools
-	// (popupshell, lazygit, gh-dash, gh-enhance, ccusage) are now [tools.*]
-	// config launchers, not built-ins.
+	// The pickers with pre-launch logic + the built-in Popup shell stay
+	// compiled-in. Simpler tools (lazygit, gh-dash, gh-enhance, ccusage) are
+	// [tools.*] config launchers, not built-ins.
 	mustBeTool := []string{
-		"k8s", "aws", "pg", "workspaces",
+		"k8s", "eks", "pg", "workspaces", "popupshell",
 	}
 	for _, name := range mustBeTool {
 		if !seen[name] {

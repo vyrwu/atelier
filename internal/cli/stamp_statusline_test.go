@@ -1,15 +1,14 @@
 package cli
 
 import (
-	"strings"
 	"testing"
 )
 
 // TestAtelierStatuslineRe_StripsPriorInjections locks in the
 // idempotency contract: re-running `atelier init` must not duplicate
-// atelier's status-line segments. We strip prior injections by
-// matching `#(atelier status (attention|forge)...)` and removing
-// the leading whitespace too.
+// atelier's status-line segment. We strip prior injections by
+// matching `#(atelier status attention...)` and removing the leading
+// whitespace too.
 //
 // Failure here would mean every dev iteration re-sources init and
 // the format grows unbounded — which is exactly the bug we just
@@ -31,23 +30,11 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 			want: `#W`,
 		},
 		{
-			name: "single forge injection stripped",
-			in:   `#W #(atelier status forge '#{@forge_state}')`,
-			want: `#W`,
-		},
-		{
-			name: "both injections stripped",
-			in:   `#W #(atelier status attention count)#(atelier status forge '#{@forge_state}')`,
-			want: `#W`,
-		},
-		{
 			name: "many duplicates all stripped (the actual bug)",
 			in: `#W` +
 				`#(atelier status attention --count)` +
 				`#(atelier status attention --count)` +
-				`#(atelier status forge '#{@forge_state}')` +
-				`#(atelier status attention --count)` +
-				`#(atelier status forge '#{@forge_state}')`,
+				`#(atelier status attention --count)`,
 			want: `#W`,
 		},
 		{
@@ -57,7 +44,7 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 		},
 		{
 			name: "foreign #(...) calls NOT stripped",
-			in:   `#W #(some_other_helper) #(atelier status forge '#{@forge_state}')`,
+			in:   `#W #(some_other_helper) #(atelier status attention count)`,
 			want: `#W #(some_other_helper)`,
 		},
 		{
@@ -73,23 +60,6 @@ func TestAtelierStatuslineRe_StripsPriorInjections(t *testing.T) {
 				t.Errorf("strip\n in:   %q\n got:  %q\n want: %q", tc.in, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestSegmentOrder_CurrentFormat pins the visual order the user
-// explicitly requested for window-status-current-format: attention
-// rollup, THEN forge PR badge. The bug where attention rendered first
-// was caused by duplicate-append accumulation; the forge badge must land
-// AFTER attention (spec: "after the attention icon").
-func TestSegmentOrder_CurrentFormat(t *testing.T) {
-	got := "" + attentionSegment() + forgeSegment()
-	aIdx := strings.Index(got, attentionEmitter)
-	gIdx := strings.Index(got, forgeEmitter)
-	if aIdx < 0 || gIdx < 0 {
-		t.Fatalf("segments missing: attention=%d forge=%d in %q", aIdx, gIdx, got)
-	}
-	if aIdx >= gIdx {
-		t.Errorf("order must be attention < forge. got %q", got)
 	}
 }
 

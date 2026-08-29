@@ -148,6 +148,7 @@ type Style string
 const (
 	StyleFull   Style = "full"   // rounded border, bottom-anchored, full-height
 	StylePicker Style = "picker" // -B compact picker (70%×70%)
+	StyleInput  Style = "input"  // rounded border, centered, compact free-text box (M-n)
 )
 
 // Validate sanity-checks a manifest. Returns the first error found.
@@ -166,7 +167,7 @@ func (m *Manifest) Validate() error {
 		return fmt.Errorf("manifest popup %q is not a known kind", m.Popup)
 	}
 	switch m.Binding.style() {
-	case "", StyleFull, StylePicker:
+	case "", StyleFull, StylePicker, StyleInput:
 	default:
 		return fmt.Errorf("manifest binding style %q is not known", m.Binding.style())
 	}

@@ -93,9 +93,6 @@ func windowFlags(win state.Window) []string {
 	if win.Tag != "" {
 		f = append(f, "tag="+win.Tag)
 	}
-	if win.ForgeState != "" {
-		f = append(f, "forge="+win.ForgeState)
-	}
 	if win.RepoPath != "" && win.PaneCwd != "" && !win.PaneCwdLive {
 		f = append(f, "CWD-GONE")
 	}
@@ -145,7 +142,6 @@ type windowJSON struct {
 	Attention   bool   `json:"attention,omitempty"`
 	Recap       string `json:"recap,omitempty"`
 	Tag         string `json:"tag,omitempty"`
-	ForgeState  string `json:"forge_state,omitempty"`
 	PaneCwdLive bool   `json:"pane_cwd_live"`
 }
 
@@ -197,7 +193,7 @@ func writeStateJSON(w io.Writer, top *state.Topology, violations []state.Violati
 			SessionID: win.SessionID, WindowID: win.WindowID, Name: win.Name,
 			WorkspaceID: win.WorkspaceID, Root: win.Root, RepoPath: win.RepoPath,
 			Driver: win.Driver, Attention: win.Attention,
-			Recap: win.Recap, Tag: win.Tag, ForgeState: win.ForgeState, PaneCwdLive: win.PaneCwdLive,
+			Recap: win.Recap, Tag: win.Tag, PaneCwdLive: win.PaneCwdLive,
 		})
 	}
 	for _, c := range top.Clients {

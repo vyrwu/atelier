@@ -212,28 +212,21 @@ set-hook -g client-attached 'run-shell -b "atelier tools workspaces _refresh-loo
 
 // StatuslineBlock returns the statusline wiring block.
 //
-// Segments are injected into window-status-current-format ONLY — the bar
-// reflects the focused workspace, never background windows:
-//
-//  1. Attention rollup — global ⏺ count of windows flagged for
-//     attention (Claude Stop hook fires on a non-attached popup).
-//
-//  2. Forge PR badge — the current window's cached @forge_state as a
-//     colored PR glyph (open/draft/merged/closed). Empty when the
-//     workspace has no PR or no forge integration is configured.
-//
-// Order matters: the layout reads `<window-name> ⏺<n> <PR>` — the
-// window, then global attention, then the current workspace's forge
-// status. Both decorate only the current window; window-status-format is
-// empty so inactive windows render nothing (the ⏺<n> rollup is global
-// and covers background attention).
+// This is the PLUGIN-mode delivery of the attention rollup: the bundled
+// theme (ThemeBlock) puts the ⏺<n> rollup in status-left, but plugin-mode
+// users keep their own theme and never get ThemeBlock. stamp-statusline
+// injects the rollup non-destructively into their existing
+// window-status-current-format (after #W), so the global ⏺ count of
+// attention-flagged windows shows up without atelier owning the whole bar.
+// In bundled mode the format is empty (no #W), so the stamp is a harmless
+// no-op and the rollup renders once, from status-left.
 func StatuslineBlock() string {
 	return `# --- statusline ---
 set -g status-interval 3
-# Idempotent stamp: strips any prior atelier additions and re-injects
-# the canonical attention + forge segments. Safe to re-source
-# the config any number of times — no accumulation. See
-# internalStampStatuslineCmd for the strip-and-re-add details.
+# Idempotent stamp: strips any prior atelier addition and re-injects the
+# canonical attention segment. Safe to re-source the config any number of
+# times — no accumulation. See internalStampStatuslineCmd for the
+# strip-and-re-add details.
 run-shell -b 'atelier internal stamp-statusline'
 `
 }
@@ -273,12 +266,11 @@ bind -T popup F12 display-message ""
 //   - automatic-rename / allow-rename off — atelier persists
 //     workspaces keyed on window name; tmux must not drift them.
 //   - Pane border accent so atelier popups look intentional.
-//   - A minimal statusline (session left, time right, bold current
-//     window). NO powerline glyphs / Nerd Font dependency — the
-//     default must render on stock fonts.
-//   - Atelier's stamp-statusline still injects the attention rollup +
-//     forge (PR) badge into window-status-current-format. Those are the
-//     value-adds; the bar's chrome stays out of the way.
+//   - A statusline at the TOP: the current workspace's description
+//     (its intent-derived title) at the left, the global attention
+//     rollup beside it, the clock at the right. No repo/branch and no
+//     per-window chrome. NO powerline glyphs / Nerd Font dependency —
+//     the default must render on stock fonts.
 //   - User-override hook: ~/.config/atelier/tmux.conf.local is
 //     sourced LAST when present, so any user customization wins
 //     over atelier's defaults without forking the bundled config.
@@ -363,26 +355,24 @@ bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-pipe-and-cancel "atelier int
 set -g pane-border-style "fg=colour240"
 set -g pane-active-border-style "fg=colour103"
 
-# Statusline: transparent bar bg, minimal content.
+# Statusline at the TOP: the current WORKSPACE's description (its intent-derived
+# title) leads at the left, the global attention rollup beside it, the clock at
+# the right. No repo/branch — a workspace is an intent, not a repo, and the
+# description already says what it is.
+set -g status-position top
 set -g status-style "bg=default,fg=default"
-# tmux defaults status-left-length to 10 which truncates anything
-# longer than e.g. "vyrwu/nix-co...". Bump high enough that real-
-# world repo names (owner/repo, ~25-30 chars) fit.
-set -g status-left-length 100
+# status-left holds the (variable-length) description; give it room.
+set -g status-left-length 120
 set -g status-right-length 50
-set -g status-left " #S "
+# Description via an emitter (reads @workspace_title through show-options — a
+# session user-option doesn't resolve in a status FORMAT on every tmux), then
+# the global ⏺N attention count. #{client_session} = the focused session.
+set -g status-left " #[bold]#(atelier status description '#{client_session}')#[nobold]  #(atelier status attention count) "
 set -g status-right " %H:%M "
-# Inactive windows render NOTHING. The status bar reflects only the
-# workspace you're focused on: the workspace name (status-left #S), the
-# GLOBAL attention count, and the forge (PR) badge. Rendering background
-# windows floods the bar — and the ⏺N attention rollup (injected into the
-# current format below) already surfaces how many workspaces are waiting,
-# with M-s listing them. The CURRENT workspace renders via
-# window-status-current-format; stamp-statusline injects the attention
-# rollup + forge badge after its #W anchor.
+# The workspace lives in status-left; windows render nothing in the bar.
 set -g window-status-format ""
 set -g window-status-separator ""
-set -g window-status-current-format "#[bold] #W #[nobold]"
+set -g window-status-current-format ""
 
 # --- User override hook ---
 # Sourced LAST so user customizations win over every default above.
@@ -472,6 +462,15 @@ func popupOptions(style manifest.Style, title string, startCwd bool) string {
 	switch style {
 	case manifest.StylePicker:
 		parts = append(parts, "-B", "-w70%", "-h70%")
+	case manifest.StyleInput:
+		// Compact, CENTERED floating box for a free-text prompt (M-n). No
+		// -y anchor → tmux centers it. Carries a border TITLE but no legend —
+		// the view owns its heading; the title just frames the popup.
+		parts = append(parts, `-b rounded`, `-S "fg=colour103"`)
+		if title != "" {
+			parts = append(parts, fmt.Sprintf(`-T "#[align=centre] %s "`, title))
+		}
+		parts = append(parts, "-w60%", "-h30%")
 	case manifest.StyleFull, "":
 		parts = append(parts, `-b rounded`, `-S "fg=colour103"`)
 		if title != "" {

@@ -14,9 +14,9 @@ import (
 	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/fzfstyle"
 	"github.com/vyrwu/atelier/internal/integration"
+	"github.com/vyrwu/atelier/internal/notify"
 	"github.com/vyrwu/atelier/internal/spinner"
 	"github.com/vyrwu/atelier/internal/statestore"
-	"github.com/vyrwu/atelier/internal/tmuxhost"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
@@ -46,14 +46,12 @@ type ChangeRow struct {
 }
 
 func ChangesCommand() *cobra.Command {
-	var socket string
 	c := &cobra.Command{
 		Use:   "changes",
 		Short: "List changes — cross-repo PR aggregate (M-c)",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			h := tmuxhost.New(socket)
 			if !forgeActive() {
-				_, _ = h.Run("display-message", "atelier: no forge integration configured ([forge] provider)")
+				notify.Show(notify.Info, "no forge integration configured ([forge] provider)")
 				return fzf.ErrCancelled
 			}
 			// Poke a sweep so the list is current, then build from the cache.
@@ -118,7 +116,6 @@ func ChangesCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&socket, "socket", "", "tmux socket (tests only)")
 	return c
 }
 

@@ -122,7 +122,10 @@ func refreshRecapsAll(h *tmuxhost.Client, ai integration.AIIntegration) {
 	// @workspace_id is session-scoped; resolve listability from list-SESSIONS
 	// (window-context inheritance is version-fragile — see workspace.ListableSessions).
 	listable := workspace.ListableSessions(h)
-	format := "#{window_id}\x1f#{session_name}\x1f#{" + workspace.OptWorkspaceDriver + "}\x1f#{pane_current_path}"
+	// `|` separator (tmux sanitizes control-char separators in -F output);
+	// pane_current_path LAST + SplitN so a path is never split (paths have no `|`
+	// but this is the safe idiom). Other fields are ids/slugs/controlled tokens.
+	format := "#{window_id}|#{session_name}|#{" + workspace.OptWorkspaceDriver + "}|#{pane_current_path}"
 	out, err := h.Run("list-windows", "-a", "-F", format)
 	if err != nil {
 		debuglog.LogErr("workspaces._refresh-loop: list-windows (recap)", err)
@@ -132,7 +135,7 @@ func refreshRecapsAll(h *tmuxhost.Client, ai integration.AIIntegration) {
 		if line == "" {
 			continue
 		}
-		f := strings.Split(line, "\x1f")
+		f := strings.SplitN(line, "|", 4)
 		if len(f) < 4 {
 			continue
 		}
@@ -186,16 +189,18 @@ func refreshSummariesAll(h *tmuxhost.Client, ai integration.AIIntegration) {
 	}
 }
 
-// driverRecaps returns session → the driver window's @attention_recap.
+// driverRecaps returns session → the driver window's @attention_recap. Uses `|`
+// with the free-text recap LAST + SplitN (tmux sanitizes control-char separators
+// in -F output); session_name + the driver flag are `|`-free.
 func driverRecaps(h *tmuxhost.Client) map[string]string {
 	out, err := h.Run("list-windows", "-a", "-F",
-		"#{session_name}\x1f#{"+workspace.OptWorkspaceDriver+"}\x1f#{"+workspace.OptRecap+"}")
+		"#{session_name}|#{"+workspace.OptWorkspaceDriver+"}|#{"+workspace.OptRecap+"}")
 	if err != nil {
 		return nil
 	}
 	m := map[string]string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		f := strings.Split(line, "\x1f")
+		f := strings.SplitN(line, "|", 3)
 		if len(f) < 3 || strings.TrimSpace(f[1]) != "1" {
 			continue
 		}
@@ -300,7 +305,7 @@ var pickerSigFields = strings.Join([]string{
 	"#{window_id}", "#{session_name}",
 	"#{" + workspace.OptAttention + "}", "#{" + workspace.OptAgentStatus + "}",
 	"#{" + workspace.OptRecap + "}",
-}, "\x1f")
+}, "|")
 
 func pickerSignature(h *tmuxhost.Client) string {
 	out, err := h.Run("list-windows", "-a", "-F", pickerSigFields)

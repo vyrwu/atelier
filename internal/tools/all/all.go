@@ -14,17 +14,19 @@ package all
 import (
 	"github.com/vyrwu/atelier/internal/plugin"
 
-	"github.com/vyrwu/atelier/internal/tools/aws"
+	"github.com/vyrwu/atelier/internal/tools/eks"
 	"github.com/vyrwu/atelier/internal/tools/k8s"
 	"github.com/vyrwu/atelier/internal/tools/pg"
+	"github.com/vyrwu/atelier/internal/tools/popupshell"
 	"github.com/vyrwu/atelier/internal/tools/toolselector"
 	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
 func init() {
-	plugin.RegisterBuiltin(aws.Manifest, aws.AddCommands)
+	plugin.RegisterBuiltin(eks.Manifest, eks.AddCommands)
 	plugin.RegisterBuiltin(k8s.Manifest, k8s.AddCommands)
 	plugin.RegisterBuiltin(pg.Manifest, pg.AddCommands)
+	plugin.RegisterBuiltin(popupshell.Manifest, popupshell.AddCommands)
 	plugin.RegisterBuiltin(toolselector.Manifest, toolselector.AddCommands)
 	plugin.RegisterBuiltin(workspaces.Manifest, workspaces.AddCommands)
 }

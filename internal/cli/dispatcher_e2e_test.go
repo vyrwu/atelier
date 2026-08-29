@@ -29,7 +29,7 @@ func TestDispatcher_ListsDiscoveredTools(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("atelier tools list: %v\nstderr: %s", err, errBuf.String())
 	}
-	for _, want := range []string{"k8s", "pg", "aws", "workspaces", "toolselector"} {
+	for _, want := range []string{"k8s", "eks", "pg", "workspaces", "toolselector", "popupshell"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing tool %q in output:\n%s", want, out.String())
 		}
