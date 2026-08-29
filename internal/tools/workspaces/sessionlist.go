@@ -315,24 +315,30 @@ func formatAge(now time.Time, tsStr string) string {
 // wsIdentity is a workspace's session-scoped identity (id/title/tag).
 type wsIdentity struct{ id, title, tag string }
 
-// sessionIdentities reads the session-scoped workspace-identity options from
-// list-SESSIONS (their own context — no window-inheritance dependency, which is
-// version-fragile), keyed by session name. The picker joins these to windows.
+// sessionIdentities reads each live session's workspace-identity options via
+// `show-options -t <session> -qv` — the DIRECT read, robust across tmux
+// versions (a session user-option inside a `-F` format is version-fragile: tmux
+// 3.4 returns empty, silently emptying the picker). Keyed by session name; the
+// picker joins these to windows.
 func sessionIdentities(h *tmuxhost.Client) map[string]wsIdentity {
-	out, err := h.Run("list-sessions", "-F", strings.Join([]string{
-		"#{session_name}", "#{" + workspace.OptWorkspaceID + "}",
-		"#{" + workspace.OptWorkspaceTitle + "}", "#{" + workspace.OptWorkspaceTag + "}",
-	}, "\x1f"))
-	if err != nil {
-		return map[string]wsIdentity{}
-	}
 	m := map[string]wsIdentity{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		f := strings.Split(line, "\x1f")
-		if len(f) < 4 {
-			continue
+	sessions, err := h.ListSessions()
+	if err != nil {
+		return m
+	}
+	opt := func(s, name string) string {
+		out, e := h.Run("show-options", "-t", s, "-qv", name)
+		if e != nil {
+			return ""
 		}
-		m[f[0]] = wsIdentity{id: f[1], title: f[2], tag: strings.TrimSpace(f[3])}
+		return strings.TrimSpace(string(out))
+	}
+	for _, s := range sessions {
+		id := opt(s, workspace.OptWorkspaceID)
+		if id == "" {
+			continue // not an atelier workspace
+		}
+		m[s] = wsIdentity{id: id, title: opt(s, workspace.OptWorkspaceTitle), tag: opt(s, workspace.OptWorkspaceTag)}
 	}
 	return m
 }

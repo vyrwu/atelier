@@ -306,23 +306,24 @@ func SetRecapTS(h *tmuxhost.Client, windowID, recap string, ts int64) error {
 }
 
 // ListableSessions returns the set of session names that carry a @workspace_id
-// (i.e. are atelier-managed workspaces), read from list-SESSIONS. Callers that
-// enumerate windows (the picker, the attention rollup, the recap sweep) must
-// resolve listability through this rather than reading `#{@workspace_id}` in a
-// list-windows format: @workspace_id is SESSION-scoped, and window-context
-// user-option inheritance is version-dependent in tmux — reading it per-window
-// silently returns empty on some versions, emptying the picker/rollup. Reading
-// it in its own session context is robust everywhere.
+// (i.e. are atelier-managed workspaces). Callers that enumerate windows (the
+// picker, the attention rollup, the recap sweep) must resolve listability
+// through this rather than reading `#{@workspace_id}` in a list-windows/
+// list-sessions FORMAT: @workspace_id is SESSION-scoped, and tmux's expansion of
+// a session user-option inside a `-F` format is version-dependent (tmux 3.4
+// returns empty; 3.6 resolves it), which silently empties the picker/rollup.
+// `show-options -t <session> -qv` is the canonical DIRECT read and works on
+// every version — the same mechanism `display-message '#{@opt}'` uses.
 func ListableSessions(h *tmuxhost.Client) map[string]bool {
-	out, err := h.Run("list-sessions", "-F", "#{session_name}\x1f#{"+OptWorkspaceID+"}")
-	if err != nil {
-		return map[string]bool{}
-	}
 	set := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		name, id, ok := strings.Cut(line, "\x1f")
-		if ok && strings.TrimSpace(id) != "" {
-			set[name] = true
+	sessions, err := h.ListSessions()
+	if err != nil {
+		return set
+	}
+	for _, s := range sessions {
+		out, err := h.Run("show-options", "-t", s, "-qv", OptWorkspaceID)
+		if err == nil && strings.TrimSpace(string(out)) != "" {
+			set[s] = true
 		}
 	}
 	return set

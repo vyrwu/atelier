@@ -22,25 +22,33 @@ import (
 func TestCountAttentionWindows_MatchesPicker(t *testing.T) {
 	srv := testtmux.New(t)
 
-	seed := func(session string, opts map[string]string) {
+	// seed a session with an optional @workspace_id (SESSION-scoped, as
+	// production stamps it) and an optional @needs_attention on its window
+	// (WINDOW-scoped). Mirrors the real option scopes so the read paths match.
+	seed := func(session, workspaceID string, attention bool) {
 		srv.NewSession(session)
-		out, err := srv.Client.Run("display-message", "-p", "-t", session+":1", "#{window_id}")
-		if err != nil {
-			t.Fatalf("resolve window id for %s: %v", session, err)
+		if workspaceID != "" {
+			if _, err := srv.Client.Run("set-option", "-t", session, "@workspace_id", workspaceID); err != nil {
+				t.Fatalf("set @workspace_id on %s: %v", session, err)
+			}
 		}
-		wid := strings.TrimSpace(string(out))
-		for k, v := range opts {
-			if err := srv.Client.SetWindowOption(wid, k, v); err != nil {
-				t.Fatalf("set %s=%s on %s: %v", k, v, session, err)
+		if attention {
+			out, err := srv.Client.Run("display-message", "-p", "-t", session+":1", "#{window_id}")
+			if err != nil {
+				t.Fatalf("resolve window id for %s: %v", session, err)
+			}
+			wid := strings.TrimSpace(string(out))
+			if err := srv.Client.SetWindowOption(wid, "@needs_attention", "1"); err != nil {
+				t.Fatalf("set @needs_attention on %s: %v", session, err)
 			}
 		}
 	}
 
-	seed("vyrwu/one", map[string]string{"@workspace_id": "vyrwu/one", "@needs_attention": "1"})
-	seed("vyrwu/two", map[string]string{"@workspace_id": "vyrwu/two", "@needs_attention": "1"})
-	seed("bare/no-metadata", map[string]string{"@needs_attention": "1"})    // phantom
-	seed("_atelier_claude_9_9", map[string]string{"@needs_attention": "1"}) // misrouted popup
-	seed("vyrwu/idle", map[string]string{"@workspace_id": "vyrwu/idle"})    // listable but no attention
+	seed("vyrwu/one", "vyrwu/one", true)
+	seed("vyrwu/two", "vyrwu/two", true)
+	seed("bare/no-metadata", "", true)      // phantom: attention, no @workspace_id
+	seed("_atelier_claude_9_9", "", true)   // misrouted popup
+	seed("vyrwu/idle", "vyrwu/idle", false) // listable but no attention
 
 	if got := countAttentionWindows(srv.Client); got != 2 {
 		t.Errorf("countAttentionWindows = %d, want 2 (the two workspaces with attention)", got)
