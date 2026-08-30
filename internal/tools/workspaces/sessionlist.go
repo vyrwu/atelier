@@ -12,68 +12,37 @@ import (
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
-// SessionRow is one row in the workspace selector. Lines are emitted as
-//
-//	<session>\t<window>\t<name>\t<recap>
-//
-// The picker runs --with-nth=3,4 (display the name plus the recap on its own
-// line beneath it) and --nth=1 (search the name only, NOT the recap). Fields
-// 1-2 stay plain for output parsing. Display holds the styled name; Recap holds
-// the indented second line — always present so every row is a uniform two-line
-// height, blank when there's no AI summary (#43). No --wrap: a too-wide recap is
-// truncated to the popup width by fzf.
-type SessionRow struct {
-	Session string
-	Window  string
-	Display string
-	Recap   string
-}
+// AgentState is a workspace's agent status, used for the row's status dot
+// and the picker's primary sort key.
+type AgentState int
 
-// Visible cell widths of the fixed left-hand columns. Their sum is the
-// picker's --wrap-sign width, which hangs wrapped recap text under the
-// workspace name. Kept in sync with the escape sequences that render them.
 const (
-	timeColCells  = 4 // "%3s" (3) + trailing space
-	iconColCells  = 2 // attention glyph (or space) + trailing space
-	badgeColCells = 2 // forge-badge slot (glyph+space or two spaces)
+	StateBlocked AgentState = iota // agent needs you (@needs_attention)
+	StateRunning                   // agent working / awaiting a sub-agent
+	StateIdle                      // nothing needed
 )
 
-// recapIndentCells is the number of leading spaces that aligns the recap line
-// under the workspace name — the visible width of the fixed columns before the
-// name (time + icon, plus the forge-badge slot when a forge integration is
-// active). Pure.
-func recapIndentCells(showForge bool) int {
-	n := timeColCells + iconColCells
-	if showForge {
-		n += badgeColCells
-	}
-	return n
+// SessionRow is one workspace row, exposed as STRUCTURED data. The bubbletea
+// delegate (sessions_tui.go) owns all styling via lipgloss — this type
+// carries only the facts. Session/Window are the tmux switch identity
+// (Session may be mangled '.'/':'→'_'); DisplayName is the user-facing
+// owner/repo with the dot intact.
+type SessionRow struct {
+	Session     string
+	Window      string
+	DisplayName string
+	IsCurrent   bool
+	State       AgentState
+	Tag         string
+	ForgeState  string // raw @forge_state; "" when none / no forge adapter
+	Recap       string // raw AI summary text; "" when none
+	Age         string // relative age, e.g. "now" / "5m" / "2h"
+	AutoRepo    bool   // multi-repo/auto session (no @repo_path)
 }
 
-// zeroWidthSpace terminates the reserved (empty-recap) second line. fzf
-// collapses a multi-line item whose trailing line is whitespace-only after
-// ANSI stripping — a blank line of plain spaces (or one ending in an ANSI
-// reset) is trimmed away, dropping the reserved row and re-introducing the
-// one-vs-two-line height oscillation (#43). A zero-width space is invisible yet
-// counts as non-whitespace to fzf's trimmer, so the line reserves height while
-// rendering blank. Verified against fzf 0.72 under --ansi; a non-breaking space
-// does NOT work (fzf trims it as whitespace). Go's unicode.IsSpace agrees —
-// it excludes U+200B but includes U+00A0 — so the TrimSpace guard in
-// recap_line_test.go mirrors fzf's behavior.
-const zeroWidthSpace = "\u200b"
-
-// formatRecapLine renders the AI recap as an italic dim-grey line beneath the
-// workspace name (fzf multi-line item): a leading newline, `indent` spaces to
-// sit under the name, then `· summary`. The picker runs WITHOUT --wrap, so a
-// recap wider than the popup is truncated to width by fzf with an ellipsis —
-// row height stays a predictable two lines. Empty recap → a blank (but present)
-// second line so every row is a uniform two-line height (#43). Pure.
-func formatRecapLine(recap string, indent int) string {
-	if recap == "" {
-		return "\n" + strings.Repeat(" ", indent) + zeroWidthSpace
-	}
-	return fmt.Sprintf("\n%s\033[3;38;5;103m· %s\033[0m", strings.Repeat(" ", indent), recap)
-}
+// sortRank is the primary picker sort key: blocked first, then running,
+// then idle (mirrors the AgentState order).
+func (r SessionRow) sortRank() int { return int(r.State) }
 
 // BuildSessionList replicates tmux_session_list:
 //
@@ -116,14 +85,7 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 	}
 	now := time.Now()
 
-	type entry struct {
-		attn      int    // sort rank: 0 blocked, 1 running, 2 idle
-		tag       string // empty sorts last
-		forgeRank int
-		row       SessionRow
-	}
-	var entries []entry
-
+	var rows []SessionRow
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -140,24 +102,10 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		repoPath, attention, kind, recap, createdTs := fields[4], fields[5], fields[6], fields[7], fields[8]
 		tag := strings.TrimSpace(fields[9])
 		agentStatus := strings.TrimSpace(fields[10])
-		// Kernel forge badge: the cached @forge_state field (if present)
-		// follows the fixed fields. The picker renders the glyph itself and
-		// computes the sort rank — the adapter only classified the state.
-		forgeBadge := ""
-		forgeRank := forgeStateRank("")
+		forgeState := ""
 		if showForge && len(fields) > baseFields {
-			forgeBadge = renderForgeBadge(fields[baseFields])
-			forgeRank = forgeStateRank(fields[baseFields])
+			forgeState = strings.TrimSpace(fields[baseFields])
 		}
-		// Fixed-width forge-badge slot rendered between the attention icon and
-		// the workspace name (layout: time · icon · badge · name · recap).
-		// Only present when a forge integration is active; the empty slot keeps
-		// name columns aligned for workspaces with no PR.
-		badgeCol := ""
-		if showForge {
-			badgeCol = forgeBadgeColumn(forgeBadge)
-		}
-		lastAtt := createdTs
 
 		// Filter out atelier-managed popup sessions.
 		if strings.HasPrefix(session, "_") {
@@ -165,110 +113,60 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 		}
 		// Only include sessions stamped with @repo_path OR @ai_workspace_kind.
 		// Shared with the status-line attention rollup (countAttentionWindows)
-		// so the picker and the ⏺ badge can never disagree on what counts as a
+		// so the picker and the badge can never disagree on what counts as a
 		// listable workspace.
 		if !workspace.Listable(repoPath, kind) {
 			continue
 		}
 
-		// blocked = the agent needs you (yellow). Keyed on @needs_attention, NOT
+		// blocked = the agent needs you. Keyed on @needs_attention, NOT
 		// @agent_status, so visiting the workspace (after-select-window clears
 		// @needs_attention) drops the dot instantly. running = the agent is
-		// working (blue) — keyed on @agent_status so a visit doesn't hide it
-		// (the agent is still going); the loop clears it when the agent stops.
-		isBlocked := attention == "1"
-		isRunning := !isBlocked && agentStatus == workspace.AgentRunning
+		// working — keyed on @agent_status so a visit doesn't hide it (the
+		// agent is still going); the loop clears it when the agent stops.
+		state := StateIdle
+		switch {
+		case attention == "1":
+			state = StateBlocked
+		case agentStatus == workspace.AgentRunning:
+			state = StateRunning
+		}
 		isCurrent := currentSid != "" && sid == currentSid && wid == currentWid
 
-		// Layout (multi-line item):
-		//   <time> <icon> <badge> <session>/<window>
-		//                         · <recap>
-		//
-		// Time is a 3-char right-aligned dim-grey column on the left.
-		// Icon (❯ ⏺ ○) follows after a single space — the icon column
-		// is 2 cells wide (glyph + trailing space) so name text stays
-		// vertically aligned across rows.
-		//
-		// Recap drops onto its own line, indented to sit under the name.
-		var ageText string
-		if isCurrent {
-			ageText = "now"
-		} else {
-			ageText = formatAge(now, lastAtt)
-		}
-		timeCol := fmt.Sprintf("\033[38;5;103m%3s\033[0m ", ageText)
-
-		// Icon by agent state: ❯ current · yellow ⏺ blocked (needs you) ·
-		// blue ⏺ running (working / waiting on a sub-agent) · dim ○ idle.
-		var icon string
-		switch {
-		case isCurrent:
-			icon = "\033[1;31m❯\033[0m "
-		case isBlocked:
-			icon = "\033[33m⏺\033[0m "
-		case isRunning:
-			icon = "\033[34m⏺\033[0m "
-		default:
-			icon = "\033[90m○\033[0m "
+		age := "now"
+		if !isCurrent {
+			age = formatAge(now, createdTs)
 		}
 
-		// Show the persisted AI summary whenever one exists — NOT only when
-		// the agent popup is currently live. Restore re-stamps @attention_recap,
-		// but a fresh launch doesn't recreate the popup, so gating on a live
-		// popup hid every workspace's last summary after relaunch. The recap is
-		// only ever written by the AI agent, so its presence already means the
-		// workspace is agent-associated.
-		//
-		// The recap renders on its OWN line beneath the workspace name,
-		// indented to sit under the name column. No wrap — fzf truncates it to
-		// the popup width, keeping row height a predictable two lines.
-		recapStr := formatRecapLine(recap, recapIndentCells(showForge))
-
-		// Bold weight for current.
-		weight := ""
-		if isCurrent {
-			weight = "1;"
-		}
-
-		// Sort rank: blocked (needs you) first, then running, then idle.
-		attn := 2
-		switch {
-		case isBlocked:
-			attn = 0
-		case isRunning:
-			attn = 1
-		}
-
-		// Display the user-facing owner/repo (dot intact) recovered from
-		// @repo_path; tmux mangles '.'/':'→'_' in the session_name so the raw
-		// name would show "cloudnativedenmark_dk". SessionRow.Session keeps the
-		// real (mangled) name — it's the tmux switch target, not cosmetic.
+		// User-facing owner/repo (dot intact) recovered from @repo_path;
+		// tmux mangles '.'/':'→'_' in the session_name. SessionRow.Session
+		// keeps the real (mangled) name — it's the tmux switch target.
 		displayName := session
 		if slug := repoSlugFromPath(repoPath); slug != "" {
 			displayName = slug
 		}
 
-		var display string
-		if repoPath != "" {
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "36", displayName, window, tag)
-		} else {
-			display = formatSessionDisplay(timeCol, icon, badgeCol, weight, "38;5;166", displayName, window, tag)
-		}
-
-		entries = append(entries, entry{
-			attn:      attn,
-			tag:       tag,
-			forgeRank: forgeRank,
-			row:       SessionRow{Session: session, Window: window, Display: display, Recap: recapStr},
+		rows = append(rows, SessionRow{
+			Session:     session,
+			Window:      window,
+			DisplayName: displayName,
+			IsCurrent:   isCurrent,
+			State:       state,
+			Tag:         tag,
+			ForgeState:  forgeState,
+			Recap:       strings.TrimSpace(recap),
+			Age:         age,
+			AutoRepo:    repoPath == "",
 		})
 	}
 
-	// Sort: attention → tag (tagged before untagged, same-tag clusters) → forge.
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].attn != entries[j].attn {
-			return entries[i].attn < entries[j].attn
+	// Sort: attention (blocked → running → idle) → tag (tagged before
+	// untagged, same-tag clusters) → forge state.
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].sortRank() != rows[j].sortRank() {
+			return rows[i].sortRank() < rows[j].sortRank()
 		}
-		ti, tj := entries[i].tag, entries[j].tag
+		ti, tj := rows[i].Tag, rows[j].Tag
 		if ti != tj {
 			if ti == "" {
 				return false
@@ -278,14 +176,9 @@ func BuildSessionList(h *tmuxhost.Client) ([]SessionRow, error) {
 			}
 			return ti < tj
 		}
-		return entries[i].forgeRank < entries[j].forgeRank
+		return forgeStateRank(rows[i].ForgeState) < forgeStateRank(rows[j].ForgeState)
 	})
-
-	out2 := make([]SessionRow, 0, len(entries))
-	for _, e := range entries {
-		out2 = append(out2, e.row)
-	}
-	return out2, nil
+	return rows, nil
 }
 
 // formatAge renders a short relative-time suffix for a unix epoch.

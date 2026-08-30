@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyrwu/atelier/internal/fzf"
 	"github.com/vyrwu/atelier/internal/manifest"
+	"github.com/vyrwu/atelier/internal/tui"
 )
 
 // TestMain re-invokes the test binary as a toolmain subprocess when the
@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 				root.AddCommand(&cobra.Command{
 					Use: "do",
 					RunE: func(*cobra.Command, []string) error {
-						return fzf.ErrCancelled
+						return tui.ErrCancelled
 					},
 				})
 			}, os.Args[1:])
@@ -42,11 +42,11 @@ func TestMain(m *testing.M) {
 }
 
 // TestDispatch_ExitsCancelledOn130 locks in the cancellation propagation
-// fix: when RunE returns fzf.ErrCancelled, Dispatch MUST exit with code
-// 130 (fzf's cancel status) so a parent fzf.Pick reading our exit status
-// up the become() chain returns ErrCancelled and the chain unwinds
-// cleanly. Returning nil (exit 0) caused upstream callers to see "valid
-// pick of empty output" and proceed with phantom state.
+// fix: when RunE returns tui.ErrCancelled, Dispatch MUST exit with code
+// 130 (the cancel status) so a parent reading our exit status up the
+// become() chain returns ErrCancelled and the chain unwinds cleanly.
+// Returning nil (exit 0) caused upstream callers to see "valid pick of
+// empty output" and proceed with phantom state.
 func TestDispatch_ExitsCancelledOn130(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "do")
 	cmd.Env = append(os.Environ(), "ATELIER_TOOLMAIN_TEST_MODE=cancel")

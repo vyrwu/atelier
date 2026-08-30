@@ -1,7 +1,6 @@
 package workspaces
 
 import (
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
-	"github.com/vyrwu/atelier/internal/dispatch"
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
@@ -53,10 +51,6 @@ const (
 	// tick — a heartbeat, so `atelier doctor` can tell a live-and-ticking daemon
 	// from one whose pid is alive but whose loop has wedged. A pid is not a pulse.
 	optRefreshLoopLastTick = "@atelier_refresh_loop_last_tick"
-	// optMSPickerPort holds the fzf --listen port of an open M-s picker (set by
-	// the picker's start bind, cleared on close). When set, the loop pushes a
-	// live reload after any tick that changed picker-visible state.
-	optMSPickerPort = "@atelier_ms_fzf_port"
 )
 
 // RefreshLoopCommand is the hidden `_refresh-loop` daemon started once from the
@@ -116,7 +110,11 @@ func runRefreshLoop(h *tmuxhost.Client, interval time.Duration) error {
 	// Wait one interval before the first tick: restore's warmup pass already
 	// fired bg-pull for live windows at startup, so an immediate tick would be
 	// redundant work (and mostly TTL-skipped anyway).
-	var lastPickerSig string
+	//
+	// The loop no longer pushes reloads to an open M-s picker: the bubbletea
+	// picker owns its own tea.Tick and re-reads the window options this loop
+	// stamps (see internal/tools/workspaces/sessions_tui.go), so the old fzf
+	// --listen HTTP push (maybeReloadPicker/postFzfReload) is gone.
 	for {
 		<-ticker.C
 		if !loopShouldContinue(h, serverPid) {
@@ -127,10 +125,6 @@ func runRefreshLoop(h *tmuxhost.Client, interval time.Duration) error {
 		// Heartbeat: record that this tick completed so doctor can distinguish a
 		// live-and-ticking daemon from a pid that's alive but wedged.
 		stampHeartbeat(h, time.Now())
-		// After the sweeps, push a live reload to an open M-s picker if the
-		// picker-visible state changed this tick (the point of the observer:
-		// see new attention/recap without reopening M-s).
-		lastPickerSig = maybeReloadPicker(h, lastPickerSig)
 	}
 }
 
@@ -174,60 +168,6 @@ func ReadDaemonHealth(h *tmuxhost.Client, now time.Time) (health DaemonHealth, s
 		}
 	}
 	return health, true
-}
-
-// maybeReloadPicker pushes a live reload to an open M-s picker when the
-// picker-visible state changed since the last tick, and returns the new
-// signature. No-op when no picker is open (its port global is unset), so this
-// costs one list-windows call per tick only while M-s is actually up.
-func maybeReloadPicker(h *tmuxhost.Client, last string) string {
-	port, _ := h.ShowGlobalOption(optMSPickerPort)
-	port = strings.TrimSpace(port)
-	if port == "" {
-		return last
-	}
-	sig := pickerSignature(h)
-	if sig == "" || sig == last {
-		return sig
-	}
-	postFzfReload(port)
-	debuglog.Logf("workspaces._refresh-loop: pushed M-s reload (port %s)", port)
-	return sig
-}
-
-// pickerSigFields are the window options the M-s picker renders. The signature
-// deliberately EXCLUDES @attention_recap_ts — a recap age tick alone shouldn't
-// disturb the user's cursor; only a change to visible content (attention,
-// status, recap text, forge badge, tag, or the window set) warrants a reload.
-var pickerSigFields = strings.Join([]string{
-	"#{window_id}", "#{session_name}", "#{window_name}",
-	"#{@needs_attention}", "#{@agent_status}", "#{@attention_recap}",
-	"#{@forge_state}", "#{@workspace_tag}", "#{@repo_path}", "#{@ai_workspace_kind}",
-}, "\x1f")
-
-// pickerSignature returns a change-detection signature over every window's
-// picker-visible fields. Context-independent (no current-client marker), so it
-// compares cleanly across ticks. "" on error.
-func pickerSignature(h *tmuxhost.Client) string {
-	out, err := h.Run("list-windows", "-a", "-F", pickerSigFields)
-	if err != nil {
-		return ""
-	}
-	return string(out)
-}
-
-// postFzfReload POSTs a reload action to the open picker's fzf --listen server,
-// re-running the same _session-list generator the picker's own binds use. Local
-// HTTP, short timeout; a dead port (picker already closed) fails silently.
-func postFzfReload(port string) {
-	body := "reload(" + dispatch.ToolCmd("workspaces", "_session-list") + ")"
-	client := &http.Client{Timeout: time.Second}
-	resp, err := client.Post("http://127.0.0.1:"+port, "text/plain", strings.NewReader(body))
-	if err != nil {
-		debuglog.LogErr("workspaces._refresh-loop: fzf reload post", err)
-		return
-	}
-	_ = resp.Body.Close()
 }
 
 // loopShouldContinue is the per-tick liveness + ownership gate. It exits the

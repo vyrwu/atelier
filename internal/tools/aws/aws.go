@@ -24,13 +24,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/awsassume"
-	"github.com/vyrwu/atelier/internal/fzf"
-	"github.com/vyrwu/atelier/internal/fzfstyle"
 	"github.com/vyrwu/atelier/internal/state"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/tui"
 )
 
 func PickCommand() *cobra.Command {
@@ -49,16 +49,22 @@ func PickCommand() *cobra.Command {
 			if len(profiles) == 0 {
 				return fmt.Errorf("no AWS profiles configured in ~/.aws/config")
 			}
-			args := fzfstyle.Args("サ ", "AWS Assume", "yellow",
-				fzfstyle.WithCustomColor("prompt:yellow:bold,pointer:yellow,query:yellow,hl:yellow,hl+:yellow:bold,label:103,border:103,footer:103"),
-			)
-			picked, err := fzf.Pick(profiles, args...)
+			items := make([]list.Item, 0, len(profiles))
+			for _, p := range profiles {
+				items = append(items, tui.SimpleItem{
+					IDStr:    p,
+					TitleStr: p,
+					Filter:   p,
+				})
+			}
+			outcome, err := tui.Run(tui.NewList(tui.NewTheme(tui.ColYellow), " AWS Assume ", items))
 			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
+				if errors.Is(err, tui.ErrCancelled) {
 					return nil
 				}
 				return err
 			}
+			picked := outcome.Selection
 			h := tmuxhost.New(socket)
 
 			target := resolveCallerPane(h)

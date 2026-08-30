@@ -72,9 +72,11 @@ freshness, persists it all to disk, and rehydrates on tmux restart.
 brew install vyrwu/tap/atelier
 ```
 
-The cask pulls in the two hard dependencies, `tmux` and `fzf`. Everything else
-(k9s, pgcli, lazygit, gh, granted, node, …) is optional — install only what
-the tools you use require. `atelier doctor` reports the gaps.
+The cask pulls in the one hard dependency, `tmux` (atelier renders its own
+pickers with [bubbletea](https://github.com/charmbracelet/bubbletea) — no
+external fzf). Everything else (k9s, pgcli, lazygit, gh, granted, node, …) is
+optional — install only what the tools you use require. `atelier doctor`
+reports the gaps.
 
 <details>
 <summary>Build from source</summary>
@@ -85,7 +87,7 @@ cd atelier
 make install        # builds and installs to $HOME/.local/bin
 ```
 
-A Nix dev shell (`nix develop`) pins tmux, go, fzf, jq, yq, golangci-lint, and
+A Nix dev shell (`nix develop`) pins tmux, go, jq, yq, golangci-lint, and
 goreleaser.
 
 </details>
@@ -155,7 +157,7 @@ Font).
 
 | Keys | Action |
 |------|--------|
-| `M-;` | Tool selector — fzf list of every discovered tool; picks route to the current workspace. |
+| `M-;` | Tool selector — list of every discovered tool; picks route to the current workspace. |
 | `M-n` | New workspace — natural-language task → Claude names the branch → worktree + agent session. |
 | `M-s` | Select workspace — switch between workspaces (recap + git freshness per row). |
 | `M-r` | Recover workspace — recently soft-closed workspaces rank to the top; recover or delete. |

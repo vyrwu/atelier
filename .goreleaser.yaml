@@ -36,8 +36,9 @@ archives:
       - LICENSE
       - README.md
 
-# Homebrew tap publishing. A single cask ships the one binary. Its hard
-# runtime deps are tmux + fzf; every tool's optional external dependency
+# Homebrew tap publishing. A single cask ships the one binary. Its only
+# hard runtime dep is tmux (atelier renders its own pickers via bubbletea,
+# no fzf); every tool's optional external dependency
 # (k9s, pgcli, lazygit, gh, aws-vault, node, …) is surfaced by
 # `atelier doctor` rather than forced at install time — install only what
 # the tools you actually use need.
@@ -61,7 +62,6 @@ homebrew_casks:
     description: TUI-native agentic workspaces — one binary, tmux-driven
     dependencies:
       - formula: tmux
-      - formula: fzf
 
 checksum:
   name_template: 'atelier_{{ .Version }}_checksums.txt'

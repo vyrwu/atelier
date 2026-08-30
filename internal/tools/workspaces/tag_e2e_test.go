@@ -3,19 +3,18 @@
 package workspaces_test
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/vyrwu/atelier/internal/testtmux"
+	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
-// TestSessionList_RendersTagPill proves the end-to-end render path: a
-// window stamped with @workspace_tag surfaces a "#tag" pill in the M-s
-// picker rows (BuildSessionList → _session-list), and clearing the tag
-// removes it. The interactive tag picker (M-t → nested fzf) needs pty
-// driving; the SetTag primitive + choice logic are covered by unit and
-// workspace-package e2e tests.
+// TestSessionList_RendersTagPill proves the end-to-end tag path: a window
+// stamped with @workspace_tag surfaces on the M-s picker row's Tag field
+// (BuildSessionList), and clearing the tag empties it. The interactive tag
+// picker (M-t) is covered by TUI-package tests; the SetTag primitive +
+// choice logic are covered by unit and workspace-package e2e tests.
 func TestSessionList_RendersTagPill(t *testing.T) {
 	srv := testtmux.New(t)
 	srv.NewSession("main")
@@ -42,24 +41,27 @@ func TestSessionList_RendersTagPill(t *testing.T) {
 		t.Fatalf("stamp tag: %v", err)
 	}
 
-	out, err := srv.RunAtelier("tools", "workspaces", "_session-list")
-	if err != nil {
-		t.Fatalf("_session-list: %v\n%s", err, out)
+	tagFor := func(session, window string) (string, bool) {
+		rows, err := workspaces.BuildSessionList(srv.Client)
+		if err != nil {
+			t.Fatalf("BuildSessionList: %v", err)
+		}
+		for _, r := range rows {
+			if r.Session == session && r.Window == window {
+				return r.Tag, true
+			}
+		}
+		return "", false
 	}
-	// The colored pill ends with an SGR reset — asserting "#client-x\033[0m"
-	// proves both the text and that it rendered as a styled pill.
-	if !strings.Contains(string(out), "#client-x\033[0m") {
-		t.Errorf("expected colored tag pill #client-x in session list, got:\n%q", out)
+
+	if tag, ok := tagFor("vyrwu/demo", "feat-tag"); !ok || tag != "client-x" {
+		t.Errorf("expected tag client-x on feat-tag row, got tag=%q found=%v", tag, ok)
 	}
 
 	if _, err := srv.Client.Run("set-window-option", "-t", wid, "-u", "@workspace_tag"); err != nil {
 		t.Fatalf("clear tag: %v", err)
 	}
-	out2, err := srv.RunAtelier("tools", "workspaces", "_session-list")
-	if err != nil {
-		t.Fatalf("_session-list after clear: %v\n%s", err, out2)
-	}
-	if strings.Contains(string(out2), "#client-x") {
-		t.Errorf("pill must be gone after clearing the tag, got:\n%q", out2)
+	if tag, ok := tagFor("vyrwu/demo", "feat-tag"); !ok || tag != "" {
+		t.Errorf("tag must be empty after clearing, got tag=%q found=%v", tag, ok)
 	}
 }

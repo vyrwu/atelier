@@ -54,27 +54,27 @@ func TestAgentStatus_DerivesAttentionAndPickerIcons(t *testing.T) {
 		t.Errorf("idle must NOT raise attention, got %q", attn(idleWid))
 	}
 
-	// Picker renders one distinct colored dot per state.
+	// Picker row carries one distinct agent state per seeded session.
 	rows, err := workspaces.BuildSessionList(srv.Client)
 	if err != nil {
 		t.Fatalf("BuildSessionList: %v", err)
 	}
-	display := func(session string) string {
+	state := func(session string) workspaces.AgentState {
 		for _, r := range rows {
 			if r.Session == session {
-				return r.Display
+				return r.State
 			}
 		}
 		t.Fatalf("session %q not in picker rows", session)
-		return ""
+		return workspaces.StateIdle
 	}
-	if d := display("blocked"); !strings.Contains(d, "33m⏺") {
-		t.Errorf("blocked → yellow ⏺; got %q", d)
+	if s := state("blocked"); s != workspaces.StateBlocked {
+		t.Errorf("blocked → StateBlocked; got %v", s)
 	}
-	if d := display("running"); !strings.Contains(d, "34m⏺") {
-		t.Errorf("running → blue ⏺; got %q", d)
+	if s := state("running"); s != workspaces.StateRunning {
+		t.Errorf("running → StateRunning; got %v", s)
 	}
-	if d := display("idle"); !strings.Contains(d, "90m○") {
-		t.Errorf("idle → dim ○; got %q", d)
+	if s := state("idle"); s != workspaces.StateIdle {
+		t.Errorf("idle → StateIdle; got %v", s)
 	}
 }

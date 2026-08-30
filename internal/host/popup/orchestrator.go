@@ -36,7 +36,9 @@ func PopupStyleArgs(b *manifest.Binding) []string {
 	var out []string
 	switch style {
 	case manifest.StylePicker:
-		out = append(out, "-B", "-w", "70%", "-h", "70%")
+		// Rounded border drawn by tmux (bubbletea pickers don't draw a frame);
+		// colour141 ≈ the dracula purple accent.
+		out = append(out, "-b", "rounded", "-S", "fg=colour141", "-w", "72%", "-h", "80%")
 	default:
 		out = append(out, "-b", "rounded", "-S", "fg=colour103")
 		if title != "" {

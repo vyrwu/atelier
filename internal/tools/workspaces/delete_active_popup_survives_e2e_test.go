@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vyrwu/atelier/internal/testtmux"
+	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
 // markerAlive reports whether a process whose command line contains
@@ -71,9 +72,8 @@ func TestDeleteRow_ActiveDelete_PickerPopupSurvives(t *testing.T) {
 	})
 
 	// Delete the ACTIVE workspace's default-branch sole window → kill-session.
-	if _, err := srv.RunAtelier("tools", "workspaces", "_delete-row",
-		"vyrwu/demo\tmain\t<display>"); err != nil {
-		t.Fatalf("_delete-row: %v", err)
+	if err := workspaces.DeleteRow(srv.Client, "vyrwu/demo", "main"); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
 	}
 
 	// Victim gone + focus shifted to the sibling (existing guarantees).

@@ -45,18 +45,21 @@ func TestBindingBlock_PickerStyle(t *testing.T) {
 		},
 	}
 	block := BindingBlock("workspaces", m)
+	// Picker popups now get a tmux rounded border (colour141 ≈ the dracula
+	// accent) — the bubbletea pickers render inline and don't draw a frame.
 	for _, want := range []string{
 		`unbind -T root "M-n"`,
-		`-B`,
-		`-w70%`,
-		`-h70%`,
+		`-b rounded`,
+		`fg=colour141`,
+		`-w72%`,
+		`-h80%`,
 		`atelier tools workspaces pick`,
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("missing %q in:\n%s", want, block)
 		}
 	}
-	for _, no := range []string{`-b rounded`, `colour103`} {
+	for _, no := range []string{`-B`, `colour103`} {
 		if strings.Contains(block, no) {
 			t.Errorf("unexpected %q in picker block:\n%s", no, block)
 		}

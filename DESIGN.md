@@ -32,7 +32,7 @@ atelier status freshness … | attention count | forge …   # status-line emitt
 atelier state show [--json] | sync | restore   # topology + invariant report / cache ops
 atelier reconcile [--fix]          # report (default) / repair invariant violations
 atelier init [--bare]              # generate the tmux.conf snippet
-atelier doctor                     # verify tmux, fzf, tools, requirements
+atelier doctor                     # verify tmux, tools, requirements
 ```
 
 Plain English. Metaphor lives at the binary name only; not in the API.
@@ -218,8 +218,7 @@ atelier/
 │   ├── awsassume/           # `granted assume` shell-function wrapper (aws tool)
 │   ├── config/              # TOML loader + path expansion
 │   ├── dispatch/            # shell-string builders for `atelier tools …` dispatch
-│   ├── fzf/ + fzfstyle/     # fzf invocation/parsing + shared picker styling
-│   ├── spinner/             # progress-indicator popup UI
+│   ├── tui/                 # bubbletea substrate: popup run-harness, list/prompt/loader, lipgloss theme
 │   ├── seed/scenarios/      # scenario YAML → real repos/worktrees/state (sandbox + e2e)
 │   ├── perf/ + debuglog/    # perf instrumentation + ~/.cache/atelier/debug.log
 │   ├── testtmux/            # isolated tmux-server fixtures for e2e tests
@@ -296,9 +295,9 @@ load-bearing details.
 - Outer-client landing — the select-window + switch-client -c outer dance (`workspace.LandOuter`)
 - Workspace metadata read/write (`SetAttention`, `SetRecap`, etc.)
 
-**Tools own:** their own popup UX, fzf binds, custom transformations, multi-stage spinner labels, plugin-specific keybinds. Anything where the user's MENTAL MODEL of the tool changes — not the underlying tmux mechanics.
+**Tools own:** their own popup UX, bubbletea picker/prompt models + keybinds, custom transformations, multi-stage loader labels. Anything where the user's MENTAL MODEL of the tool changes — not the underlying tmux mechanics. (Rendering lives in `internal/tui`; the picker/prompt/loader substrate is shared, per-tool models compose it.)
 
-If a tool needs a tmux operation that's not in the primitive, ADD IT TO THE PRIMITIVE — don't reach around it. The primitive stays narrow (no fzf, no picker logic, no spinner) — but it owns the entire workspace-lifecycle surface.
+If a tool needs a tmux operation that's not in the primitive, ADD IT TO THE PRIMITIVE — don't reach around it. The primitive stays narrow (no picker logic, no rendering) — but it owns the entire workspace-lifecycle surface.
 
 ## Tool contract
 

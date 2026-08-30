@@ -26,14 +26,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
 	"github.com/vyrwu/atelier/internal/awsassume"
-	"github.com/vyrwu/atelier/internal/fzf"
-	"github.com/vyrwu/atelier/internal/fzfstyle"
 	"github.com/vyrwu/atelier/internal/popup"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/tui"
 	"github.com/vyrwu/atelier/internal/workspace"
 )
 
@@ -104,7 +104,7 @@ func openCommand(tool string, spec *popup.SessionGlobal, activeOpt string) *cobr
 			}
 			ctx, role, err := pickEndpoint()
 			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
+				if errors.Is(err, tui.ErrCancelled) {
 					return nil
 				}
 				return err
@@ -136,7 +136,7 @@ func SwitchCommand() *cobra.Command {
 			activeOpt := OptActivePgcli
 			ctx, role, err := pickEndpoint()
 			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
+				if errors.Is(err, tui.ErrCancelled) {
 					return nil
 				}
 				return err
@@ -250,13 +250,12 @@ func LaunchCommand() *cobra.Command {
 	}
 }
 
-// pickEndpoint: bash-exact tmux_pg_picker port.
+// pickEndpoint: bubbletea port of tmux_pg_picker.
 //
-//	prompt: 庫 (color 110)
-//	label:  Postgres Contexts
-//	rows:   "<name> · <colored-endpoint>" with-nth=1 hides parseable suffix
-//	endpoint color: read=108(green), write=168(red), other=103(grey)
-//	output: <name>\t<endpoint>
+//	title:  Postgres Contexts
+//	rows:   context name (title) + role (read/write/other) as the subtitle
+//	id:     <name>\t<role> (the flattenEndpoints lookup key), returned so the
+//	        post-selection code resolves the exact (context, endpoint) pair.
 func pickEndpoint() (*Context, string, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -271,30 +270,30 @@ func pickEndpoint() (*Context, string, error) {
 		return nil, "", fmt.Errorf("no pg endpoints in %s", cfg.Contexts)
 	}
 
-	args := fzfstyle.Args("庫 ", "Postgres Contexts", "110",
-		fzfstyle.WithCustomColor("prompt:110:bold,pointer:110,query:110,hl:-1,hl+:-1,label:103,border:103,footer:103"),
-		fzfstyle.WithDelimiter("\t"),
-		fzfstyle.WithNth("1"),
-	)
+	// One row per (context, role) pair, in flattenEndpoints' stable order.
+	// The ID round-trips the <name>\t<role> lookup key so selection resolves
+	// to the exact endpoint; fuzzy search targets "<name> <role>".
+	items := make([]list.Item, 0, len(contexts))
+	for i := range contexts {
+		ctx := &contexts[i]
+		for _, role := range orderedRoles(ctx.Endpoints) {
+			key := fmt.Sprintf("%s\t%s", ctx.Name, role)
+			items = append(items, tui.SimpleItem{
+				IDStr:    key,
+				TitleStr: ctx.Name,
+				DescStr:  role,
+				Filter:   ctx.Name + " " + role,
+			})
+		}
+	}
 
-	picked, err := fzf.Pick(lines, args...)
+	outcome, err := tui.Run(tui.NewList(tui.NewTheme(tui.ColTeal), " Postgres Contexts ", items))
 	if err != nil {
 		return nil, "", err
 	}
-	// fzf with --ansi strips escape codes from the returned line, so the
-	// raw `picked` no longer matches the ANSI-colored map key. Key the
-	// lookup by the trailing tab-separated <name>\t<role> fields, which
-	// flattenEndpoints emits specifically for invariant-under-ANSI
-	// matching. See toolselector.SelectCommand for the same pattern.
-	key := picked
-	if i := strings.LastIndexByte(picked, '\t'); i >= 0 {
-		if j := strings.LastIndexByte(picked[:i], '\t'); j >= 0 {
-			key = picked[j+1:]
-		}
-	}
-	entry, ok := lookup[key]
+	entry, ok := lookup[outcome.Selection]
 	if !ok || entry.Ctx == nil {
-		return nil, "", fmt.Errorf("picked entry %q not resolvable", picked)
+		return nil, "", fmt.Errorf("picked entry %q not resolvable", outcome.Selection)
 	}
 	return entry.Ctx, entry.Role, nil
 }

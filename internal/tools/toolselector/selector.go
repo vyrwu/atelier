@@ -11,22 +11,66 @@ package toolselector
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"syscall"
 
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/vyrwu/atelier/internal/debuglog"
 	cmddispatch "github.com/vyrwu/atelier/internal/dispatch"
-	"github.com/vyrwu/atelier/internal/fzf"
-	"github.com/vyrwu/atelier/internal/fzfstyle"
 	hostpopup "github.com/vyrwu/atelier/internal/host/popup"
 	"github.com/vyrwu/atelier/internal/integration"
 	"github.com/vyrwu/atelier/internal/manifest"
 	"github.com/vyrwu/atelier/internal/plugin"
 	"github.com/vyrwu/atelier/internal/tmuxhost"
+	"github.com/vyrwu/atelier/internal/tui"
 )
+
+// selectorItem is one tool row; its per-tool accent color (from the manifest
+// UI block) is what selectorDelegate paints the icon + name with, restoring
+// the colorful fzf menu.
+type selectorItem struct {
+	icon, name, desc, accent, kind string
+}
+
+func (i selectorItem) Title() string       { return i.icon + "  " + i.name }
+func (i selectorItem) Description() string { return i.desc }
+func (i selectorItem) FilterValue() string { return i.name }
+func (i selectorItem) ID() string          { return i.kind }
+
+// selectorDelegate renders each tool row in its own accent color (icon + name
+// on line 1, dim description on line 2). The selected row gets an accent bar +
+// bold name.
+type selectorDelegate struct{}
+
+func (selectorDelegate) Height() int                         { return 2 }
+func (selectorDelegate) Spacing() int                        { return 1 }
+func (selectorDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
+
+func (selectorDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	it, ok := item.(selectorItem)
+	if !ok {
+		return
+	}
+	accent := tui.ColFg
+	if it.accent != "" {
+		accent = lipgloss.Color(it.accent)
+	}
+	nameStyle := lipgloss.NewStyle().Foreground(accent)
+	bar := "  "
+	if index == m.Index() {
+		bar = lipgloss.NewStyle().Foreground(accent).Render("▎") + " "
+		nameStyle = nameStyle.Bold(true)
+	}
+	line1 := bar + nameStyle.Render(it.icon+"  "+it.name)
+	line2 := "  " + tui.SubtleStyle.Render(it.desc)
+	_, _ = io.WriteString(w, line1+"\n"+line2)
+}
 
 // shellEntryKind is the dispatch kind for the special "Shell" navigation
 // entry that's not a tool but appears in the selector menu (matches bash).
@@ -56,51 +100,56 @@ func SelectCommand() *cobra.Command {
 
 			entries := buildEntries(res.Plugins)
 
-			// Format: <colored icon>  <colored name>\t<kind>
-			// fzf with --ansi strips escape codes from the returned line, so
-			// we key the lookup by kind (the trailing tab-separated field
-			// which is invariant under --ansi).
-			lines := make([]string, 0, len(entries))
+			// Each row: kanji icon + name as the title, the tool's own
+			// description as the subtitle (bubbles' two-line delegate). Keyed
+			// by kind (the stable identity round-tripped as the item ID);
+			// fuzzy search targets the name.
+			items := make([]list.Item, 0, len(entries))
 			byKind := make(map[string]entry, len(entries))
 			for _, e := range entries {
-				icon := fzfstyle.ColoredText(e.AccentColor, e.Icon)
-				name := fzfstyle.ColoredText(e.AccentColor, e.Name)
-				line := fmt.Sprintf("%s  %s\t%s", icon, name, e.Kind)
-				lines = append(lines, line)
+				items = append(items, selectorItem{
+					icon: e.Icon, name: e.Name, desc: e.Description,
+					accent: e.AccentColor, kind: e.Kind,
+				})
 				byKind[e.Kind] = e
 			}
 
 			// alt-n / alt-s / alt-r: swap to sibling workspace pickers
-			// without leaving the popup. fzf's `become(...)` exec()s the
-			// command in place of fzf, so the popup-session pty survives
-			// and the new picker takes over. Same pattern as
-			// dispatchExecInPlace below — picker → picker is exec-in-place.
-			// Tmux's popup-table M-n binding doesn't reach inside fzf
-			// because display-popup -E hands raw stdin to fzf; fzf
-			// processes every key against its own --bind table first.
-			args := fzfstyle.Args("⌘ ", "Select Tool", "172",
-				fzfstyle.WithDelimiter("\t"),
-				fzfstyle.WithNth("1"),
-				fzfstyle.WithBind("alt-;", "abort"),
-				fzfstyle.WithBind("alt-n", "become(atelier tools workspaces pick)"),
-				fzfstyle.WithBind("alt-s", "become(atelier tools workspaces sessions)"),
-				fzfstyle.WithBind("alt-r", "become(atelier tools workspaces recover)"),
-			)
-			picked, err := fzf.Pick(lines, args...)
+			// without leaving the popup. The model reports a jump token; we
+			// tui.ExecReplace (syscall.Exec) into the sibling picker so the
+			// popup pty survives and the new picker takes over — the bubbletea
+			// equivalent of fzf's `become(...)`. Tmux's popup-table M-n binding
+			// doesn't reach the picker (display-popup -E hands raw stdin to the
+			// child), so the model must own these keys.
+			model := tui.NewListWithDelegate(tui.SelectorTheme(), " Select Tool ", items, selectorDelegate{},
+				tui.Action("workspaces/pick", "alt+n", "M-n", "new"),
+				tui.Action("workspaces/sessions", "alt+s", "M-s", "sessions"),
+				tui.Action("workspaces/recover", "alt+r", "M-r", "recover"),
+				// M-; is the open key; pressing it again dismisses (press-to-
+				// close affordance the fzf picker had via alt-;:abort).
+				tui.Action("cancel", "alt+;", "M-;", "close"))
+			outcome, err := tui.Run(model)
 			if err != nil {
-				if errors.Is(err, fzf.ErrCancelled) {
+				if errors.Is(err, tui.ErrCancelled) {
 					return nil
 				}
 				return err
 			}
-			// Extract trailing kind field (tab-delimited).
-			kind := picked
-			if i := strings.LastIndexByte(picked, '\t'); i >= 0 {
-				kind = picked[i+1:]
+			if outcome.Key == "cancel" {
+				return nil
 			}
-			chosen, ok := byKind[kind]
+			// Cross-jump to a sibling picker (exec-replace, popup survives).
+			switch outcome.Key {
+			case "workspaces/pick":
+				return tui.ExecReplace("tools", "workspaces", "pick")
+			case "workspaces/sessions":
+				return tui.ExecReplace("tools", "workspaces", "sessions")
+			case "workspaces/recover":
+				return tui.ExecReplace("tools", "workspaces", "recover")
+			}
+			chosen, ok := byKind[outcome.Selection]
 			if !ok {
-				return fmt.Errorf("could not resolve picked entry: %q", picked)
+				return fmt.Errorf("could not resolve picked entry: %q", outcome.Selection)
 			}
 
 			return dispatch(h, chosen)

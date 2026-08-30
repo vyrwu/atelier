@@ -16,6 +16,7 @@ import (
 
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/testtmux"
+	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
 // ---------------------------------------------------------------------------
@@ -53,11 +54,10 @@ func TestSessionPicker_DeleteWorkspace_KillsWindow_KeepsWorktree(t *testing.T) {
 		t.Fatalf("expected worktree at %s, got %v", wtPath, err)
 	}
 
-	// Invoke _delete-row with the row's session\twindow\tdisplay format
-	// (matches what the fzf picker would pass via `{}`).
-	row := "vyrwu/demo\tfeat-toremove\t<display>"
-	if _, err := srv.RunAtelier("tools", "workspaces", "_delete-row", row); err != nil {
-		t.Fatalf("_delete-row: %v", err)
+	// Invoke the in-process delete the bubbletea M-s picker calls (the old
+	// `_delete-row` shell subcommand is gone).
+	if err := workspaces.DeleteRow(srv.Client, "vyrwu/demo", "feat-toremove"); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
 	}
 
 	// Window gone, worktree dir preserved.
@@ -68,79 +68,6 @@ func TestSessionPicker_DeleteWorkspace_KillsWindow_KeepsWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(wtPath); err != nil {
 		t.Errorf("worktree dir at %s should still exist for M-r recovery, got err=%v", wtPath, err)
-	}
-}
-
-// TestSessionPicker_DeleteDefault_ConfirmsWhenOtherWorktrees verifies
-// that the default-branch window is dismissable even when other worktree
-// windows exist in the session: the prompt is Confirm? y/n (not the old
-// "Cannot delete — close attached workspaces first." block). The actual
-// dismiss removes just the window, keeping the session alive — see
-// TestDeleteRow_DefaultBranch_WithSiblings_DismissesWindowOnly.
-func TestSessionPicker_DeleteDefault_ConfirmsWhenOtherWorktrees(t *testing.T) {
-	srv := testtmux.New(t)
-	srv.NewSession("main")
-	srv.SourceInit(t)
-	_ = srv.Attach(t, "main")
-	time.Sleep(200 * time.Millisecond)
-
-	tmp := t.TempDir()
-	repoDir := testtmux.TestRepo(t, tmp, "vyrwu", "demo", "main")
-	srv.SetEnv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
-	srv.SetEnv("HOME", tmp)
-	t.Setenv("HOME", tmp)
-	t.Setenv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
-
-	if _, err := srv.RunAtelier("tools", "workspaces", "_name",
-		"vyrwu/demo", repoDir, "main", "feat-attached"); err != nil {
-		t.Fatalf("create wt: %v", err)
-	}
-	// The worktree-creation flow no longer auto-creates the default-
-	// branch window — the user only asked for `feat-attached`. To reach
-	// the "default-branch window alongside other worktrees" scenario we
-	// materialize the default-branch window explicitly, mimicking what
-	// the empty-Enter→pull-default flow would do.
-	if _, err := srv.Client.Run("new-window", "-d", "-t", "vyrwu/demo",
-		"-c", repoDir, "-n", "main"); err != nil {
-		t.Fatalf("seed default-branch window: %v", err)
-	}
-
-	row := "vyrwu/demo\tmain\t<display>"
-	out, err := srv.RunAtelier("tools", "workspaces", "_delete-prompt", "栽 ", row)
-	if err != nil {
-		t.Fatalf("_delete-prompt: %v\n%s", err, out)
-	}
-	got := strings.TrimSpace(string(out))
-	if !strings.Contains(got, "Confirm? y/n") {
-		t.Fatalf("expected Confirm? y/n prompt, got %q", got)
-	}
-}
-
-// TestSessionPicker_DeleteNonDefault_PromptsConfirm verifies non-default
-// rows emit the Confirm? y/n prompt instead of Cannot-delete.
-func TestSessionPicker_DeleteNonDefault_PromptsConfirm(t *testing.T) {
-	srv := testtmux.New(t)
-	srv.NewSession("main")
-	srv.SourceInit(t)
-	_ = srv.Attach(t, "main")
-	time.Sleep(200 * time.Millisecond)
-
-	tmp := t.TempDir()
-	repoDir := testtmux.TestRepo(t, tmp, "vyrwu", "demo", "main")
-	srv.SetEnv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
-	srv.SetEnv("HOME", tmp)
-	t.Setenv("HOME", tmp)
-	t.Setenv("ATELIER_CODE_ROOT", testtmux.CodeRoot(tmp))
-
-	if _, err := srv.RunAtelier("tools", "workspaces", "_name",
-		"vyrwu/demo", repoDir, "main", "feat-foo"); err != nil {
-		t.Fatalf("create wt: %v", err)
-	}
-	row := "vyrwu/demo\tfeat-foo\t<display>"
-	out, _ := srv.RunAtelier("tools", "workspaces", "_delete-prompt", "栽 ", row)
-	got := strings.TrimSpace(string(out))
-	if !strings.Contains(got, "Confirm? y/n") {
-		t.Fatalf("expected Confirm? y/n prompt, got %q", got)
 	}
 }
 
@@ -680,11 +607,17 @@ func TestSessionPicker_PullDefaultOnDefaultBranch(t *testing.T) {
 		t.Fatalf("seed default-branch window: %v", err)
 	}
 
-	out, err := srv.RunAtelier("tools", "workspaces", "_session-list")
+	rows, err := workspaces.BuildSessionList(srv.Client)
 	if err != nil {
-		t.Fatalf("_session-list: %v\n%s", err, out)
+		t.Fatalf("BuildSessionList: %v", err)
 	}
-	if !strings.Contains(string(out), "vyrwu/demo\tmain\t") {
-		t.Errorf("expected vyrwu/demo\\tmain row in session list, got:\n%s", out)
+	found := false
+	for _, r := range rows {
+		if r.Session == "vyrwu/demo" && r.Window == "main" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected vyrwu/demo:main row in session list, got:\n%+v", rows)
 	}
 }

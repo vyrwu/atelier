@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vyrwu/atelier/internal/testtmux"
+	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
 // TestDottedRepo_CreatesAndDisplaysWithDot is the end-to-end regression guard
@@ -47,15 +48,21 @@ func TestDottedRepo_CreatesAndDisplaysWithDot(t *testing.T) {
 		t.Fatalf("feat window not created under mangled session: wid=%q err=%v", wid, err)
 	}
 
-	// Display fix: the picker row's rendered name keeps the dot. The mangled
-	// name ("…_dk") still appears in field 1 (the switch target); the dotted
-	// form appears ONLY via the Display field, so its presence proves the fix.
-	out, err := srv.RunAtelier("tools", "workspaces", "_session-list")
+	// Display fix: the picker row's DisplayName keeps the dot. The mangled
+	// name ("…_dk") still lives in Session (the switch target); the dotted
+	// form appears ONLY via DisplayName, so its presence proves the fix.
+	rows, err := workspaces.BuildSessionList(srv.Client)
 	if err != nil {
-		t.Fatalf("_session-list: %v\n%s", err, out)
+		t.Fatalf("BuildSessionList: %v", err)
 	}
-	if !strings.Contains(string(out), "cloudnativedenmark/cloudnativedenmark.dk") {
-		t.Errorf("picker display dropped the dot; want a rendered name containing "+
-			"\"cloudnativedenmark/cloudnativedenmark.dk\":\n%s", out)
+	found := false
+	for _, r := range rows {
+		if strings.Contains(r.DisplayName, "cloudnativedenmark/cloudnativedenmark.dk") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("picker DisplayName dropped the dot; want a rendered name containing "+
+			"\"cloudnativedenmark/cloudnativedenmark.dk\":\n%+v", rows)
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/vyrwu/atelier/internal/statestore"
 	"github.com/vyrwu/atelier/internal/testtmux"
+	"github.com/vyrwu/atelier/internal/tools/workspaces"
 )
 
 // TestDeleteRow_ClearsCache locks in the contract that deleting a
@@ -44,11 +45,10 @@ func TestDeleteRow_ClearsCache(t *testing.T) {
 		t.Fatalf("cache should contain feat-doomed before delete. State:\n%+v", before)
 	}
 
-	// User invokes the delete from the picker (M-x → Confirm? y/n →
-	// y). `_delete-row` is the action invoked by the fzf bind.
-	row := "vyrwu/demo\tfeat-doomed\t<display>"
-	if _, err := srv.RunAtelier("tools", "workspaces", "_delete-row", row); err != nil {
-		t.Fatalf("_delete-row: %v", err)
+	// User invokes the delete from the picker (M-x → Confirm? y/n → y).
+	// The bubbletea picker calls deleteRow in-process (no shell round-trip).
+	if err := workspaces.DeleteRow(srv.Client, "vyrwu/demo", "feat-doomed"); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
 	}
 
 	// Cache should no longer contain feat-doomed. Either the workspace
@@ -97,9 +97,8 @@ func TestDeleteRow_DefaultBranch_ClearsSessionFromCache(t *testing.T) {
 	})
 
 	// Delete the default-branch row → kills whole session.
-	row := "vyrwu/demo\tmain\t<display>"
-	if _, err := srv.RunAtelier("tools", "workspaces", "_delete-row", row); err != nil {
-		t.Fatalf("_delete-row: %v", err)
+	if err := workspaces.DeleteRow(srv.Client, "vyrwu/demo", "main"); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
 	}
 
 	after, _ := statestore.Load()
@@ -111,7 +110,6 @@ func TestDeleteRow_DefaultBranch_ClearsSessionFromCache(t *testing.T) {
 			t.Errorf("session 'vyrwu/demo' should be removed from cache, still present: %+v", ws)
 		}
 	}
-	_ = strings.Contains // keep import touched
 }
 
 // TestDeleteRow_DefaultBranch_WithSiblings_DismissesWindowOnly covers the
@@ -151,9 +149,8 @@ func TestDeleteRow_DefaultBranch_WithSiblings_DismissesWindowOnly(t *testing.T) 
 	})
 
 	// Dismiss the default-branch row.
-	row := "vyrwu/demo\tmain\t<display>"
-	if _, err := srv.RunAtelier("tools", "workspaces", "_delete-row", row); err != nil {
-		t.Fatalf("_delete-row: %v", err)
+	if err := workspaces.DeleteRow(srv.Client, "vyrwu/demo", "main"); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
 	}
 
 	// Session must survive with the sibling still present, default gone.
