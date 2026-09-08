@@ -6,7 +6,7 @@
       "package-name": "atelier",
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
-      "bump-minor-pre-major": true,
+      "bump-minor-pre-major": false,
       "bump-patch-for-minor-pre-major": false,
       "draft": false,
       "prerelease": false,
