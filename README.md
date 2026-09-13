@@ -1,333 +1,183 @@
 <div align="center">
+<pre>
+      _       _ _
+  __ _| |_ ___| (_) ___ _ __
+ / _` | __/ _ \ | |/ _ \ '__|
+| (_| | ||  __/ | |  __/ |
+ \__,_|\__\___|_|_|\___|_|
+</pre>
 
-# atelier
+<h1>atelier</h1>
 
-**tmux + git-worktree workspaces for running coding agents in parallel.**
+<p><em>A switchboard for parallel Claude Code sessions.</em></p>
 
-One Go binary, curated built-in tools, an unopinionated statusline API.
-
-[![ci](https://github.com/vyrwu/atelier/actions/workflows/ci.yml/badge.svg)](https://github.com/vyrwu/atelier/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/vyrwu/atelier?display_name=tag&sort=semver)](https://github.com/vyrwu/atelier/releases)
-[![license](https://img.shields.io/github/license/vyrwu/atelier)](LICENSE)
-
-<img src="docs/demo.png" alt="atelier — the M-s workspace picker: parallel agent workspaces with per-row recap and git freshness" width="800">
-
-<!-- TODO: replace this splash with a demo video showcasing atelier. -->
-
+<p>
+<a href="https://github.com/vyrwu/atelier/releases"><img src="https://img.shields.io/github/v/release/vyrwu/atelier?style=flat-square" alt="Release"></a>
+<a href="https://github.com/vyrwu/atelier/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/vyrwu/atelier/ci.yml?branch=main&style=flat-square" alt="Build"></a>
+<a href="https://goreportcard.com/report/github.com/vyrwu/atelier"><img src="https://goreportcard.com/badge/github.com/vyrwu/atelier?style=flat-square" alt="Go Report Card"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/vyrwu/atelier?style=flat-square" alt="License"></a>
+</p>
 </div>
 
-> [!NOTE]
-> Alpha, single-author project. Stable for the author's daily use; expect
-> rough edges. macOS is the daily-driver platform; Linux builds exist but
-> are not exercised as hard.
+Running several Claude Code agents at once is powerful but taxing — you
+context-switch constantly and are never quite sure which session is working,
+which is blocked waiting on you, and which is done. **atelier makes parallel
+agents something you _have_, not something you _manage_.**
 
----
+Describe a task and it becomes a **space**: a named directory with its own agent,
+launched and already running in the background before you've finished reading the
+confirmation. One keystroke shows your active spaces; a single marker tells you
+which agent actually needs you. Pull requests and worktrees surface on their own,
+and the agents open their own draft PRs on your behalf — you review rather than
+wrangle.
 
-## Overview
-
-atelier manages tmux windows, git worktrees, and per-workspace tool state so
-you can run several coding agents (Claude Code, Codex, Aider) in parallel and
-keep track of which ones need attention.
-
-A workspace is one tmux window + one git worktree + its own tool state — agent
-session, lazygit, k9s context, postgres CLI. A background loop continuously
-observes each workspace's agent — re-reading its session transcript to derive a
-one-line recap and a three-state status (blocked / running / idle) — tracks git
-freshness, persists it all to disk, and rehydrates on tmux restart.
+One binary. tmux for the panes, [Bubble Tea](https://github.com/charmbracelet/bubbletea)
+for everything you see.
 
 ## Features
 
-- **Workspace = window + worktree + tool state.** `M-n` creates a workspace
-  from a natural-language task, `M-s` switches between them, `M-;` opens any
-  tool for the current workspace, `M-r` recovers one that was soft-closed.
-- **Load-bearing kernel, swappable integrations.** The kernel owns the views
-  and their capability slots — a per-row AI summary, an attention sigil, a
-  code-forge badge. An integration is a bounded adapter that fills a slot.
-  Claude is the default AI; GitHub fills the PR badge. Both are selected in
-  config, not compiled in.
-- **Launchers instead of an SDK.** Register any command with a `[tools.<name>]`
-  block; atelier binds a key, opens it in a popup, and owns the window state.
-  No Go, no plugin protocol, no recompile.
-- **Unopinionated statusline.** atelier emits git freshness (ahead/behind) and
-  attention (an agent is blocked waiting on you) as `#(atelier status …)`
-  commands you embed in your own statusline. Works with vanilla tmux, Dracula,
-  or Powerline; it supplies data, not visuals.
-- **Persistent state.** Workspaces, recap text, attention flags, and git
-  freshness are written through to disk. `M-q` detaches while the server keeps
-  running, so background agents survive.
-- **Always-on diagnostics.** Every tmux call from every atelier process is
-  logged to `~/.cache/atelier/debug.log`. `atelier doctor` reports missing
-  dependencies.
-- **Introspectable, self-healing state.** atelier keeps one validated model of
-  its tmux entity graph — repos, workspaces, popups, and the outer-focus
-  pointer. `atelier state show [--json]` prints the graph plus any invariant
-  violations; `atelier reconcile` reports them, and `atelier reconcile --fix`
-  repairs the *structural* ones (orphan popups, a stranded outer pointer, a
-  leaked hook). It does **not** clear the attention badge — that's a real
-  per-workspace signal (`⏺`), cleared by visiting the workspace, not a fault.
+- **Kick off work without breaking focus.** New spaces build in the background —
+  you stay on the task in front of you and come back when you want.
+- **One glance to know where to look.** A single attention marker flags the agent
+  that's blocked on you; everything else stays quiet.
+- **The forge comes to you.** Agents open their own draft pull requests; PRs and
+  worktrees surface on their own, with live CI, review, and comment status.
+- **Change PR state in place.** Open, close, or convert to draft without leaving
+  the terminal — the icon flips instantly and reconciles with GitHub.
+- **Finish without losing anything.** Retire a space to clear it from your active
+  set; restore it later and the agent picks the conversation back up.
+- **Fresh by construction.** Agents branch worktrees off the freshly-fetched
+  default and commit as _you_, not the machine.
+- **No daemon, nothing polling.** State is event-driven off Claude's lifecycle
+  hooks. Worktrees come from disk, PRs from `gh`, and it all runs on its own tmux
+  socket so it never touches your main session.
 
 ## Installation
 
-```bash
-brew install vyrwu/tap/atelier
+**Homebrew** (macOS/Linux):
+
+```sh
+brew install --cask vyrwu/tap/atelier
 ```
 
-The cask pulls in the two hard dependencies, `tmux` and `fzf`. Everything else
-(k9s, pgcli, lazygit, gh, granted, node, …) is optional — install only what
-the tools you use require. `atelier doctor` reports the gaps.
+**Go:**
 
-<details>
-<summary>Build from source</summary>
-
-```bash
-git clone https://github.com/vyrwu/atelier
-cd atelier
-make install        # builds and installs to $HOME/.local/bin
+```sh
+go install github.com/vyrwu/atelier/cmd/atelier@latest
 ```
 
-A Nix dev shell (`nix develop`) pins tmux, go, fzf, jq, yq, golangci-lint, and
-goreleaser.
+**Releases:** grab a prebuilt binary from the [releases page](https://github.com/vyrwu/atelier/releases),
+extract it, and move `atelier` onto your `PATH`.
 
-</details>
+**From source:**
 
-<details>
-<summary>Prebuilt binaries</summary>
-
-Download a tarball for linux/macos × amd64/arm64 from the
-[releases page](https://github.com/vyrwu/atelier/releases) and place the
-`atelier` binary on your `PATH`.
-
-</details>
-
-## Get started
-
-Add one line to `~/.config/tmux/tmux.conf`:
-
-```tmux
-run-shell 'atelier init --bare | tmux source-file -'
+```sh
+git clone https://github.com/vyrwu/atelier && cd atelier
+make install   # builds ./bin/atelier and links it into ~/.local/bin
 ```
 
-`--bare` emits engine wiring only — bindings, hooks, and statusline data
-emitters — with no theme or format opinions, so an existing dracula / gruvbox /
-nord setup is unaffected. This is the author's daily driver; see
-[`examples/tmux/vyrwu.conf`](examples/tmux/vyrwu.conf) (dracula + TPM + atelier).
+## Getting started
 
-```bash
-atelier doctor      # check tmux and every tool's requirements
+```sh
+atelier install   # writes the Claude hooks + tmux bindings (run once)
+atelier           # starts atelier's own tmux server and drops you on the splash
 ```
 
-For wiring freshness and attention into your statusline format, see
-[docs/EMBEDDING.md](docs/EMBEDDING.md).
+Run `atelier` from a plain terminal — not from inside another tmux. You land on a
+splash; press **`M-n`** to describe your first task, and it starts building
+straight away. (`M-` is <kbd>Alt</kbd>/<kbd>Meta</kbd>.)
 
-<details>
-<summary>Reference tmux configs</summary>
+## Keys
 
-| File | Description |
-|---|---|
-| [`examples/tmux/minimal.conf`](examples/tmux/minimal.conf) | atelier on vanilla tmux — no theme, no plugins. The smallest embedding. |
-| [`examples/tmux/powerline.conf`](examples/tmux/powerline.conf) | atelier in a powerline-styled tmux; shows how emitters inject into arrow-segment layouts. |
-| [`examples/tmux/vyrwu.conf`](examples/tmux/vyrwu.conf) | The author's daily-driver config: dracula + TPM + atelier. |
+Everything is a keystroke away. Overlays open from anywhere:
 
-The only load-bearing line is the `run-shell` above; the rest is taste.
+| Key | Overlay |
+|-----|---------|
+| `M-s` | **Spaces** — your active working set |
+| `M-p` | **Pull requests** — for the current space |
+| `M-w` | **Worktrees** — for the current space |
+| `M-t` | **Trash** — retired spaces, restorable |
+| `M-n` | **New** space |
+| `M-h` | **Help** — the full keymap, version, and a dependency check |
 
-</details>
+Inside a space:
 
-<details>
-<summary>Bundled runtime (no existing tmux setup)</summary>
+| Key | |
+|-----|---|
+| `M-a` | jump to the **agent** (Claude) — respawns and resumes it if you exited |
+| `M-c` | a **command line** in the space directory |
+| `M-q` | **detach** atelier — back to the shell you launched it from |
 
-Run `atelier` with no subcommand to spawn a dedicated tmux server
-(`tmux -L atelier`) with curated defaults — system-clipboard yank, 50k
-scrollback, focus-events, vi mode, truecolor, fast escape-time. No `tmux.conf`
-required.
+Actions within each overlay:
 
-```bash
-atelier
-```
-
-Override defaults in `~/.config/atelier/tmux.conf.local` (sourced after every
-default). For powerline decoration, start from
-[`examples/atelier-extras.tmux`](examples/atelier-extras.tmux) (requires a Nerd
-Font).
-
-</details>
-
-## Key bindings
-
-| Keys | Action |
-|------|--------|
-| `M-;` | Tool selector — fzf list of every discovered tool; picks route to the current workspace. |
-| `M-n` | New workspace — natural-language task → Claude names the branch → worktree + agent session. |
-| `M-s` | Select workspace — switch between workspaces (recap + git freshness per row). |
-| `M-r` | Recover workspace — recently soft-closed workspaces rank to the top; recover or delete. |
-| `M-?` | Cheatsheet — every active binding, scoped to the current context. |
-| `M-q` | Detach — the server keeps running; reattach with `atelier` (or `tmux -L atelier attach`). |
-
-Each popup runs in its own backing tmux session, so opening a tool does not
-disturb your work and closing it leaves it ready to resume. `M-;` works inside a
-tool's popup, so you can pivot to another tool without closing the first.
-
-## Configuration
-
-Config is optional — every field has a default, and atelier runs with no config
-file at all. There is no scaffold command yet; to override, hand-write
-`$XDG_CONFIG_HOME/atelier/config.toml` (`~/.config/atelier/config.toml`). Each
-section is loaded independently, so you only include the sections you change.
-`~`, `~/…`, and `$VAR` are expanded in path values.
-
-The block below is the complete schema, showing every option at its default:
-
-```toml
-# All AI configuration lives under one roof. `provider` selects the adapter;
-# everything else is capability-level tuning the active adapter interprets
-# (model names + prompts below are Claude values).
-[ai]
-provider = "claude"   # AI adapter: "claude" | "mock" | "" (disables AI features)
-model    = "haiku"    # default model for AI tasks that don't set their own
-
-[ai.models]           # per-task model overrides (empty = use `model` above)
-naming = "sonnet"     # model that names branches/sessions (M-n)
-recap  = ""           # model for one-line session recaps (M-s rows); inherits `model`
-
-[ai.prompts]          # empty = built-in default
-recap      = ""       # override the recap system prompt
-multi_repo = ""       # extra system prompt in multi-repo workspaces
-
-[forge]
-provider = ""         # forge/PR-badge adapter: "github" | "mock" | "" (off)
-
-[workspaces]
-code_root       = "~/code/github"             # where M-n clones single repos
-worktree_root   = "~/code/.worktrees/github"  # where M-n creates git worktrees
-multi_repo_root = "~/code"                     # root for multi-repo workspaces
-auto_tag        = true                         # let the AI suggest a tag at M-n creation
-
-[k8s]
-contexts = "~/.config/atelier/k8s/contexts.yaml"  # k9s context definitions
-configs  = "~/.config/atelier/k8s/configs.yaml"   # k9s cluster configs
-
-[pg]
-contexts = "~/.config/atelier/pg/contexts.yaml"   # postgres endpoint definitions
-
-# [tools.<name>] launcher blocks register arbitrary TUIs in popups —
-# see "Extending atelier" for every field.
-```
-
-## Extending atelier
-
-Three mechanisms, by what you are adding.
-
-### 1. A launcher (no code)
-
-Register any TUI with a `[tools.<name>]` block. atelier binds the key, opens
-the command in a popup of the declared shape, and owns the window state; the
-command need not be an atelier binary. Example — k9s authenticated through AWS
-SSO first:
-
-```toml
-[tools.k9s-aws]
-launch       = "granted-k9s"     # REQUIRED — any executable on PATH (a script you wrote)
-popup        = "global"          # workspace | global | none  (default: none)
-key          = "K"               # optional tmux binding
-key_table    = ""                # optional tmux key-table for the binding (default: root)
-requires     = ["granted-k9s"]   # atelier doctor checks these
-invoke       = "open"            # manifest invoke verb (default: open)
-start_cwd    = true              # start in the workspace cwd (default: true iff popup="workspace")
-icon         = "胡"
-accent_color = "110"             # tmux colour 0–255
-title        = "K9s (AWS)"
-description  = "k9s with AWS SSO auth"
-```
-
-`atelier tools list` shows it, `atelier doctor` checks its `requires`, and `M-;`
-lists it in the selector.
-
-### 2. An integration (swap a capability)
-
-To change which component fills a kernel capability — the AI that names
-branches, summarizes, and raises attention, or the forge behind the PR badge —
-write an adapter satisfying the kernel port (`internal/integration`:
-`AIIntegration`, `ForgeIntegration`) and select it in config:
-
-```toml
-[ai]
-provider = "claude"
-[forge]
-provider = "github"
-```
-
-Bundled adapters live in `internal/adapters/{claude,github,mock}`. Adding
-`codex` / `gemini` / `gitlab` is a new adapter implementing the same port plus
-one line in the composition root (`cmd/atelier/integrations.go`). The kernel
-does not change; it drives whatever adapter is installed.
-
-### 3. A built-in tool (a PR)
-
-Tools with pre-launch logic (k8s / pg / aws context and auth pickers) are Go
-packages under `internal/tools/<name>` exposing `Manifest` + `AddCommands`,
-registered in `internal/tools/all`, and dispatched via `atelier tools <name>`.
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+| Overlay | Keys |
+|---------|------|
+| **Spaces** | `↵` open · `M-d` delete (→ Trash) |
+| **Trash** | `↵` restore (resumes the conversation) · `M-d` delete permanently |
+| **Pull requests** | `↵` open in browser · `M-o` reopen · `M-c` close · `M-d` convert to draft · `M-y` copy as a Markdown link |
+| **Worktrees** | `↵` open a dedicated, persistent shell in that worktree |
+| **New** | `↵` start in the background · `⌥↵` start & switch in · `^j` newline |
 
 ## How it works
 
+- A **space** is a directory under `~/ateliers/<slug>/` plus a tmux session. It's
+  named instantly with a memorable handle (`spry-otter`) and renamed to a
+  descriptive title by Claude a moment later, mid-work. The status line shows the
+  agent's live state — working, blocked on you, or idle — pushed straight from
+  Claude's lifecycle hooks.
+- **Worktrees** are created by the agent with a `create_worktree` MCP tool that
+  branches off the repository's freshly-fetched default branch — never stale. The
+  Worktrees overlay shows each one's freshness (ahead/behind the default) at a
+  glance; opening one gives it a dedicated persistent shell.
+- **Pull requests** are opened by the agent as drafts (`create_pr`, rebased onto
+  the latest default) and surface in the Pull requests overlay grouped by repo,
+  with GitHub Octicon state, CI, review, and comment status. Status refreshes when
+  you open the view (cached briefly for snappy reopens).
+- **Attribution is yours.** Agents commit under your git/GitHub identity, not the
+  machine's default — even under an isolated dev instance.
+- **Ground truth over bookkeeping.** Worktrees are read from disk, PRs from `gh`.
+  atelier keeps only a small index + cache in one JSON file
+  (`$XDG_STATE_HOME/atelier/state.json`), never in tmux. Nothing polls; there is
+  no daemon.
+
+## Configuration
+
+Optional, at `$XDG_CONFIG_HOME/atelier/config.toml`. Every field has a sensible
+default, so a fresh install with no config just works:
+
+```toml
+root         = "~/ateliers"   # where spaces live
+socket       = "atelier"      # dedicated tmux socket
+naming       = true           # name spaces with Claude
+naming_model = "sonnet"       # model used to name them
 ```
-[ workspace = tmux window backed by a git worktree ]
-        │
-        │  bind c → set @atelier_outer_pane=$5
-        │       → display-popup -E 'atelier ai open'
-        ▼
-[ claude popup session (_atelier_claude_5_3) ]
-        │
-        │  reads @atelier_outer_pane → knows outer is $5
-        │  M-; opens tool selector, which can spawn other tools
-        │  on the same outer pane without closing claude
-        ▼
-[ k8s popup renders on $5, claude popup stays open ]
-```
 
-The engine tracks the outer pane in global tmux options. Tools inside popups
-read those globals — no parsing of session names, no guessing about ancestry.
-Each popup spawns its own `atelier` process (one binary, one process per popup),
-so a crash in one tool cannot take down the others. Full architecture in
-[DESIGN.md](DESIGN.md).
+## Requirements
 
-## Development
+- **[tmux](https://github.com/tmux/tmux)**, **git**, and the **[GitHub CLI](https://cli.github.com)**
+  (`gh`), authenticated with `gh auth login`.
+- **[Claude Code](https://claude.com/claude-code)** (`claude`) — the agent atelier drives.
+- A **[Nerd Font](https://www.nerdfonts.com)** in your terminal — the Pull
+  requests and Worktrees views render GitHub Octicon glyphs.
 
-```bash
-make build           # build the atelier binary into bin/
-make test            # unit tests (no tmux required)
-make test-e2e        # e2e tests against isolated tmux servers
-make test-tmux       # launch a sandboxed tmux server with the current build
-```
+macOS and Linux.
 
-E2E tests spin up `tmux -L atelier-test-<random>` servers, isolated from your
-real tmux; cleanup runs even on panic. Every bug fix and feature lands with
-tests. For the release process, see [RELEASING.md](RELEASING.md).
+## Design principles
 
-## Prior art
+atelier is deliberately one-of-everything:
 
-- **[Claude Code](https://github.com/anthropics/claude-code)** — the daily
-  driver. Per-task scope, attention signals, and resume-on-restart are the
-  workflow patterns atelier is built around.
-- **[k9s](https://github.com/derailed/k9s)** — a TUI preferable to most browser
-  alternatives; atelier's k8s tool is a thin shell around it.
-- **[sesh](https://github.com/joshmedeski/sesh)** — the "binary on PATH, not a
-  TPM plugin" model of extending tmux.
-- **[lazygit](https://github.com/jesseduffield/lazygit)** — the per-workspace
-  git surface, shipped as a `[tools.lazygit]` launcher.
-- **[Conductor](https://conductor.build)** — parallel agents in isolated
-  workspaces, as a desktop app; atelier takes the same thesis into the terminal.
-- **[Neovim](https://github.com/neovim/neovim)** and its distributions — the
-  engine-versus-distribution framing: the engine is portable, the bundled
-  runtime is a curated layer on top.
+- **One agent (Claude), one forge (GitHub), one renderer (Bubble Tea).** No
+  abstraction for a hypothetical second one.
+- **All UI is Bubble Tea.** No second UI technology, no shelling out to draw.
+- **State lives in one JSON file,** never in tmux — a cache and an index.
+- **Nothing polls; no daemon.** State changes are event-driven off Claude's hooks.
+- **No plugin system.**
 
 ## Status
 
-Currently shipping `v0.6.x`. Known limitations:
-
-- macOS only in practice (Linux builds exist but are not tested daily).
-- Requires tmux ≥ 3.4 with `display-popup`.
-- Single-author cadence; no SLAs.
+atelier is a personal prototype under active shaping — expect sharp edges and
+breaking changes. The design is written up in [V1.md](V1.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE)

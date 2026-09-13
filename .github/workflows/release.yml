@@ -1,22 +1,15 @@
 name: release
 
-# Trigger paths:
-#   1. `release: published` — release-please creates the GitHub Release
-#      via API. For this event to trigger THIS workflow, release-please
-#      must authenticate with a GitHub App token, not the default
-#      GITHUB_TOKEN: GitHub's loop-prevention suppresses workflow runs
-#      for events created by GITHUB_TOKEN (tag-push AND release-published
-#      alike). See release-please.yml.
-#   2. `workflow_dispatch` — manual override, e.g. to re-run against
-#      an existing tag if the automated run failed. Provide the tag
-#      as input.
+# Triggered by release-please publishing a GitHub Release (via an App token,
+# so the event actually fires — see release-please.yml), or manually. Builds
+# and publishes the binaries + Homebrew cask with goreleaser.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.1.0). Defaults to latest."
+        description: "Tag to release (e.g. v1.0.0). Defaults to latest."
         required: false
         type: string
 
@@ -26,54 +19,23 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Ubuntu has no default git identity; test hook creates git repos
-    # and commits. See ci.yml for the same env block.
-    env:
-      GIT_AUTHOR_NAME: atelier-ci
-      GIT_AUTHOR_EMAIL: ci@atelier.local
-      GIT_COMMITTER_NAME: atelier-ci
-      GIT_COMMITTER_EMAIL: ci@atelier.local
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          # On workflow_dispatch, honor the `tag` input if given so a
-          # re-run targets a specific historical tag (e.g. v0.1.0)
-          # rather than the branch tip. On release-published, ref is
-          # already the tag, so the default is correct.
           ref: ${{ inputs.tag || github.ref }}
-
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
           cache: true
-
-      - name: Install tmux + fzf (for `go test` hook in goreleaser)
-        run: sudo apt-get update && sudo apt-get install -y tmux fzf
-
       - name: Verify build
         run: make build
-
-      - name: Run unit tests
-        run: make test
-
-      - name: Run e2e tests
-        run: |
-          export PATH="$PWD/bin:$PATH"
-          go test -tags=e2e ./...
-
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          # Keep in lockstep with the goreleaser-check version pinned
-          # in ci.yml. Must be ≥ v2.10.0 for the archives[].ids and
-          # archives[].formats config schema this repo uses.
           version: v2.17.0
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with write access to vyrwu/homebrew-tap (set up at:
-          # github.com/vyrwu/atelier → Settings → Secrets and variables).
-          # Used by goreleaser's homebrew_casks block to push the cask
-          # Ruby file into the tap repo on every release.
+          # PAT with write access to vyrwu/homebrew-tap (repo secret).
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
