@@ -1,257 +1,102 @@
 # Contributing to atelier
 
-Thanks for your interest. atelier is **one binary**. There are two ways
-to add a tool — pick by how much behavior you need. Neither involves a
-subprocess manifest protocol or an `atelier-<name>` binary on PATH; that
-model was removed (see [DESIGN.md](DESIGN.md) → "Non-goals").
+Thanks for your interest. atelier is small on purpose, and most of what makes a
+contribution land is knowing what it deliberately does *not* do. Read the rules
+below before writing code; they are enforced in review.
 
-## Option 1 — a launcher (no code, no recompile)
+## Setting up
 
-Register *any* command as a tool with a `[tools.<name>]` block in
-`$XDG_CONFIG_HOME/atelier/config.toml`. atelier binds a key, opens the
-command in a popup, and owns the window state. The command can be
-anything on PATH — a script you wrote, another TUI, a wrapper.
+You need Go (the version in `go.mod`), tmux 3.2+, git, the GitHub CLI, and
+Claude Code.
 
-```toml
-[tools.hello]
-launch      = "sh -c 'echo hello, atelier!; read -n1 -s'"
-popup       = "none"     # workspace | global | none
-key         = "h"        # optional tmux binding
-title       = "Hello"
-description = "Print hello to the popup"
-requires    = []         # external commands doctor should verify
+```sh
+git clone https://github.com/vyrwu/atelier && cd atelier
+make dev    # build and run an isolated instance
 ```
 
-```bash
-atelier doctor            # lists it under "Discovered tools", checks `requires`
-atelier tools hello       # runs the launch command in a popup
-atelier init              # includes hello's binding block
+`make dev` runs the freshly built binary with its own tmux socket, state,
+config, and workspace root, all under `~/.atelier-dev`. It never touches your
+real atelier. `make dev-clean` removes it.
+
+## Before you open a pull request
+
+```sh
+make test               # go test ./...
+go vet ./...
+golangci-lint run ./...
 ```
 
-Popup shapes:
+CI runs the same checks on Linux and macOS, plus `gofmt` and a goreleaser check.
 
-- `workspace` — a per-parent-window backing session (survives while the
-  window lives). Set `start_cwd = true` to open at the pane's cwd.
-- `global` — one singleton backing session shared server-wide (k9s /
-  pgcli style). Your `granted-k9s` wrapper goes here.
-- `none` — exec the command directly in the popup pty; no backing
-  session.
+## The rules
 
-Launcher fields: `launch` (required), `popup`, `key`, `key_table`,
-`requires`, `icon`, `accent_color`, `title`, `description`, `invoke`,
-`start_cwd`.
+These are tripwires, not preferences. The design doc, [V1.md](V1.md) §6, is the
+source.
 
-That's it. No source changes, no recompile.
+- **One agent (Claude Code), one forge (GitHub), one renderer (Bubble Tea).**
+  Supporting a second means replacing the first. Don't add an interface for a
+  hypothetical second implementation, or for a mock.
+- **All UI is Bubble Tea**, in `internal/ui`. No second UI technology and no
+  shelling out to draw. (Programs atelier opens *in a window*, like the agent, a
+  shell, or a diff pager, aren't atelier's UI.)
+- **State lives in one JSON file, never in tmux**, and it's a cache and an index.
+  Worktrees come from disk and PRs from GitHub; don't store what can be derived.
+- **Nothing polls, and there is no daemon.** Changes arrive as events from Claude
+  Code's hooks. The one exception is the PR view re-querying GitHub while it is
+  open, because GitHub can't push to us; it ends when the view closes.
+- **No plugin system.**
+- **Delete dead code** rather than keeping it around.
+- **A feature ships once it has been wanted three separate times.** Open an issue
+  first for anything that adds surface.
 
-## Option 2 — a built-in (a PR)
+## Tests
 
-Richer tools — those that provide a capability slot (attention, a picker
-badge, a summary) or need deep integration with the workspace primitive
-— live in-tree and compile into the one binary. A built-in is a package
-under `internal/tools/<name>/` exposing two symbols, plus one
-registration line.
+Tests cover the headless core: the state file, paths and config, agent status,
+the Claude hook merge, worktree derivation, the PR query and its parsing, and
+the list rendering. Code that shells out to tmux, `gh`, or Claude
+stays untested rather than growing an abstraction to be mocked.
 
-```go
-// internal/tools/yourtool/register.go
-package yourtool
+Add a test for the behaviour a change pins, especially a bug fix, and check that
+it fails without the fix.
 
-import (
-    "github.com/spf13/cobra"
+## Commits and pull requests
 
-    "github.com/vyrwu/atelier/internal/manifest"
-)
+Commits follow [Conventional Commits](https://www.conventionalcommits.org), which
+[release-please](https://github.com/googleapis/release-please) reads to version
+releases and write the changelog:
 
-var Manifest = &manifest.Manifest{
-    Tool:          true,                 // appears in the M-; selector
-    Name:          "yourtool",
-    Description:   "short human description",
-    Popup:         manifest.KindWorkspace,
-    PrimaryInvoke: "open",
-    Binding:       &manifest.Binding{Key: "x", Style: manifest.StyleFull, StartCwd: true, Invoke: "open"},
-    Requires:      []string{"fzf"},
-}
-// (To fill a kernel capability slot — AI summary/attention, forge badge —
-//  write an integration adapter instead; see Option 3.)
-
-func AddCommands(root *cobra.Command) {
-    root.AddCommand(OpenCommand())
-}
+```
+fix(forge): Keep a failed repo's PRs on a partial refresh
+feat(ui): Open a PR's diff with Enter
 ```
 
-```go
-// internal/tools/all/all.go — one line
-plugin.RegisterBuiltin(yourtool.Manifest, yourtool.AddCommands)
-```
+- `feat` for features, `fix` for bug fixes. `perf`, `refactor`, and `docs` also
+  appear in the changelog; `test`, `ci`, `chore`, and `build` don't.
+- Mark a breaking change with `!` after the type, plus a `BREAKING CHANGE:`
+  footer.
+- Keep the subject short and in the imperative. Use the body to explain why.
 
-`atelier tools yourtool open` now dispatches to your `OpenCommand` in
-the same process; `atelier init` emits its binding; the selector lists
-it (when `Tool: true`); `atelier doctor` checks `Requires`.
+Pull requests are squash-merged, so the PR title becomes the commit on `main`.
+Give it the same format.
 
-### Manifest fields
+## Layout
 
-| Field | Description |
+| Path | |
 |---|---|
-| `Name` | tool name (no `atelier-` prefix) |
-| `Description` | shown in `atelier tools list` + selector |
-| `Tool` | `true` to appear in the M-; selector; omit for pure providers |
-| `Popup` | `KindWorkspace` / `KindGlobal` / `KindNone` — launch shape |
-| `PrimaryInvoke` | subcommand the M-; selector launches (default `open`; e.g. pg → `pgcli`) |
-| `Binding` / `Bindings` | tmux key bindings emitted by `atelier init` |
-| `Requires` | external commands `atelier doctor` verifies on PATH |
-| `UI` | icon / accent color / popup title for the selector |
-| `PickerBindings` | in-popup key hints for the cheatsheet |
+| `cmd/atelier` | the one binary: `up`, `open`, `home`, `create`, `win`, `hook`, `mcp`, `install`, `version` |
+| `internal/core` | domain types, the state file, config, paths |
+| `internal/tmux` | the tmux wrapper (dedicated socket) |
+| `internal/git` | worktree derivation and git queries |
+| `internal/forge` | GitHub: the PR query and PR state changes |
+| `internal/agent` | Claude Code: launch and resume, status, hooks, project setup |
+| `internal/mcp` | the stdio MCP server agents use: `create_worktree`, `create_pr`, `register_pr` |
+| `internal/ui` | the overlay and the splash |
 
-(Presentation CAPABILITIES — AI summary/attention/naming, forge badge —
-are NOT declared on a tool manifest. They are kernel ports filled by
-swappable integration adapters. See Option 3.)
+## Reporting bugs and asking for features
 
-## Option 3 — an integration adapter (swap a capability)
+Use the [issue templates](https://github.com/vyrwu/atelier/issues/new/choose). For
+a bug, include `atelier version` and the dependency check from the splash
+(`M-h`).
 
-To change *who fills a kernel capability* — the AI agent (branch naming,
-summary, attention, the popup agent) or the code forge (PR badge) — write
-an adapter that satisfies the kernel port in `internal/integration` and
-wire it at the composition root. The kernel does not change.
-
-```go
-// internal/adapters/codex/codex.go
-package codex
-
-import "github.com/vyrwu/atelier/internal/integration"
-
-type Adapter struct{}
-func New() *Adapter { return &Adapter{} }
-var _ integration.AIIntegration = (*Adapter)(nil) // implement the port's methods
-```
-
-```go
-// cmd/atelier/integrations.go — one line in composeIntegrations()
-case "codex":
-    set.AI = codex.New()
-```
-
-Then `[ai] provider = "codex"` selects it. Ports:
-
-- `AIIntegration` — `Name`, `DisplayName`, `OpenAgent`, `SetPrompt`,
-  `GenerateName`, `RefreshRecap`, `AgentPopupSession`, `HasResumableState`.
-  The KERNEL owns the naming instruction + conventional-commit validation;
-  the adapter runs its model and manages its own resume/session semantics.
-  `RefreshRecap` is pull-based — it re-reads the agent transcript and writes
-  the recap plus a three-state attention verdict; there is no push/stop-hook.
-- `ForgeIntegration` — `Name`, `Status` (classify into the kernel's
-  `ForgeState`), `Open`. The KERNEL renders the glyph + sort order.
-
-**Dependency rule:** an adapter imports `internal/integration` (the port)
-+ kernel primitives; it must NEVER be imported by the kernel. Only
-`cmd/atelier` maps config → adapter. Test your adapter against the port
-(`var _ integration.AIIntegration = ...`) and add a unit test; the `mock`
-adapter shows the minimum.
-
-## Host services
-
-Tools call back into the core for shared services. CLI surface:
-
-```bash
-# Inspect runtime state (topology + invariant report; where am I? outer pane?)
-atelier state show
-
-# Get info about the workspace containing a pane
-atelier workspace info --format=json
-atelier workspace info --format=cwd
-atelier workspace info --format=repo
-
-# List all workspaces
-atelier workspace list
-
-# Create a new workspace
-atelier workspace create --dir=/path --name=feat/foo
-
-# Switch to one
-atelier workspace switch <session:window>
-
-# Open a popup on the outer (non-popup) client
-atelier popup outer <command>
-
-# Clean up orphaned popup sessions (called from hooks)
-atelier popup cleanup
-
-# Ensure a backing popup session exists
-atelier internal ensure-workspace-popup --tool=mytool --cmd=mycmd
-atelier internal ensure-global-popup --tool=mytool --cmd=mycmd
-
-# Attach a tmux client to a session
-atelier internal attach --session=mysession
-```
-
-Go-written tools can import `github.com/vyrwu/atelier/internal/popup`,
-`internal/state`, `internal/workspace`, etc. directly for in-process speed.
-
-## Distribution
-
-- **Launcher**: nothing to distribute — it's a `[tools.*]` block in the
-  user's `config.toml` pointing at a command they already have on PATH.
-- **Built-in**: ships inside the single `atelier` binary once your PR
-  merges. `brew install vyrwu/tap/atelier` gets it. There are no
-  per-tool packages.
-
-## Style + behavior expectations
-
-- **Tools must never block on missing tmux state.** If `atelier state` reports no outer pane, return a clear error explaining the binding must set the `@atelier_outer_*` globals.
-- **Tools must be cancellable.** If the user dismisses fzf, return exit 0 (not an error).
-- **Tools must be idempotent.** Calling `open` twice should not create duplicate backing sessions.
-- **Tools must not panic on missing dependencies.** Declare them in `requires` so `atelier doctor` can warn.
-
-## Adding a built-in to atelier's official set
-
-Open a PR that:
-
-1. Adds `internal/tools/yourtool/` with your command constructors and a
-   `register.go` exposing `Manifest` + `AddCommands` (see Option 2 above).
-2. Adds one `plugin.RegisterBuiltin(yourtool.Manifest, yourtool.AddCommands)`
-   line to `internal/tools/all/all.go`.
-
-It builds via `make build` and installs via `make install`. `cmd/atelier`
-never changes — the registry is the single wiring point. In-process
-dispatch (cancel → exit 130, error → pause-and-exit) is handled for you by
-`toolmain.Dispatch`; you don't call it directly.
-
-## Agent observation (pull-based recap + attention)
-
-Atelier does **not** install a stop-hook into the agent's config — Claude
-launches with your untouched `~/.config/claude/settings.json`. Instead the
-background refresh loop (`atelier tools workspaces _refresh-loop`, started
-by `atelier init`) periodically calls the active AI adapter's
-`RefreshRecap`, which re-reads the workspace agent's latest session
-transcript and, in one cheap model pass, derives BOTH:
-
-- a one-line recap → `@attention_recap` (+ `@attention_recap_ts`)
-- a three-state agent status → `@agent_status`: `blocked` (waiting on
-  you), `running` (working / waiting on a sub-agent), or `idle`
-
-Only `blocked` raises `@needs_attention` on the workspace window, so the
-status-line rollup (`atelier status attention count`) surfaces just the
-workspaces that actually need you. Attention clears when you open the
-window (`after-select-window` hook) or attach to its popup
-(`client-session-changed` hook). All writes go through the kernel verbs
-(`workspace.SetRecapTS` / `SetAgentStatus` / `SetAttention`).
-
-`atelier ai recap` is the one-shot entry point the loop calls per tick;
-reads are throttled on the transcript mtime, so a quiet workspace costs
-only a `stat`.
-
-Atelier also reads two window options you can set per-workspace from the
-workspaces tool or by hand (persisted as statestore metadata, surfaced as
-`@ai_*` tmux options):
-
-- `@ai_prompt` — initial prompt passed to the agent on next popup open
-- `@ai_workspace_kind` — distinguishes single-repo from multi-repo
-  workspaces. For a multi-repo workspace, claude is launched with
-  `--append-system-prompt <ai.prompts.multi_repo>` from
-  atelier's config.
-
-## Repository conventions
-
-- Format: `gofmt`.
-- Lint: `golangci-lint run` must pass.
-- Tests: each tool's logic library (under `internal/tools/<name>/`) should have unit tests for naming/parsing/pure logic and e2e tests for tmux-interacting behavior. E2e tests use `internal/testtmux` for isolation.
-- Commits: follow the existing repo style.
-- PRs: include `atelier init` output before/after if your change affects bindings.
+For security issues, see [SECURITY.md](SECURITY.md). Please don't open a public
+issue.
