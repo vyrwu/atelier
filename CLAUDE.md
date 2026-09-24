@@ -1,98 +1,94 @@
-# CLAUDE.md — atelier
+# CLAUDE.md — atelier (v1)
 
-Project-level instructions for Claude Code (and any other agent working
-in this repo). Short, durable, mechanically-enforceable rules. Read
-this before touching tool code.
+A workshop for parallel Claude Code agents. The full spec is [V1.md](V1.md);
+read it before making changes. User-facing docs are README.md; contributor
+docs are CONTRIBUTING.md — keep all three in step with behaviour.
 
-## Architecture principle: tools never re-implement window management
+## Rules (V1.md §6 — tripwires, not sentiments)
 
-**Rule:** code under `internal/tools/<name>/` MUST NOT directly invoke
-tmux verbs that mutate sessions, windows, or popup-client state, and
-MUST NOT write atelier-managed window options as string literals. All
-of that lives in `internal/workspace` and `internal/popup`.
+- **One agent (Claude), one forge (GitHub), one renderer (Bubble Tea).** A second
+  implementation means deleting the first. No abstraction exists for a
+  hypothetical second one.
+- **All UI is Bubble Tea** (`internal/ui`). No fzf, no second UI technology, no
+  shelling out to draw.
+- **State lives in one JSON file** (`internal/core`), never in tmux.
+- **Nothing polls; no daemon.** State changes are event-driven (Claude hooks).
+  One scoped exception: the PR view re-queries every minute *while it is open*,
+  because GitHub can't push to us. The popup is the process, so closing it ends
+  the poll — nothing runs in the background.
+- **No plugin system.**
+- **Ground truth over bookkeeping:** worktrees derive from disk, PRs from `gh`.
+  Stored state is a cache + index.
 
-Concretely, the following are *prohibited* in `internal/tools/...`:
+## Layout
 
-- `tmux new-session`, `new-window`, `kill-session`, `kill-window`,
-  `switch-client`, `select-window`, `respawn-pane` (the workspace-
-  lifecycle verbs)
-- `set-option`/`set-window-option` calls that write atelier-managed
-  window options as string literals — `@needs_attention`,
-  `@attention_recap`, `@attention_recap_ts`, `@agent_status`,
-  `@repo_path` (use the `workspace.Opt*` constants), or the adapter
-  metadata options `@ai_prompt`, `@ai_workspace_kind`,
-  `@ai_active_session_id` (write through statestore metadata, not literals)
-- The `set-option <key> + statestore.UpdateGlobal(<key>)` two-step for
-  persisted tmux globals — use `workspace.SetPersistedGlobal`
-- The "spawn workspace-scoped popup" four-step recipe (resolve parent
-  context, ensure backing session, apply popup style, attach) — use
-  `popup.OpenWorkspaceScoped` / `OpenWorkspaceScopedWithCmd`
-- The `key-table popup ; status off ; prefix None ; prefix2 None ;
-  aggressive-resize on` popup-style sequence — use `popup.ApplyStyle`
-- The `TMUX_PARENT_SESSION_ID/WINDOW_ID env → atelier globals →
-  current-pane` parent-context resolution — use
-  `popup.ResolveParentContext`
+- `internal/core` — domain types, the state file, config, paths, slug
+- `internal/tmux` — tmux CLI wrapper (dedicated socket)
+- `internal/git` — worktree derivation + git queries
+- `internal/forge` — `gh` PR queries + open-in-browser
+- `internal/agent` — Claude launch/resume, per-session status, hooks, Claude
+  config (trust + MCP registration), the per-workspace guide
+- `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
+- `internal/ui` — the Bubble Tea overlay + the home splash (the only UI)
+- `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `win` / `hook`
+  / `mcp` / `install` / `version`
 
-**Why:** every tool that opens a popup, creates a workspace, lands the
-outer client on a workspace, or stamps workspace metadata hits the
-same edge cases — picking the right outer client, ordering
-select-window before switch-client, killing auto-created default-branch
-windows, sigil-restoring stripped `$`/`@` env values. Inlined in each
-tool, one bug fix has to touch every tool. In the primitive, fixes
-land once. The five-copy `applyPopupStyle` extraction (Layer A) and
-the persistence write-through helpers (Layer B in progress) exist
-because we kept hitting the same bug class until we accepted that.
+## Model & bindings
 
-**Where to add new behavior:**
+- A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
+  `claude` window runs the agent (named windows: `claude`, `shell`,
+  `<repo>-<branch>` per worktree — nav is keyed on names, so
+  `automatic-rename`/`allow-rename` are off).
+- Lifecycle: create → **active**; `M-d` delete → Trash (kill processes, keep on
+  disk); Trash `↵` restore (resume); Trash `M-d` delete permanently (confirm).
+  `Retired bool` + `RetiredAt` on the workspace (zero value = active, no migration).
+- Overlays: `M-s` spaces · `M-p` PRs · `M-w` worktrees · `M-t` trash · `M-n` new
+  (background). `M-h` switches to the home splash (a session switch, not an
+  overlay); the keymap, version, and dependency doctor live there — there is no
+  Help screen. In-space: `M-a` agent · `M-c` shell · `M-q` detach. Leader is `M-`
+  (Alt), hardcoded. New spaces build via a detached `atelier create`; feedback is
+  a status-line spinner (`@atelier_spin`) that resolves into a check-mark.
+- PR view: `↵` opens the diff as a window, `M-e` its checks, `M-b` the
+  browser, `M-o`/`M-c` reopen or close (there is no draft action). The diff is local `git diff <base>...HEAD` in the worktree on the PR's
+  head branch in the PR's repo, after fetching the base (instant, offline, no
+  size limit — GitHub's diff endpoint refuses past 20k lines); with no such
+  worktree or no known base it falls back to `gh pr diff`. It is piped to
+  whichever of `diffnav` · `delta` · `less` is installed, chosen by the shell that
+  runs it rather than atelier's PATH; none is a dependency. `M-e` opens the PR in
+  gh-enhance in a window — as the `gh-enhance` binary if it's on PATH (a package
+  manager install isn't registered with gh), else as `gh enhance` — falling back
+  to `gh pr checks --watch`. The two windows swap in place: `M-e` in a `pr-*`
+  window opens that PR's `ci-*` checks, `M-d` in a `ci-*` window its `pr-*` diff
+  (`atelier win <session> checks|diff <window>`, which maps the window name back
+  to its PR). Both bindings test the window name first and send the key through
+  anywhere else (Alt-d is delete-word). `M-a` is the agent everywhere — never
+  overload it, not even in a PR's windows.
+- Status line is event-driven: the per-session marker (`@atelier_status`) and the
+  attention badge (`@atelier_attention`) are pushed by the Claude hooks. PR status
+  is one GraphQL query for the whole space (worktree branches + registered PRs by
+  number) on opening `M-p` and once a minute while it stays open; the view shows
+  the last sweep, marked `checking github…`, until the query lands. Worktree
+  freshness is computed the same way, off the path that builds the model.
+- PR rows name their base; stacked PRs (one's base is another's head) render as
+  a contiguous run, base first, joined by a gutter line — derived per render,
+  never stored. Rows are ordered open · draft · merged · closed, newest first; a
+  stack takes its most active member's state.
+- The generated tmux fragment advertises 24-bit colour (`terminal-features
+  ",*:RGB"`) when `$COLORTERM` says the launching terminal has it.
+- Bindings are regenerated from the binary: `up`/`install` always write and
+  source the fragment, and the popup and window keys (`open`, `win`) re-sync it
+  whenever the server's `@atelier_bindings` marker (a hash the fragment sets
+  when sourced) differs from the running binary's — so a rebuild or upgrade
+  under a live server fixes itself on first use instead of leaving keys dead.
+  Likewise `up` restarts an already-running splash (`respawn-pane`), since a
+  running process keeps the binary it started with.
 
-- New per-window option key → `internal/workspace` constants block
-- New cross-tool tmux operation → `internal/workspace` or
-  `internal/popup`, picked by whether it's about the workspace or
-  about a popup tool
-- New tool-specific UX (fzf binds, picker logic, custom transforms) →
-  tool's own package, no restriction
+## Working here
 
-If you find yourself reaching around the primitive ("I'll just call
-tmux directly here, it's faster"), STOP. Add the helper to the
-primitive first, then call it. The fast path is the trap.
-
-See [`DESIGN.md` → "Window management belongs to the workspace
-primitive"](DESIGN.md) for the longer rationale, and
-[`REFACTOR.md`](REFACTOR.md) for in-flight extraction work.
-
-## Testing rule
-
-Every bug fix and feature lands with tests. Pure-unit tests where the
-helper is pure (e.g., `formatStageLabel`, `formatRecapAge`,
-`interpretPickedRepo`, `dispatchMode`); integration tests via
-`internal/testtmux` where tmux is involved. See `feedback_test_every_fix`
-in user memory for the explicit "no manually-verified-only fixes" rule.
-
-## Commit + PR rules
-
-atelier uses plain [Conventional Commits](https://www.conventionalcommits.org/)
-— `type(scope): Description` subject, **no `[PLA-XXX]`/Linear key** (this repo
-is not Linear-tracked). Concise body explaining the *why*, `Co-Authored-By:
-Claude <model>` trailer. Pull requests follow the same title format; body has
-`## Summary` (3-5 bullets), separator, repo PR template if present,
-generated-by footer. Don't enumerate files in PR bodies; don't expand
-design rationale. See [`RELEASING.md`](RELEASING.md) for how commit prefixes
-drive release-please version bumps.
-
-## GitHub Issue conventions
-
-Feature requests use `.github/ISSUE_TEMPLATE/feature_request.md`:
-**Problem** (the friction/gap) → **Proposal** (the concrete change) →
-**Notes** (where it lands in the code, constraints, alternatives;
-optional). Keep them short and focused. Label every issue `enhancement`
-plus exactly one area label — `ux`, `usability`, or `config`. Prefix the
-title with the area when it aids scanning (e.g. `UX: divider between M-s
-entries`).
-
-## When the principle doesn't hold
-
-If a future tool genuinely needs a tmux primitive that doesn't exist
-yet (e.g., `move-window` for a workspace reorganizer), ADD IT TO THE
-PRIMITIVE first, then use it. The rule is enforceable mechanically and
-the deflection move ("I'll inline it just this once") is exactly the
-pattern this rule exists to prevent.
+- **Tests cover the headless core only** — the domain (state file, paths,
+  config), agent status + the Claude hook merge, worktree derivation, the PR query, and list rendering. Anything that shells out to tmux, `gh`, or
+  Claude stays untested; don't add an abstraction to make it mockable.
+  Run `make test`, `go vet ./...`, and `golangci-lint run ./...` before
+  committing. Commits are Conventional Commits (release-please reads them).
+- Delete dead code rather than keep it. Elegance and fitness-for-purpose over
+  completeness or feature count.
