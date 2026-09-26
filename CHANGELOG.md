@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0](https://github.com/vyrwu/atelier/compare/v0.9.0...v1.0.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* replaces the v0.x implementation; config, state, and integration are not backward compatible.
+
+### Features
+
+* Atelier v1, a workshop for agents ([#100](https://github.com/vyrwu/atelier/issues/100)) ([1ca9fad](https://github.com/vyrwu/atelier/commit/1ca9fadfee7b5d2a7cee4a1c1cb43de7d373a3d8))
+
+
+### Bug fixes
+
+* **sandbox:** run the freshly-built binary, not the installed one ([#98](https://github.com/vyrwu/atelier/issues/98)) ([632fb9b](https://github.com/vyrwu/atelier/commit/632fb9b2cc1a5cc7cb8d800ace55846351585c4c))
+
+
+### Docs
+
+* **readme:** Fix key tables and notation ([#101](https://github.com/vyrwu/atelier/issues/101)) ([f210620](https://github.com/vyrwu/atelier/commit/f210620348f5f8f615e5c15efe532023f4afd09d))
+
 ## [0.9.0](https://github.com/vyrwu/atelier/compare/v0.8.0...v0.9.0) (2026-08-17)
 
 
