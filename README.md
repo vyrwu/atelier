@@ -55,7 +55,7 @@ One binary, running on its own tmux server so it never touches yours.
   quiet.
 - **Review without the browser.** The pull-request view groups PRs by repo and
   state, keeps stacked PRs together, and shows each one's base, CI, review, and
-  comments. It stays current while it's open. <kbd>Enter</kbd> opens the diff in
+  comments. It stays current while it's open. `Enter` opens the diff in
   a window, with a GitHub-style file tree if you have
   [diffnav](https://github.com/dlvhdr/diffnav) installed.
 - **See why CI failed.** `M-e` opens a PR's runs, jobs, steps, and logs in
@@ -128,58 +128,69 @@ atelier           # start (or re-attach) and land on the splash
 ```
 
 Run `atelier` from a plain terminal, not from inside another tmux session. Press
-**`M-n`**, describe a task, and press <kbd>Enter</kbd>. The space builds in the
-background; press **`M-s`** when you want to go to it.
+`M-n`, describe a task, and press `Enter`. The space builds in the
+background; press `M-s` when you want to go to it.
 
-`M-` means <kbd>Alt</kbd> (<kbd>Option</kbd> on a Mac). Your terminal has to send
+`M-` means `Alt` (`Option` on a Mac). Your terminal has to send
 it as Meta — see [Troubleshooting](#troubleshooting) if nothing happens.
 
 ## Keys
 
+`M-x` means `Alt-x` (`Option-x` on a Mac). The splash (`M-h`) lists them all.
+
 ### Anywhere
 
-| Key | |
+| Key | Does |
 |---|---|
-| `M-n` | **New** space: describe the task, it builds in the background |
+| `M-n` | **New space**: describe the task; it builds in the background |
 | `M-s` | **Spaces**: your active set, the ones that need you first |
-| `M-p` | **Pull requests** for the current space |
-| `M-w` | **Worktrees** for the current space |
 | `M-t` | **Trash**: retired spaces, restorable |
-| `M-h` | **Home**: back to the splash, which lists every key and checks your dependencies. The space you left keeps running. |
+| `M-h` | **Home**: the splash, with every key and a dependency check |
+| `M-q` | **Detach** from atelier; everything keeps running |
 
-### Inside a space
+### In a space
 
-| Key | |
+| Key | Does |
 |---|---|
-| `M-a` | the **agent** — respawns and resumes Claude if you exited it |
-| `M-c` | a **command line** in the space's directory |
-| `M-q` | **detach** from atelier; everything keeps running |
+| `M-a` | **Agent**: respawns and resumes Claude if you exited it |
+| `M-c` | **Command line** in the space's directory |
+| `M-p` | **Pull requests** for the space |
+| `M-w` | **Worktrees** for the space |
 
 ### In the overlays
 
-Type to filter. <kbd>↑</kbd>/<kbd>↓</kbd> (or `^k`/`^j`) to move, <kbd>Esc</kbd>
-clears the filter, then closes.
+Type to filter. `Up`/`Down` (or `Ctrl-k`/`Ctrl-j`) move; `Esc` clears the
+filter, then closes.
 
-| View | Keys |
-|---|---|
-| **Spaces** | `↵` open · `M-d` retire to Trash |
-| **Trash** | `↵` restore, resuming the conversation · `M-d` delete permanently (asks first) |
-| **Pull requests** | `↵` diff · `M-e` checks · `M-b` open on GitHub · `M-o` reopen / mark ready · `M-c` close · `M-y` copy as a Markdown link |
-| **Worktrees** | `↵` open a persistent shell in that worktree |
-| **New** | `↵` start in the background · `⌥↵` start and switch to it · `^j` newline |
+| View | Key | Does |
+|---|---|---|
+| **Spaces** | `Enter` | open |
+| | `M-d` | retire to Trash |
+| **Trash** | `Enter` | restore, resuming the conversation |
+| | `M-d` | delete permanently (asks first) |
+| **Pull requests** | `Enter` | diff |
+| | `M-e` | checks |
+| | `M-b` | open on GitHub |
+| | `M-o` | reopen, or mark a draft ready |
+| | `M-c` | close |
+| | `M-y` | copy as a Markdown link |
+| **Worktrees** | `Enter` | open a shell in that worktree |
+| **New** | `Enter` | start in the background |
+| | `Alt-Enter` | start and switch to it |
+| | `Ctrl-j` | newline |
 
 The PR diff opens in a window of the space, named after the PR, so pressing
-<kbd>Enter</kbd> again returns to it. With diffnav: `n`/`p` move between files,
-`e` toggles the tree, `s` toggles side-by-side, `?` shows the rest, `q` closes.
+`Enter` again returns to it. With diffnav: `n`/`p` move between files, `e`
+toggles the tree, `s` toggles side-by-side, `?` shows the rest, `q` closes.
 
-`M-e` opens the PR's checks the same way, in gh-enhance: runs, jobs, and steps down
-the side, the log beside them, `/` to search it, `ctrl+r` to rerun. Without
+`M-e` opens the PR's checks the same way, in gh-enhance: runs, jobs, and steps
+down the side, the log beside them, `/` to search it, `Ctrl-r` to rerun. Without
 gh-enhance you get gh's live checks table instead, which has no logs.
 
 Once one is open, flip between the two without going back through the PR view:
-**`M-e`** in a PR's diff window shows its checks, and **`M-d`** in its checks
-window shows the diff again. Anywhere else both keys go to whatever program has
-focus, so Alt-d is still delete-word in your shell.
+`M-e` in a PR's diff window shows its checks, and `M-d` in its checks window
+shows the diff again. Anywhere else both keys go to whatever program has focus,
+so `Alt-d` is still delete-word in your shell.
 
 ## How it works
 
@@ -264,7 +275,7 @@ ui:
 
 ## Troubleshooting
 
-**`M-` keys do nothing.** Your terminal is sending <kbd>Option</kbd> as a
+**`M-` keys do nothing.** Your terminal is sending `Option` as a
 character rather than as Meta.
 
 | Terminal | Setting |
