@@ -34,7 +34,7 @@ NOT a repository — you do your work in git worktrees you create here.
    reports the base advanced, re-check your work against the new commits.
 
 5. If you ever open a PR another way, call ` + "`register_pr`" + ` so it shows up in
-   atelier's Changes view.
+   atelier's pull request view.
 
 6. Keep everything under this workspace directory. Anything created outside it is
    invisible to atelier and to your operator.

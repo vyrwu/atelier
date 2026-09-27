@@ -20,7 +20,7 @@ import (
 // A worktree is any directory that directly contains a regular `.git` file. For
 // each, Path is the absolute directory, Branch is its current branch (falling
 // back to the directory's base name), and Repo is the first path segment under
-// workspaceRoot (the <owner-repo> directory). The result is sorted by Repo then
+// workspaceRoot (the <repo> directory). The result is sorted by Repo then
 // Branch. Best-effort: returns nil on any error or a missing root, and does not
 // recurse into a worktree once one is found.
 func Worktrees(workspaceRoot string) []core.Worktree {
@@ -75,7 +75,7 @@ func isWorktreeDir(dir string) bool {
 }
 
 // repoSegment returns the first path segment of path relative to root — the
-// <owner-repo> directory that owns the worktree. Falls back to the worktree's
+// <repo> directory that owns the worktree. Falls back to the worktree's
 // own base name if path is not under root.
 func repoSegment(root, path string) string {
 	rel, err := filepath.Rel(root, path)

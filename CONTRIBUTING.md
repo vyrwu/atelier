@@ -6,7 +6,7 @@ below before writing code; they are enforced in review.
 
 ## Setting up
 
-You need Go (the version in `go.mod`), tmux 3.2+, git, the GitHub CLI, and
+You need Go (the version in `go.mod`), tmux 3.3+, git, the GitHub CLI, and
 Claude Code.
 
 ```sh

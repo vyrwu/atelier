@@ -103,7 +103,7 @@ func up() error {
 	// If we're already inside atelier's OWN server, re-attaching would attach
 	// it to itself — a hall-of-mirrors loop. No-op instead.
 	if insideOwnServer() {
-		fmt.Println("atelier: already running here — M-a active · M-n new · M-q detach.")
+		fmt.Println("atelier: already running here — M-s spaces · M-n new · M-q detach.")
 		return nil
 	}
 	// Hand the terminal to tmux (attach to the atelier server).
@@ -276,7 +276,7 @@ set -g mouse on
 # Alt-chord (M-a/M-c/M-s…) responsiveness.
 set -g escape-time 0
 # Window names are atelier's identity for nav (claude/shell/<worktree>); keep
-# tmux and the running program from renaming them out from under M-c/M-s/M-t.
+# tmux and the running program from renaming them out from under M-a/M-c/M-w.
 set -g automatic-rename off
 set -g allow-rename off
 # Overlay openers. Capture the invoking client into @atelier_outer FIRST:

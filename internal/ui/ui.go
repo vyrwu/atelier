@@ -39,7 +39,7 @@ const (
 	scrConfirm
 )
 
-// Version is the atelier version, set by main at startup; shown in Help.
+// Version is the atelier version, set by main at startup; shown on the splash.
 var Version = "dev"
 
 // row is one line in a workspace list.
@@ -199,8 +199,8 @@ func (m *Model) load() {
 }
 
 // rebuild flattens the (filtered) workspaces into visible rows — a flat list of
-// workspaces. The active view hides retired ones; the all view shows every
-// workspace. Worktrees live in their own view (M-t), not nested here.
+// workspaces. Spaces hides retired ones; Trash shows only those. Worktrees
+// live in their own view (M-w), not nested here.
 func (m *Model) rebuild() {
 	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
 	m.rows = m.rows[:0]
@@ -384,7 +384,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		// Global keys work from every screen: C-c closes; M-s/M-p/M-w/M-t/M-n jump
-		// to a view; M-d retires the selection; M-x deletes it (with confirm).
+		// to a view; M-h goes home; M-d retires the selection in Spaces and deletes
+		// it (with confirm) in Trash.
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -524,7 +525,7 @@ func (m Model) screenFooter() string {
 }
 
 // footer is the bottom shortcut bar: the Enter verb and only this view's own
-// actions. Cross-view navigation lives in Help (M-h), so each view shows exactly
+// actions. Cross-view navigation lives on the splash (M-h), so each view shows exactly
 // its own legend and nothing more.
 func (m Model) footer(verb string, extras ...string) string {
 	parts := append([]string{"↵ " + verb}, extras...)
@@ -602,7 +603,7 @@ func (m Model) beginCreate(intent string, switchIn bool) (tea.Model, tea.Cmd) {
 }
 
 // deactivate retires a workspace: kill its session, mark it retired (kept on
-// disk, restorable from M-w), and refresh the list.
+// disk, restorable from Trash, M-t), and refresh the list.
 func (m *Model) deactivate(w core.Workspace) {
 	m.moveOuterOff(w.Session)
 	_ = tmux.KillSession(w.Session)

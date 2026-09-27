@@ -1,7 +1,8 @@
 # CLAUDE.md — atelier (v1)
 
-A workshop for parallel Claude Code agents. The full spec is [V1.md](V1.md);
-read it before making changes. User-facing docs are README.md; contributor
+A workshop for parallel Claude Code agents: a terminal-based agentic development
+environment, where reviewing a PR should be as easy as making the change by hand.
+The full spec is [V1.md](V1.md); read it before making changes. User-facing docs are README.md; contributor
 docs are CONTRIBUTING.md — keep all three in step with behaviour.
 
 ## Rules (V1.md §6 — tripwires, not sentiments)
@@ -45,11 +46,13 @@ docs are CONTRIBUTING.md — keep all three in step with behaviour.
 - Overlays: `M-s` spaces · `M-p` PRs · `M-w` worktrees · `M-t` trash · `M-n` new
   (background). `M-h` switches to the home splash (a session switch, not an
   overlay); the keymap, version, and dependency doctor live there — there is no
-  Help screen. In-space: `M-a` agent · `M-c` shell · `M-q` detach. Leader is `M-`
+  Help screen. `M-p` and `M-w` are scoped to the current space (off one they
+  toast and close). In-space: `M-a` agent · `M-c` shell. `M-q` detaches. Leader is `M-`
   (Alt), hardcoded. New spaces build via a detached `atelier create`; feedback is
   a status-line spinner (`@atelier_spin`) that resolves into a check-mark.
 - PR view: `↵` opens the diff as a window, `M-e` its checks, `M-b` the
-  browser, `M-o`/`M-c` reopen or close (there is no draft action). The diff is local `git diff <base>...HEAD` in the worktree on the PR's
+  browser, `M-o` reopens or marks a draft ready, `M-c` closes (nothing converts
+  back to draft), `M-y` copies a Markdown link. The diff is local `git diff <base>...HEAD` in the worktree on the PR's
   head branch in the PR's repo, after fetching the base (instant, offline, no
   size limit — GitHub's diff endpoint refuses past 20k lines); with no such
   worktree or no known base it falls back to `gh pr diff`. It is piped to
@@ -64,7 +67,9 @@ docs are CONTRIBUTING.md — keep all three in step with behaviour.
   anywhere else (Alt-d is delete-word). `M-a` is the agent everywhere — never
   overload it, not even in a PR's windows.
 - Status line is event-driven: the per-session marker (`@atelier_status`) and the
-  attention badge (`@atelier_attention`) are pushed by the Claude hooks. PR status
+  attention badge (`@atelier_attention`) are pushed by the Claude hooks. Entering
+  a blocked space sets it idle, so the badge clears until the agent asks again.
+  The hooks never refresh PRs. PR status
   is one GraphQL query for the whole space (worktree branches + registered PRs by
   number) on opening `M-p` and once a minute while it stays open; the view shows
   the last sweep, marked `checking github…`, until the query lands. Worktree

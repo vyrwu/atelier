@@ -289,7 +289,7 @@ func HasWindow(session, name string) bool {
 }
 
 // EnsureShell selects the session's "shell" window, creating one at cwd if there
-// isn't one yet — so M-s always lands on a shell in the workspace dir.
+// isn't one yet — so M-c always lands on a shell in the workspace dir.
 func EnsureShell(session, cwd string) error {
 	if HasWindow(session, "shell") {
 		return SelectWindow(session, "shell")

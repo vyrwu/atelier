@@ -29,7 +29,7 @@ const ClaudeWindow = "claude"
 // EnsureClaude makes sure the workspace's Claude window is running and ready to
 // select: it revives the whole session if it's gone, or respawns just the
 // "claude" window if you exited Claude but left other windows (shells) open —
-// so M-c always brings Claude back. Resumes the prior conversation.
+// so M-a always brings Claude back. Resumes the prior conversation.
 func EnsureClaude(session, root, slug string) error {
 	env := map[string]string{"ATELIER_SESSION": slug, "ATELIER_SLUG": slug}
 	if !tmux.HasSession(session) {
