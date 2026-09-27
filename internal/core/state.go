@@ -94,8 +94,8 @@ func (s *State) save() error {
 }
 
 // Update runs fn against the current state under an exclusive lock, then saves
-// atomically. Both the UI and the hook CLI call this; the lock serialises them
-// so a concurrent write never corrupts the file (NFR-R4).
+// atomically. The UI, the builder, and the MCP server call this; the lock
+// serialises them so a concurrent write never corrupts the file (NFR-R4).
 func Update(fn func(*State)) error {
 	unlock, err := lock()
 	if err != nil {

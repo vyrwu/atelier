@@ -1,24 +1,12 @@
-# CLAUDE.md — atelier (v1)
+# CLAUDE.md — atelier
 
-A workshop for parallel Claude Code agents. The full spec is [V1.md](V1.md);
-read it before making changes. User-facing docs are README.md; contributor
-docs are CONTRIBUTING.md — keep all three in step with behaviour.
+A workshop for parallel Claude Code agents: a terminal-based agentic development
+environment, where reviewing a PR should be as easy as making the change by hand.
+The design, its principles (`NFR-*`, cited in code), and the rules (§5) are in
+DESIGN.md, imported below. User-facing behaviour is README.md; contributor
+workflow is CONTRIBUTING.md — keep all three in step with the code.
 
-## Rules (V1.md §6 — tripwires, not sentiments)
-
-- **One agent (Claude), one forge (GitHub), one renderer (Bubble Tea).** A second
-  implementation means deleting the first. No abstraction exists for a
-  hypothetical second one.
-- **All UI is Bubble Tea** (`internal/ui`). No fzf, no second UI technology, no
-  shelling out to draw.
-- **State lives in one JSON file** (`internal/core`), never in tmux.
-- **Nothing polls; no daemon.** State changes are event-driven (Claude hooks).
-  One scoped exception: the PR view re-queries every minute *while it is open*,
-  because GitHub can't push to us. The popup is the process, so closing it ends
-  the poll — nothing runs in the background.
-- **No plugin system.**
-- **Ground truth over bookkeeping:** worktrees derive from disk, PRs from `gh`.
-  Stored state is a cache + index.
+@DESIGN.md
 
 ## Layout
 
@@ -45,11 +33,13 @@ docs are CONTRIBUTING.md — keep all three in step with behaviour.
 - Overlays: `M-s` spaces · `M-p` PRs · `M-w` worktrees · `M-t` trash · `M-n` new
   (background). `M-h` switches to the home splash (a session switch, not an
   overlay); the keymap, version, and dependency doctor live there — there is no
-  Help screen. In-space: `M-a` agent · `M-c` shell · `M-q` detach. Leader is `M-`
+  Help screen. `M-p` and `M-w` are scoped to the current space (off one they
+  toast and close). In-space: `M-a` agent · `M-c` shell. `M-q` detaches. Leader is `M-`
   (Alt), hardcoded. New spaces build via a detached `atelier create`; feedback is
   a status-line spinner (`@atelier_spin`) that resolves into a check-mark.
 - PR view: `↵` opens the diff as a window, `M-e` its checks, `M-b` the
-  browser, `M-o`/`M-c` reopen or close (there is no draft action). The diff is local `git diff <base>...HEAD` in the worktree on the PR's
+  browser, `M-o` reopens or marks a draft ready, `M-c` closes (nothing converts
+  back to draft), `M-y` copies a Markdown link. The diff is local `git diff <base>...HEAD` in the worktree on the PR's
   head branch in the PR's repo, after fetching the base (instant, offline, no
   size limit — GitHub's diff endpoint refuses past 20k lines); with no such
   worktree or no known base it falls back to `gh pr diff`. It is piped to
@@ -64,7 +54,9 @@ docs are CONTRIBUTING.md — keep all three in step with behaviour.
   anywhere else (Alt-d is delete-word). `M-a` is the agent everywhere — never
   overload it, not even in a PR's windows.
 - Status line is event-driven: the per-session marker (`@atelier_status`) and the
-  attention badge (`@atelier_attention`) are pushed by the Claude hooks. PR status
+  attention badge (`@atelier_attention`) are pushed by the Claude hooks. Entering
+  a blocked space sets it idle, so the badge clears until the agent asks again.
+  The hooks never refresh PRs. PR status
   is one GraphQL query for the whole space (worktree branches + registered PRs by
   number) on opening `M-p` and once a minute while it stays open; the view shows
   the last sweep, marked `checking github…`, until the query lands. Worktree

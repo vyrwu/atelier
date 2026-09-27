@@ -35,7 +35,7 @@ func keepRegistered(refreshed, onDisk []core.PR) []core.PR {
 	return out
 }
 
-// prMutatedMsg carries the result of an M-o/M-c/M-d state change back into the
+// prMutatedMsg carries the result of an M-o/M-c state change back into the
 // model so the row re-renders in place.
 type prMutatedMsg struct {
 	slug   string

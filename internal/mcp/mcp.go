@@ -1,8 +1,9 @@
-// Package mcp is a minimal stdio MCP (Model Context Protocol) server exposing a
-// single tool, register_pr. It is the FR-G2 gap-filler: when the agent opens a
-// PR that atelier's branch-matching sweep wouldn't discover (e.g. a fork, or a
-// branch that doesn't match the worktree), the agent calls register_pr to pin
-// it to the current workspace so it shows up in the Changes view.
+// Package mcp is a minimal stdio MCP (Model Context Protocol) server exposing
+// the agent's tools: create_worktree, create_pr, and register_pr. register_pr is
+// the gap-filler (NFR-R6): when the agent opens a PR that atelier's branch-matching
+// sweep wouldn't discover (e.g. a fork, or a branch that doesn't match the
+// worktree), the agent calls it to pin the PR to the current workspace so it
+// shows up in the pull request view.
 //
 // The framing is newline-delimited JSON-RPC 2.0 over stdin/stdout, hand-rolled
 // so there is no SDK dependency — the surface is tiny (initialize / tools/list
@@ -100,7 +101,7 @@ func registerPRSpec() map[string]interface{} {
 	}
 	return map[string]interface{}{
 		"name":        "register_pr",
-		"description": "Register a pull request you opened with the current atelier workspace so it is tracked in the Changes view, even if branch-matching wouldn't find it.",
+		"description": "Register a pull request you opened with the current atelier workspace so it is tracked in the pull request view, even if branch-matching wouldn't find it.",
 		"inputSchema": map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

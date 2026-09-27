@@ -8,7 +8,7 @@ import (
 
 // The palette — toned and quiet: a soft slate-blue accent, a neutral grey scale,
 // and a single warm attention colour. Only "blocked" is an attention colour;
-// everything else stays quiet (FR-B1: the badge means "something needs you").
+// everything else stays quiet (the badge means "something needs you").
 var (
 	cAccent  = lipgloss.Color("110") // soft slate blue — atelier's accent
 	cBlocked = lipgloss.Color("173") // muted terracotta — the single attention colour

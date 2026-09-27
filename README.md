@@ -21,6 +21,7 @@
 <a href="#how-it-works">How it works</a> ·
 <a href="#configuration">Configuration</a> ·
 <a href="#troubleshooting">Troubleshooting</a> ·
+<a href="#roadmap">Roadmap</a> ·
 <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 </div>
@@ -34,6 +35,12 @@
 Running several Claude Code agents at once is powerful, but it's taxing. You
 switch contexts constantly, and you're never quite sure which session is working,
 which is blocked waiting on you, and which is done.
+
+atelier is a **terminal-based agentic development environment**: what an IDE is
+to writing code, atelier is to directing the agents that write it. The goal is
+that reviewing a pull request is as easy as making the change by hand or running
+a command in the repository. It is terminal-based, keyboard-centric, and fully
+multiplexed through tmux.
 
 **atelier makes parallel agents something you *have*, not something you
 *manage*.** Describe a task and it becomes a **space**: a named directory with
@@ -52,7 +59,7 @@ One binary, running on its own tmux server so it never touches yours.
   new one is ready.
 - **Know where to look.** An agent waiting on you raises one attention marker,
   and the Spaces list puts it first. Working, idle, and finished agents stay
-  quiet.
+  quiet. Opening the space clears the marker until the agent asks again.
 - **Review without the browser.** The pull-request view groups PRs by repo and
   state, keeps stacked PRs together, and shows each one's base, CI, review, and
   comments. It stays current while it's open. `Enter` opens the diff in
@@ -61,8 +68,8 @@ One binary, running on its own tmux server so it never touches yours.
 - **See why CI failed.** `M-e` opens a PR's runs, jobs, steps, and logs in
   [gh-enhance](https://github.com/dlvhdr/gh-enhance), with search through the
   logs and reruns.
-- **Change PR state in place.** Reopen or close from the list;
-  the row updates at once and reconciles with GitHub.
+- **Change PR state in place.** Reopen, close, or mark a draft ready from the
+  list; the row updates at once and reconciles with GitHub.
 - **Worktrees that are never stale.** Agents branch every worktree from the
   freshly fetched default branch, and the worktree view shows how far each has
   drifted.
@@ -80,7 +87,7 @@ One binary, running on its own tmux server so it never touches yours.
 
 | | |
 |---|---|
-| [tmux](https://github.com/tmux/tmux) 3.2+ | atelier runs its own server on a dedicated socket |
+| [tmux](https://github.com/tmux/tmux) 3.3+ | atelier runs its own server on a dedicated socket |
 | git | worktrees and diffs |
 | [GitHub CLI](https://cli.github.com) (`gh`) | PR status and actions — run `gh auth login` first |
 | [Claude Code](https://claude.com/claude-code) (`claude`) | the agent atelier drives |
@@ -179,6 +186,8 @@ filter, then closes.
 | | `Alt-Enter` | start and switch to it |
 | | `Ctrl-j` | newline |
 
+On the splash, `r` re-runs the dependency check and `q` detaches.
+
 The PR diff opens in a window of the space, named after the PR, so pressing
 `Enter` again returns to it. With diffnav: `n`/`p` move between files, `e`
 toggles the tree, `s` toggles side-by-side, `?` shows the rest, `q` closes.
@@ -237,9 +246,12 @@ to `gh pr diff`.
 
 **State.** One JSON file, `$XDG_STATE_HOME/atelier/state.json`, holds the list of
 spaces and a cache of PR status. It is an index, never the only record of
-anything: worktrees come from disk and PRs from GitHub.
+anything: worktrees come from disk and PRs from GitHub. Agent status is runtime
+only, one small file per space under `$XDG_CACHE_HOME/atelier/agents/`,
+rewritten by the hooks.
 
-The full design, requirements, and rules are in [V1.md](V1.md).
+Why it is built this way, and the rules that keep it so, are in
+[DESIGN.md](DESIGN.md).
 
 ## Configuration
 
@@ -301,7 +313,20 @@ upgrade — open any overlay once. `atelier install` forces it.
 branch is a worktree in the space, or when the agent registered it.
 
 **The splash's dependency check** (`M-h`) shows which of git, gh, tmux, and
-claude atelier can find, and their versions.
+claude atelier can find, and their versions, then the optional diffnav and
+gh-enhance.
+
+## Roadmap
+
+Wanted next, not yet designed:
+
+- **Remote spaces.** Spawn a space on a remote host, cheaply, so its agent runs
+  off your machine. ([#104](https://github.com/vyrwu/atelier/issues/104))
+- **Embedded CLI support.** In a shell, write a task in natural language and get
+  the CLI command for it, ready to run.
+  ([#103](https://github.com/vyrwu/atelier/issues/103))
+
+Each still has to fit the rules in [DESIGN.md](DESIGN.md#5-rules).
 
 ## Development
 

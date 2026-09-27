@@ -11,7 +11,7 @@ import (
 	"github.com/vyrwu/atelier/internal/git"
 )
 
-// updateActive drives the M-a "Active workspaces" list: the working set.
+// updateActive drives the M-s Spaces list: the working set.
 func (m Model) updateActive(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "ctrl+k":
@@ -77,7 +77,7 @@ func (m Model) viewActive() string {
 	return m.workspaceList("Spaces", "nothing active — M-n to start · M-t to restore from trash")
 }
 
-// workspaceList renders the shared workspace-list body (used by Active and All).
+// workspaceList renders the shared workspace-list body (used by Spaces).
 func (m Model) workspaceList(title, empty string) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(title))

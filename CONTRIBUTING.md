@@ -6,7 +6,7 @@ below before writing code; they are enforced in review.
 
 ## Setting up
 
-You need Go (the version in `go.mod`), tmux 3.2+, git, the GitHub CLI, and
+You need Go (the version in `go.mod`), tmux 3.3+, git, the GitHub CLI, and
 Claude Code.
 
 ```sh
@@ -30,24 +30,9 @@ CI runs the same checks on Linux and macOS, plus `gofmt` and a goreleaser check.
 
 ## The rules
 
-These are tripwires, not preferences. The design doc, [V1.md](V1.md) §6, is the
-source.
-
-- **One agent (Claude Code), one forge (GitHub), one renderer (Bubble Tea).**
-  Supporting a second means replacing the first. Don't add an interface for a
-  hypothetical second implementation, or for a mock.
-- **All UI is Bubble Tea**, in `internal/ui`. No second UI technology and no
-  shelling out to draw. (Programs atelier opens *in a window*, like the agent, a
-  shell, or a diff pager, aren't atelier's UI.)
-- **State lives in one JSON file, never in tmux**, and it's a cache and an index.
-  Worktrees come from disk and PRs from GitHub; don't store what can be derived.
-- **Nothing polls, and there is no daemon.** Changes arrive as events from Claude
-  Code's hooks. The one exception is the PR view re-querying GitHub while it is
-  open, because GitHub can't push to us; it ends when the view closes.
-- **No plugin system.**
-- **Delete dead code** rather than keeping it around.
-- **A feature ships once it has been wanted three separate times.** Open an issue
-  first for anything that adds surface.
+They live in [DESIGN.md §5](DESIGN.md#5-rules), with the reasoning behind them.
+They are tripwires, not preferences. Open an issue first for anything that adds
+surface.
 
 ## Tests
 
