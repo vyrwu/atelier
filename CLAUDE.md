@@ -1,25 +1,12 @@
-# CLAUDE.md — atelier (v1)
+# CLAUDE.md — atelier
 
 A workshop for parallel Claude Code agents: a terminal-based agentic development
 environment, where reviewing a PR should be as easy as making the change by hand.
-The full spec is [V1.md](V1.md); read it before making changes. User-facing docs are README.md; contributor
-docs are CONTRIBUTING.md — keep all three in step with behaviour.
+The design, its principles (`NFR-*`, cited in code), and the rules (§5) are in
+DESIGN.md, imported below. User-facing behaviour is README.md; contributor
+workflow is CONTRIBUTING.md — keep all three in step with the code.
 
-## Rules (V1.md §6 — tripwires, not sentiments)
-
-- **One agent (Claude), one forge (GitHub), one renderer (Bubble Tea).** A second
-  implementation means deleting the first. No abstraction exists for a
-  hypothetical second one.
-- **All UI is Bubble Tea** (`internal/ui`). No fzf, no second UI technology, no
-  shelling out to draw.
-- **State lives in one JSON file** (`internal/core`), never in tmux.
-- **Nothing polls; no daemon.** State changes are event-driven (Claude hooks).
-  One scoped exception: the PR view re-queries every minute *while it is open*,
-  because GitHub can't push to us. The popup is the process, so closing it ends
-  the poll — nothing runs in the background.
-- **No plugin system.**
-- **Ground truth over bookkeeping:** worktrees derive from disk, PRs from `gh`.
-  Stored state is a cache + index.
+@DESIGN.md
 
 ## Layout
 

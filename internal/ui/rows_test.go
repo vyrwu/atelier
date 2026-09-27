@@ -95,7 +95,7 @@ func TestAge(t *testing.T) {
 	}
 }
 
-// Zero counts are omitted so a quiet space shows a quiet row (FR-B1); a count
+// Zero counts are omitted so a quiet space shows a quiet row; a count
 // that exists renders as "N<glyph>".
 func TestSpaceCounts(t *testing.T) {
 	m := Model{}

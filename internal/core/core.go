@@ -96,7 +96,7 @@ type Worktree struct {
 
 // AgentStatus is per-session runtime state (NOT persisted in State): the agent
 // is working, blocked on you, idle (finished, not waiting), or gone (no live
-// process). Only Blocked draws attention (FR-B1).
+// process). Only Blocked draws attention.
 type AgentStatus string
 
 const (

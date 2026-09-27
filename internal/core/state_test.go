@@ -63,9 +63,10 @@ func TestAddUniqueWorkspace_Sequential(t *testing.T) {
 	}
 }
 
-// NFR-R4: the UI and the hook CLI both write state, so Update must serialise the
-// whole read-modify-write. Without the lock around it, concurrent appends read
-// the same base state and overwrite each other — the classic lost update.
+// NFR-R4: the UI, the builder, and the MCP server all write state, so Update
+// must serialise the whole read-modify-write. Without the lock around it,
+// concurrent appends read the same base state and overwrite each other — the
+// classic lost update.
 func TestUpdateSerialisesConcurrentWrites(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	const n = 16

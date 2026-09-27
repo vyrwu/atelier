@@ -250,7 +250,8 @@ anything: worktrees come from disk and PRs from GitHub. Agent status is runtime
 only, one small file per space under `$XDG_CACHE_HOME/atelier/agents/`,
 rewritten by the hooks.
 
-The full design, requirements, and rules are in [V1.md](V1.md).
+Why it is built this way, and the rules that keep it so, are in
+[DESIGN.md](DESIGN.md).
 
 ## Configuration
 
@@ -320,10 +321,12 @@ gh-enhance.
 Wanted next, not yet designed:
 
 - **Remote spaces.** Spawn a space on a remote host, cheaply, so its agent runs
-  off your machine.
-- **Embedded CLI support.**
+  off your machine. ([#104](https://github.com/vyrwu/atelier/issues/104))
+- **Embedded CLI support.** In a shell, write a task in natural language and get
+  the CLI command for it, ready to run.
+  ([#103](https://github.com/vyrwu/atelier/issues/103))
 
-Each still has to fit the rules in [V1.md](V1.md) §6.
+Each still has to fit the rules in [DESIGN.md](DESIGN.md#5-rules).
 
 ## Development
 

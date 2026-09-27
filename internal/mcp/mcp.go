@@ -1,6 +1,6 @@
 // Package mcp is a minimal stdio MCP (Model Context Protocol) server exposing
 // the agent's tools: create_worktree, create_pr, and register_pr. register_pr is
-// the FR-G2 gap-filler: when the agent opens a PR that atelier's branch-matching
+// the gap-filler (NFR-R6): when the agent opens a PR that atelier's branch-matching
 // sweep wouldn't discover (e.g. a fork, or a branch that doesn't match the
 // worktree), the agent calls it to pin the PR to the current workspace so it
 // shows up in the pull request view.
