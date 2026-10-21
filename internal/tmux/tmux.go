@@ -162,6 +162,13 @@ func NewWindowCmd(session, cwd, name, cmd string, env map[string]string) error {
 	return err
 }
 
+// RespawnWindow runs cmd at cwd in session's window name afresh, killing
+// whatever the window was running.
+func RespawnWindow(session, name, cwd, cmd string) error {
+	_, err := Run("respawn-window", "-k", "-c", cwd, "-t", "="+session+":"+name, wrap(nil, cmd))
+	return err
+}
+
 // RenameWindow renames session's active window (used right after NewSession to
 // label the agent window "claude"; a manual rename disables automatic-rename for
 // that window, so the label sticks even as Claude runs).

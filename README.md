@@ -189,7 +189,8 @@ filter, then closes.
 On the splash, `r` re-runs the dependency check and `q` detaches.
 
 The PR diff opens in a window of the space, named after the PR, so pressing
-`Enter` again returns to it. With diffnav: `n`/`p` move between files, `e`
+`Enter` again returns to it, with the diff re-run so it shows the branch as it is
+now. With diffnav: `n`/`p` move between files, `e`
 toggles the tree, `s` toggles side-by-side, `?` shows the rest, `q` closes.
 
 `M-e` opens the PR's checks the same way, in gh-enhance: runs, jobs, and steps

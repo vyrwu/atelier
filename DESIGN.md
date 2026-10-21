@@ -332,7 +332,8 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
    (GitHub's diff endpoint refuses past 20,000 lines). A stacked PR's base is the
    branch below it, so it shows only its own slice. With no worktree it falls
    back to `gh pr diff`. The pager is chosen by the window's own shell, since
-   its `PATH` can differ from atelier's.
+   its `PATH` can differ from atelier's. Opening a diff whose window is already
+   open re-runs it there, since a diff is a snapshot of when it ran.
 5. **Network git uses gh's token over HTTPS**, rewriting SSH remotes for that
    one command, so a background fetch or push never pops an SSH passphrase or
    keychain prompt, and never asks for credentials on the agent's terminal.

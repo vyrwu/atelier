@@ -31,21 +31,15 @@ func (m Model) openDiff(pr core.PR) (tea.Model, tea.Cmd) {
 	if stale {
 		note = fmt.Sprintf("#%d moved on GitHub — showing what this worktree has", pr.Number)
 	}
-	return m.openWindow(diffWindow(pr), cwd, cmd, note)
+	return m.openWindow(diffWindow(pr), cwd, cmd, note, true)
 }
 
 // openWindow runs cmd in a named window of the current space and switches the
-// outer client to it, closing the overlay. A window of that name already open is
-// returned to rather than started again. note, if set, is shown as a toast —
+// outer client to it, closing the overlay. note, if set, is shown as a toast —
 // not printed into the window, where a pager would swallow it.
-func (m Model) openWindow(name, cwd, cmd, note string) (tea.Model, tea.Cmd) {
+func (m Model) openWindow(name, cwd, cmd, note string, restart bool) (tea.Model, tea.Cmd) {
 	session := m.curWS.Session
-	if tmux.HasWindow(session, name) {
-		_ = tmux.SelectWindow(session, name)
-		_ = tmux.SwitchClient(m.outer, session)
-		return m, tea.Quit
-	}
-	if err := tmux.NewWindowCmd(session, cwd, name, cmd, nil); err != nil {
+	if err := startWindow(session, name, cwd, cmd, restart); err != nil {
 		m.err = err.Error()
 		return m, nil
 	}
@@ -55,6 +49,20 @@ func (m Model) openWindow(name, cwd, cmd, note string) (tea.Model, tea.Cmd) {
 	_ = tmux.SelectWindow(session, name)
 	_ = tmux.SwitchClient(m.outer, session)
 	return m, tea.Quit
+}
+
+// startWindow runs cmd in session's window name, opening the window if it isn't
+// there. One already open is left running as it is, unless restart: a diff is a
+// snapshot of the branch when it ran, so returning to an old one would show
+// commits since pushed as missing.
+func startWindow(session, name, cwd, cmd string, restart bool) error {
+	switch {
+	case !tmux.HasWindow(session, name):
+		return tmux.NewWindowCmd(session, cwd, name, cmd, nil)
+	case restart:
+		return tmux.RespawnWindow(session, name, cwd, cmd)
+	}
+	return nil
 }
 
 // diffWindow is the window name for a PR's diff. Window names are atelier's
