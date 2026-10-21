@@ -15,7 +15,7 @@ func (m Model) openChecks(pr core.PR) (tea.Model, tea.Cmd) {
 	if m.curWS == nil || pr.Repo == "" || pr.Number == 0 {
 		return m, nil
 	}
-	return m.openWindow(checksWindow(pr), m.curWS.Root(), checksCommand(pr), "")
+	return m.openWindow(checksWindow(pr), m.curWS.Root(), checksCommand(pr), "", false)
 }
 
 // checksPrelude finds gh-enhance, setting $c to the way to run it or to nothing.

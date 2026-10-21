@@ -44,7 +44,10 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   size limit — GitHub's diff endpoint refuses past 20k lines); with no such
   worktree or no known base it falls back to `gh pr diff`. It is piped to
   whichever of `diffnav` · `delta` · `less` is installed, chosen by the shell that
-  runs it rather than atelier's PATH; none is a dependency. `M-e` opens the PR in
+  runs it rather than atelier's PATH; none is a dependency. Opening the diff
+  (`↵` or `M-d`) when its window exists re-runs it there (`respawn-window`), so
+  it never shows a stale changeset; the checks window is returned to as is.
+  `M-e` opens the PR in
   gh-enhance in a window — as the `gh-enhance` binary if it's on PATH (a package
   manager install isn't registered with gh), else as `gh enhance` — falling back
   to `gh pr checks --watch`. The two windows swap in place: `M-e` in a `pr-*`

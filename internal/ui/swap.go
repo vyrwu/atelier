@@ -33,13 +33,11 @@ func SwitchPRView(session, window string, to PRView) (ok bool, err error) {
 	if cmd == "" {
 		return true, fmt.Errorf("no way to show %s", name)
 	}
-	if !tmux.HasWindow(session, name) {
-		if err := tmux.NewWindowCmd(session, cwd, name, cmd, nil); err != nil {
-			return true, err
-		}
-		if stale {
-			_ = tmux.Notify("", "this PR moved on GitHub — showing what the worktree has")
-		}
+	if err := startWindow(session, name, cwd, cmd, to == DiffView); err != nil {
+		return true, err
+	}
+	if stale {
+		_ = tmux.Notify("", "this PR moved on GitHub — showing what the worktree has")
 	}
 	return true, tmux.SelectWindow(session, name)
 }
