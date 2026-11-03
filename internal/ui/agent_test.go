@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -15,10 +16,13 @@ import (
 // Tab on the new-space prompt flips which agent the space starts with, rather
 // than reaching the text.
 func TestNewSpaceTabTogglesAgent(t *testing.T) {
-	m := Model{newAgent: agent.Claude}
+	m := Model{newAgent: agent.Claude, intent: textarea.New()}
 	next, _ := m.updateNew(tea.KeyMsg{Type: tea.KeyTab})
 	if got := next.(Model).newAgent; got != agent.Codex {
 		t.Errorf("after Tab agent = %q, want codex", got)
+	}
+	if v := ansiRe.ReplaceAllString(next.(Model).viewNew(), ""); !strings.Contains(v, "What can "+glyphCodex+" Codex do for you?") {
+		t.Errorf("prompt = %q, want it to ask Codex", v)
 	}
 	next, _ = next.(Model).updateNew(tea.KeyMsg{Type: tea.KeyTab})
 	if got := next.(Model).newAgent; got != agent.Claude {

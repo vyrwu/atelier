@@ -536,7 +536,7 @@ func (m Model) screenFooter() string {
 	case scrTrash:
 		return m.footer("restore", "M-d delete")
 	case scrNew:
-		return hintStyle.Render("↵ start (background)  ·  ⌥↵ start & open  ·  tab agent  ·  ^j newline  ·  esc close")
+		return hintStyle.Render("↵ start (background)  ·  ⌥↵ start & open  ·  tab switch agent  ·  ^j newline  ·  esc close")
 	case scrPRs:
 		return m.footer("diff", "M-e checks", "M-b browser", "M-o open", "M-c close", "M-y copy")
 	case scrWorktrees:

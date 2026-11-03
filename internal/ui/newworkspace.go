@@ -28,8 +28,9 @@ func (m Model) updateNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) viewNew() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("What are we doing today?"))
-	b.WriteString("  " + agentGlyph(m.newAgent) + " " + dimStyle.Render(m.newAgent.Label()))
+	// The agent is part of the question, so Tab reads as asking the other one.
+	b.WriteString(titleStyle.Render("What can ") + agentGlyph(m.newAgent) + " " +
+		titleStyle.Render(m.newAgent.Label()+" do for you?"))
 	b.WriteString("\n\n")
 	b.WriteString(m.intent.View())
 	return b.String()
