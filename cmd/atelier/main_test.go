@@ -109,6 +109,25 @@ func TestFragmentBindsSwap(t *testing.T) {
 	t.Error("no M-x binding")
 }
 
+// The status line names the window — the agent, or "Command Line" — after the
+// title; a long title is cut short so that name is never what gets cut.
+func TestStatusLeftKeepsTheWindowName(t *testing.T) {
+	frag, _ := bindingsFragment()
+	for _, line := range strings.Split(frag, "\n") {
+		if !strings.HasPrefix(line, "set -g status-left ") {
+			continue
+		}
+		if !strings.Contains(line, "#{=/50/…:@atelier_title}") {
+			t.Errorf("status-left = %q, want the title truncated", line)
+		}
+		if !strings.Contains(line, "#{@atelier_agent}") || !strings.Contains(line, "Command Line") {
+			t.Errorf("status-left = %q, want the agent's name and the shell's", line)
+		}
+		return
+	}
+	t.Error("no status-left")
+}
+
 // Sourcing the fragment is what records its version in the server.
 func TestFragmentRecordsItsVersion(t *testing.T) {
 	frag, version := bindingsFragment()

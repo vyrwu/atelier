@@ -283,9 +283,10 @@ set -g status-style "bg=colour236,fg=colour252"
 # window-context marker (grey) so you can tell the agent from a shell, working
 # from idle: the agent's own name (@atelier_agent, set when atelier starts it;
 # "Agent" on a session from before there was a choice). @atelier_status is
-# pushed by the lifecycle hooks (event-driven, no poll).
+# pushed by the lifecycle hooks (event-driven, no poll). The title is cut to 50
+# cells, so a long one can't push the window's name past status-left-length.
 # Only fg is ever changed (never bg), so the subtle grey bar stays intact.
-set -g status-left " #[fg=colour110,bold]atelier#[nobold] #[fg=colour252]#{@atelier_status}#{@atelier_title}#[fg=colour245] · #{?#{==:#{window_name},claude},#{?#{@atelier_agent},#{@atelier_agent},Agent},Command Line}#[fg=colour252] "
+set -g status-left " #[fg=colour110,bold]atelier#[nobold] #[fg=colour252]#{@atelier_status}#{=/50/…:@atelier_title}#[fg=colour245] · #{?#{==:#{window_name},claude},#{?#{@atelier_agent},#{@atelier_agent},Agent},Command Line}#[fg=colour252] "
 # While a background action runs, an activity spinner (@atelier_spin) takes the
 # attention slot; otherwise the attention badge (@atelier_attention, pushed by
 # the hooks — event-driven, no polling) shows.
