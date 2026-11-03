@@ -20,6 +20,7 @@ import (
 // config. It contains only quota metadata, never credentials or conversations.
 type Usage struct {
 	Observed time.Time     `json:"observed"`
+	Source   string        `json:"source,omitempty"`
 	Buckets  []UsageBucket `json:"buckets"`
 }
 
@@ -95,7 +96,21 @@ func CaptureClaudeUsage(data []byte, now time.Time) error {
 		return err
 	}
 	defer unlock()
-	return saveUsage(Claude, Usage{Observed: now, Buckets: []UsageBucket{b}})
+	cached := LoadUsage(Claude)
+	// /usage is an account-wide reading. A session may be replaying headers
+	// from its last response, so it must not replace a fresh native reading.
+	if cached.Source == "native" {
+		return nil
+	}
+	if len(cached.Buckets) > 0 {
+		if b.Primary == nil {
+			b.Primary = cached.Buckets[0].Primary
+		}
+		if b.Secondary == nil {
+			b.Secondary = cached.Buckets[0].Secondary
+		}
+	}
+	return saveUsage(Claude, Usage{Observed: now, Source: "statusline", Buckets: []UsageBucket{b}})
 }
 
 // decodeCodexUsage accepts both the current multi-bucket response and the older
@@ -130,9 +145,9 @@ func decodeCodexUsage(data []byte, now time.Time) (Usage, error) {
 
 const usageDim = "#[fg=colour245,nobold]"
 
-// UsageStatus uses remaining percentages, coloured by the amount spent. Claude
-// is always '~' (last reported by a session); Codex is '~' after two minutes
-// without a successful metadata fetch. Expired data never implies 100% left.
+// UsageStatus uses remaining percentages, coloured by the amount spent.
+// Session-reported readings and metadata older than two minutes are '~'.
+// Expired data never implies 100% left.
 func UsageStatus(claude, codex Usage, now time.Time) string {
 	return renderUsage(Claude, claude, now) + usageDim + " · " + renderUsage(Codex, codex, now) + usageDim + " left"
 }
@@ -144,12 +159,25 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 	}
 	text := fmt.Sprintf("#[fg=colour%d]%s", color, glyph) + usageDim
 	if len(u.Buckets) == 0 {
+		if k == Claude {
+			return text + " 5h — 7d —"
+		}
 		return text + " —"
 	}
-	if k == Claude || now.Sub(u.Observed) > 2*time.Minute {
+	if (k == Claude && u.Source != "native") || now.Sub(u.Observed) > 2*time.Minute {
 		text += "~"
 	}
 	for _, b := range u.Buckets {
+		// Keep the two labelled Claude slots even when one field is omitted.
+		// Hiding the slot made a partial response look like a complete balance.
+		if k == Claude {
+			if b.Primary == nil {
+				b.Primary = &UsageWindow{Minutes: 300}
+			}
+			if b.Secondary == nil {
+				b.Secondary = &UsageWindow{Minutes: 10080}
+			}
+		}
 		if len(u.Buckets) > 1 {
 			name := b.Name
 			if name == "" {

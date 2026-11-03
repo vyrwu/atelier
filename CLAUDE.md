@@ -40,14 +40,18 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   `-c` (without one it can attach to an app-server daemon lacking the space's
   env). Each agent's hooks are guarded on `$ATELIER_AGENT`.
 - Allowances: `atelier usage` is tmux's asynchronous status job. It renders
-  cached account quotas immediately, then asks `codex app-server` for metadata
-  at most once a minute (shared file lock; no threads or model calls). Claude
-  spaces use project-local `statusLine` settings to capture native JSON with
+  cached account quotas immediately, then refreshes both agents in parallel
+  at most once a minute each (shared file locks; no model calls). Codex uses
+  `account/rateLimits/read`; Claude uses native `claude -p /usage`, validating
+  `local_command=usage` and zero turns/cost. Reset dates are parsed in UTC;
+  unsupported output fails closed. Claude spaces also use local `statusLine`
+  settings as a fallback to capture native JSON with
   `atelier usage claude`, chaining any existing custom command without editing
   global settings. Updating bindings backfills these settings so existing
   Claude sessions hot-reload the collector too. Cache files under
   `CacheDir()/usage/` hold quota metadata
-  only, partitioned by agent config directory. `~` means last observed; an
+  only, partitioned by agent config directory. Native account readings take
+  precedence over session headers. `~` means last observed or stale; an
   expired window is unknown. Percentage remaining uses green/amber/red based
   on spent quota; the icon retains its brand colour.
 - Lifecycle: create → **active**; `M-d` delete → Trash (kill processes, keep on

@@ -13,11 +13,11 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 )
 
-// RefreshCodexUsage runs off tmux's asynchronous status job, at most once per
-// minute across all attached clients. This fetches account metadata only: no
-// thread, model call, MCP server, or agent hook is started.
-func RefreshCodexUsage() error {
-	path := usagePath(Codex)
+// RefreshUsage fetches account metadata at most once per minute per agent
+// across all attached clients. Neither provider needs a model call or a live
+// interactive session, so both balances stay current regardless of focus.
+func RefreshUsage(k Kind) error {
+	path := usagePath(k)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -33,11 +33,23 @@ func RefreshCodexUsage() error {
 	if err := os.WriteFile(attempt, nil, 0o600); err != nil {
 		return err
 	}
-	u, err := readCodexUsage()
+	var u Usage
+	if k == Claude {
+		u, err = readClaudeUsage()
+	} else {
+		u, err = readCodexUsage()
+	}
 	if err != nil {
 		return err // retain the previous observation, visibly marked stale
 	}
-	return saveUsage(Codex, u)
+	// Serialize with status-line capture, which must re-check whether a fresh
+	// native reading won the race before writing session headers over it.
+	unlockCache, err := lockConfig(path)
+	if err != nil {
+		return err
+	}
+	defer unlockCache()
+	return saveUsage(k, u)
 }
 
 func readCodexUsage() (Usage, error) {

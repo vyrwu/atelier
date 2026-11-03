@@ -35,6 +35,46 @@ func TestCaptureClaudeUsage(t *testing.T) {
 	}
 }
 
+func TestClaudePartialCaptureKeepsBothWindows(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	now := time.Now()
+	first := []byte(`{"rate_limits":{"five_hour":{"used_percentage":25,"resets_at":2000000000},"seven_day":{"used_percentage":85,"resets_at":2000000001}}}`)
+	partial := []byte(`{"rate_limits":{"seven_day":{"used_percentage":90,"resets_at":2000000001}}}`)
+	if err := CaptureClaudeUsage(first, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := CaptureClaudeUsage(partial, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	u := LoadUsage(Claude)
+	if u.Buckets[0].Primary == nil || *u.Buckets[0].Primary.Used != 25 || *u.Buckets[0].Secondary.Used != 90 {
+		t.Fatalf("partial response erased another window: %+v", u)
+	}
+	// A stale session must not overwrite the account command's newer reading,
+	// even if native refresh is temporarily failing.
+	u.Source = "native"
+	full := 100.0
+	u.Buckets[0].Secondary.Used = &full
+	if err := saveUsage(Claude, u); err != nil {
+		t.Fatal(err)
+	}
+	if err := CaptureClaudeUsage(partial, now.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadUsage(Claude); *got.Buckets[0].Secondary.Used != 100 || got.Source != "native" {
+		t.Error("stale session headers replaced the native account reading")
+	}
+}
+
+func TestClaudeMissingWindowIsVisible(t *testing.T) {
+	used := 85.0
+	u := Usage{Observed: time.Now(), Buckets: []UsageBucket{{Secondary: &UsageWindow{Used: &used, Minutes: 10080, Reset: 2000000000}}}}
+	got := renderUsage(Claude, u, time.Now())
+	if !strings.Contains(got, "5h —") || !strings.Contains(got, "7d ") {
+		t.Errorf("missing window disappeared: %s", got)
+	}
+}
+
 func TestDecodeCodexUsage(t *testing.T) {
 	now := time.Now()
 	for _, data := range []string{

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vyrwu/atelier/internal/agent"
@@ -16,7 +17,7 @@ import (
 
 // usage is the asynchronous tmux status job, or Claude's status-line capture.
 // Rendering never waits on the network: tmux sees the cache immediately, and a
-// fresh Codex reading replaces it when the metadata fetch finishes.
+// fresh readings replace it when the metadata fetches finish.
 func usage(args []string) error {
 	if arg(args, 0) == "claude" {
 		data, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20))
@@ -40,7 +41,11 @@ func usage(args []string) error {
 		fmt.Println(agent.UsageStatus(agent.LoadUsage(agent.Claude), agent.LoadUsage(agent.Codex), time.Now()))
 	}
 	printUsage()
-	_ = agent.RefreshCodexUsage()
+	var refresh sync.WaitGroup
+	for _, k := range []agent.Kind{agent.Claude, agent.Codex} {
+		refresh.Go(func() { _ = agent.RefreshUsage(k) })
+	}
+	refresh.Wait()
 	printUsage()
 	return nil
 }

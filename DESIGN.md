@@ -294,11 +294,12 @@ predictable failure mode. They are enforced in review.
 - **State lives in one JSON file, never in tmux**, and it is a cache and an
   index. Don't store what can be derived (NFR-R2).
 - **Prefer events, and there is no daemon.** GitHub can't push to atelier, so
-  an open pull request view re-queries once a minute. Codex account allowances
-  are also fetched at most once a minute, through an asynchronous tmux status
+  an open pull request view re-queries once a minute. Agent account allowances
+  are also fetched at most once a minute each, through an asynchronous tmux status
   job while a status line is visible. Neither fetch blocks rendering or agent
-  startup. Claude's allowances arrive through its native status-line payload;
-  cached and expired observations are marked explicitly.
+  startup. Current Claude Code has a non-interactive native `/usage` command;
+  session status-line payloads are a fallback for versions without it. Cached
+  and expired observations are marked explicitly.
 - **No plugin system, ever.**
 - **Delete dead code** rather than keeping it around.
 - **A feature ships only after it has been wanted three separate times.** Open
