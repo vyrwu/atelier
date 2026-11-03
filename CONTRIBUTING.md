@@ -69,7 +69,7 @@ Give it the same format.
 
 | Path | |
 |---|---|
-| `cmd/atelier` | the one binary: `up`, `open`, `home`, `create`, `swap`, `handoff`, `win`, `hook`, `mcp`, `install`, `version` |
+| `cmd/atelier` | the one binary: `up`, `open`, `home`, `create`, `swap`, `handoff`, `win`, `hook`, `usage`, `mcp`, `install`, `version` |
 | `internal/core` | domain types, the state file, config, paths |
 | `internal/tmux` | the tmux wrapper (dedicated socket) |
 | `internal/git` | worktree derivation and git queries |

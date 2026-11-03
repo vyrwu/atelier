@@ -21,7 +21,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
 - `internal/ui` — the Bubble Tea overlay + the home splash (the only UI)
 - `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
-  `handoff` / `win` / `hook` / `mcp` / `install` / `version`
+  `handoff` / `win` / `hook` / `usage` / `mcp` / `install` / `version`
 
 ## Model & bindings
 

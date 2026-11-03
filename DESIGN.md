@@ -267,7 +267,7 @@ trusted.
 | Interface | Purpose | Consumers |
 |---|---|---|
 | **UI** | Everything the user sees and does | The user |
-| **CLI** | `hook`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, the agents (MCP) |
+| **CLI** | `hook`, `usage`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, the agents (MCP) |
 | **MCP** | `create_worktree`, `create_pr`, `register_pr` | The agent |
 | **tmux fragment** | Bindings and options, generated and sourced into atelier's own server | atelier itself |
 
@@ -371,6 +371,7 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
     Nothing waits on a model: an earlier summary step cost every swap a model
     call, and the incoming agent reads the export itself. It resumes its own
     earlier conversation in the workspace, so swapping back and forth never
-    piles up new ones. Codex runs with its sandbox
+    piles up new ones. Choosing the current harness in the confirmation instead
+    deliberately starts a fresh conversation seeded by the export. Codex runs with its sandbox
     and approval prompts off: a worktree's git data lives in its source
     repository, outside the workspace, so the sandbox would stop every commit.
