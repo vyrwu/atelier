@@ -195,8 +195,10 @@ func handoffNote(ws core.Workspace, from, to agent.Kind, at time.Time) (string, 
 		fmt.Printf("  %s left no conversation to hand over.\n", from.Label())
 		note := head + " It left no new conversation to hand over."
 		dir := filepath.Join(ws.Root(), ".atelier", "handoff")
-		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+		if err := protectHandoffDir(dir); err == nil {
 			note += " Earlier handoffs are in " + dir + "; read them before continuing."
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("protect earlier handoffs: %w", err)
 		}
 		return note + " The task: " + ws.Intent, nil
 	}
@@ -216,14 +218,7 @@ func writeHandoff(path, text string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	fi, err := os.Lstat(dir)
-	if err != nil {
-		return err
-	}
-	if !fi.IsDir() {
-		return fmt.Errorf("handoff directory is not a directory: %s", dir)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := protectHandoffDir(dir); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -236,6 +231,17 @@ func writeHandoff(path, text string) error {
 		return err
 	}
 	return closeErr
+}
+
+func protectHandoffDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("handoff directory is not a directory: %s", dir)
+	}
+	return os.Chmod(dir, 0o700)
 }
 
 // spaceName is how a space is named to the operator: its title, or its slug.

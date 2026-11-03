@@ -49,6 +49,17 @@ func TestLatestClaudeSession(t *testing.T) {
 	if id, _ := latestClaudeSession(projects, root, created.Add(15*time.Minute)); id != "" {
 		t.Errorf("latest = %q, want none newer than the space", id)
 	}
+	// The project directory itself may live on another volume via a symlink.
+	target := filepath.Join(t.TempDir(), "transcripts")
+	if err := os.Rename(dir, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, dir); err != nil {
+		t.Fatal(err)
+	}
+	if id, path := latestClaudeSession(projects, root, created); id != "want" || path != filepath.Join(dir, "want.jsonl") {
+		t.Errorf("symlinked latest = %q %q, want the main interactive session", id, path)
+	}
 }
 
 // Codex keeps every session in one tree; a space's is the newest interactive
@@ -72,6 +83,13 @@ func TestLatestCodexSession(t *testing.T) {
 	}
 	if id, _ := latestCodexSession(sessions, "/s/none", created); id != "" {
 		t.Errorf("latest = %q, want none", id)
+	}
+	linked := filepath.Join(t.TempDir(), "sessions")
+	if err := os.Symlink(sessions, linked); err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := latestCodexSession(linked, "/s/otter", created); id != "want" {
+		t.Errorf("symlinked latest = %q, want the existing interactive session", id)
 	}
 }
 

@@ -129,9 +129,15 @@ func TestHandoffNoteExportsOrFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(transcriptDir, "session.jsonl"), []byte(record), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(handoffDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	note, err = handoffNote(ws, agent.Claude, agent.Codex, time.Now())
 	if err != nil || !strings.Contains(note, handoffDir) || !strings.Contains(note, ws.Intent) {
 		t.Fatalf("consecutive swap lost earlier handoffs: %q, %v", note, err)
+	}
+	if fi, err := os.Stat(handoffDir); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("reused handoff directory must be private: %v, %v", fi, err)
 	}
 	// A non-directory .atelier blocks a save without relying on permissions
 	// (CI may run as root).

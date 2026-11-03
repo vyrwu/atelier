@@ -46,12 +46,21 @@ func newestFirst(dir string, since time.Time, keep func(name string) bool) []str
 		mod  time.Time
 	}
 	var files []file
-	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	walkRoot, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil
+	}
+	_ = filepath.WalkDir(walkRoot, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !keep(d.Name()) {
 			return nil
 		}
 		if fi, err := d.Info(); err == nil && !fi.ModTime().Before(since) {
-			files = append(files, file{p, fi.ModTime()})
+			// Preserve the caller's path spelling: Claude uses its parent to
+			// distinguish the main conversation from subagent transcripts.
+			rel, err := filepath.Rel(walkRoot, p)
+			if err == nil {
+				files = append(files, file{filepath.Join(dir, rel), fi.ModTime()})
+			}
 		}
 		return nil
 	})

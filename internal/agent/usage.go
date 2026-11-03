@@ -257,6 +257,7 @@ func usageDuration(minutes int) string {
 }
 
 const usageCaptureMark = "# atelier usage\n"
+const usageInheritedMark = usageCaptureMark + "# inherited\n"
 
 // InstallClaudeUsage captures native status-line data through project-local
 // settings. Claude hot-reloads these even in sessions that predate this build,
@@ -277,6 +278,7 @@ func InstallClaudeUsage(root string) error {
 	defer unlock()
 	local, status := map[string]any{}, map[string]any{}
 	var previous []byte
+	localStatus := false
 	for _, p := range []string{settingsPath(), filepath.Join(root, ".claude", "settings.json"), path} {
 		data, err := os.ReadFile(p)
 		if os.IsNotExist(err) {
@@ -289,27 +291,39 @@ func InstallClaudeUsage(root string) error {
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return err // never overwrite invalid user settings
 		}
-		if v, ok := cfg["statusLine"]; ok {
-			status = map[string]any{}
-			if fields, ok := v.(map[string]any); ok {
-				status = fields
-			}
-		}
 		if p == path {
 			local, previous = cfg, data
 		}
+		if v, ok := cfg["statusLine"]; ok {
+			fields, _ := v.(map[string]any)
+			if fields == nil {
+				fields = map[string]any{}
+			}
+			if p == path {
+				command, _ := fields["command"].(string)
+				if strings.HasPrefix(command, usageCaptureMark) {
+					original, err := unwrapUsageCommand(command)
+					if err != nil {
+						return err
+					}
+					if strings.HasPrefix(command, usageInheritedMark) || original == "" {
+						continue // re-read the current global/project status command
+					}
+					// Older wrappers did not record provenance. Preserve their
+					// nonempty command as a local override rather than lose it.
+					fields["command"] = original
+				}
+				localStatus = true
+			}
+			status = fields
+		}
 	}
 	original, _ := status["command"].(string)
-	if strings.HasPrefix(original, usageCaptureMark) {
-		// Only the final (base64) argument is our saved original command.
-		fields := strings.Fields(original)
-		decoded, err := base64.StdEncoding.DecodeString(strings.Trim(fields[len(fields)-1], "'"))
-		if err != nil {
-			return err
-		}
-		original = string(decoded)
+	mark := usageInheritedMark
+	if localStatus {
+		mark = usageCaptureMark
 	}
-	capture := usageCaptureMark + "env "
+	capture := mark + "env "
 	// Pin the shared cache even when a pre-existing Claude process inherited a
 	// different XDG environment from the status job or a dev instance.
 	cacheHome := filepath.Dir(core.CacheDir())
@@ -326,4 +340,11 @@ func InstallClaudeUsage(root string) error {
 		return err
 	}
 	return writeConfig(path, out, 0o600)
+}
+
+func unwrapUsageCommand(command string) (string, error) {
+	// Only the final (base64) argument is our saved original command.
+	fields := strings.Fields(command)
+	decoded, err := base64.StdEncoding.DecodeString(strings.Trim(fields[len(fields)-1], "'"))
+	return string(decoded), err
 }

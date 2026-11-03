@@ -278,7 +278,10 @@ Atelier does not read subscription credentials.
 
 If Claude's non-interactive `/usage` is unavailable, its native status-line
 data is a fallback, marked `~` as last observed. Space-local capture settings
-preserve existing custom status-line output and your global settings. A partial
+preserve existing custom status-line output and your global settings. Inherited
+commands follow later global or project changes; explicit local commands stay
+local. Wrappers from earlier development builds without origin metadata keep
+their saved nonempty command as a local override. A partial
 capture keeps the other window. Applicable native account windows take
 precedence; if native refresh is unavailable, a session capture can restore an
 expired window with a newer reset. Metadata older than two minutes is also

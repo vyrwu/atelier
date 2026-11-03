@@ -204,6 +204,31 @@ func TestInstallClaudeUsagePreservesSettings(t *testing.T) {
 	if string(got) != string(data) || !json.Valid(got) {
 		t.Error("InstallClaudeUsage changed global settings")
 	}
+	// Generated local wrappers must keep following inherited settings, while
+	// commands explicitly authored in settings.local.json remain local.
+	for _, tc := range []struct{ path, command, want string }{
+		{path, "updated-global", "updated-global"},
+		{filepath.Join(root, ".claude", "settings.json"), "project-status", "project-status"},
+		{localPath, "local-status", "local-status"},
+		{filepath.Join(root, ".claude", "settings.json"), "new-project-status", "local-status"},
+	} {
+		data := fmt.Sprintf(`{"statusLine":{"type":"command","command":%q}}`, tc.command)
+		if err := os.WriteFile(tc.path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := InstallClaudeUsage(root); err != nil {
+			t.Fatal(err)
+		}
+		local, _ := os.ReadFile(localPath)
+		if err := json.Unmarshal(local, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		fields := strings.Fields(cfg.Status.Command)
+		original, err := base64.StdEncoding.DecodeString(strings.Trim(fields[len(fields)-1], "'"))
+		if err != nil || string(original) != tc.want {
+			t.Fatalf("wrapped status = %q, %v, want %q", original, err, tc.want)
+		}
+	}
 }
 
 func TestInstallClaudeUsageWithoutCustomStatus(t *testing.T) {
@@ -214,5 +239,15 @@ func TestInstallClaudeUsageWithoutCustomStatus(t *testing.T) {
 		if err := InstallClaudeUsage(root); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := os.WriteFile(settingsPath(), []byte(`{"statusLine":{"type":"command","command":"configured-later"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallClaudeUsage(root); err != nil {
+		t.Fatal(err)
+	}
+	local, _ := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	if !strings.Contains(string(local), base64.StdEncoding.EncodeToString([]byte("configured-later"))) {
+		t.Error("a status command configured after capture installation was ignored")
 	}
 }

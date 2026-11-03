@@ -450,6 +450,10 @@ func createWorkspace(args []string) error {
 	if a := flagVal(args, "--agent"); a != "" {
 		k = agent.Of(a)
 	}
+	if _, err := exec.LookPath(k.Bin()); err != nil {
+		_ = tmux.Flash(failMark+k.Bin()+" is not installed", 5)
+		return fmt.Errorf("%s is not installed", k.Bin())
+	}
 	// Reserve an instant, unique referential name — no model call on the hot path.
 	w, err := core.AddUniqueWorkspace(core.Workspace{
 		Title: deterministicTitle(intent), Intent: intent, Created: time.Now(), Agent: string(k),
