@@ -120,6 +120,9 @@ func CaptureClaudeUsage(data []byte, now time.Time) error {
 		if old != nil && ((old.Native && old.Reset > now.Unix()) || incoming.Reset < old.Reset || (old.Native && incoming.Reset == old.Reset)) {
 			return old, false
 		}
+		if old != nil && incoming.Reset == old.Reset && old.Used != nil && *incoming.Used < *old.Used {
+			return old, false // another session can replay an older same-window header
+		}
 		return incoming, true
 	}
 	var primaryChanged, secondaryChanged bool

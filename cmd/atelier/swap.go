@@ -193,7 +193,12 @@ func handoffNote(ws core.Workspace, from, to agent.Kind, at time.Time) (string, 
 	}
 	if text == "" {
 		fmt.Printf("  %s left no conversation to hand over.\n", from.Label())
-		return head + " It left no conversation to hand over. The task: " + ws.Intent, nil
+		note := head + " It left no new conversation to hand over."
+		dir := filepath.Join(ws.Root(), ".atelier", "handoff")
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			note += " Earlier handoffs are in " + dir + "; read them before continuing."
+		}
+		return note + " The task: " + ws.Intent, nil
 	}
 	dir := filepath.Join(ws.Root(), ".atelier", "handoff")
 	export := filepath.Join(dir, at.Format("2006-01-02T15-04-05.000000000")+"-"+string(from)+".md")

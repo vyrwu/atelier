@@ -123,6 +123,16 @@ func TestHandoffNoteExportsOrFails(t *testing.T) {
 	if !strings.Contains(string(export), "fix the new regression") || !strings.Contains(note, files[0]) {
 		t.Errorf("handoff lost the conversation: %s / %s", note, export)
 	}
+	// A second swap before any agent reply has only the injected handoff prompt
+	// to export. It must retain the pointer to the first saved conversation.
+	record = fmt.Sprintf(`{"type":"user","entrypoint":"cli","cwd":%q,"timestamp":%q,"message":{"content":"[atelier handoff] previous context"}}`, ws.Root(), time.Now().Format(time.RFC3339Nano))
+	if err := os.WriteFile(filepath.Join(transcriptDir, "session.jsonl"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	note, err = handoffNote(ws, agent.Claude, agent.Codex, time.Now())
+	if err != nil || !strings.Contains(note, handoffDir) || !strings.Contains(note, ws.Intent) {
+		t.Fatalf("consecutive swap lost earlier handoffs: %q, %v", note, err)
+	}
 	// A non-directory .atelier blocks a save without relying on permissions
 	// (CI may run as root).
 	ws.Slug = "blocked"

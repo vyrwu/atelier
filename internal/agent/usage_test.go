@@ -68,13 +68,13 @@ func TestClaudePartialCaptureKeepsBothWindows(t *testing.T) {
 	// After the native 5h window expires, a capture can restore that window
 	// while the still-applicable native weekly counter remains authoritative.
 	afterReset := time.Unix(2000000000, 0)
-	for _, spent := range []int{10, 20} {
-		capture := fmt.Sprintf(`{"rate_limits":{"five_hour":{"used_percentage":%d,"resets_at":2000018000},"seven_day":{"used_percentage":85,"resets_at":2000000001}}}`, spent)
+	for _, tc := range []struct{ spent, want int }{{10, 10}, {20, 20}, {5, 20}, {30, 30}} {
+		capture := fmt.Sprintf(`{"rate_limits":{"five_hour":{"used_percentage":%d,"resets_at":2000018000},"seven_day":{"used_percentage":85,"resets_at":2000000001}}}`, tc.spent)
 		if err := CaptureClaudeUsage([]byte(capture), afterReset); err != nil {
 			t.Fatal(err)
 		}
 		got := LoadUsage(Claude)
-		if *got.Buckets[0].Primary.Used != float64(spent) || *got.Buckets[0].Secondary.Used != 100 || got.Source != "statusline" {
+		if *got.Buckets[0].Primary.Used != float64(tc.want) || *got.Buckets[0].Secondary.Used != 100 || got.Source != "statusline" {
 			t.Fatalf("fallback did not preserve independent windows: %+v", got)
 		}
 	}
