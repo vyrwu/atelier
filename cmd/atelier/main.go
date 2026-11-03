@@ -104,6 +104,7 @@ func up() error {
 		return err
 	}
 	syncGitIdentity()        // pin the operator's git identity onto existing sessions
+	syncAgentNames()         // name each existing session's agent on its status line
 	agent.RefreshAttention() // seed the attention badge from any already-blocked sessions
 	// If we're already inside atelier's OWN server, re-attaching would attach
 	// it to itself — a hall-of-mirrors loop. No-op instead.
@@ -280,9 +281,11 @@ func bindingsBody() string {
 set -g status-style "bg=colour236,fg=colour252"
 # Brand (accent "atelier") + live status glyph + workspace name (white) ·
 # window-context marker (grey) so you can tell the agent from a shell, working
-# from idle. @atelier_status is pushed by the lifecycle hooks (event-driven, no poll).
+# from idle: the agent's own name (@atelier_agent, set when atelier starts it;
+# "Agent" on a session from before there was a choice). @atelier_status is
+# pushed by the lifecycle hooks (event-driven, no poll).
 # Only fg is ever changed (never bg), so the subtle grey bar stays intact.
-set -g status-left " #[fg=colour110,bold]atelier#[nobold] #[fg=colour252]#{@atelier_status}#{@atelier_title}#[fg=colour245] · #{?#{==:#{window_name},claude},Agent,Command Line}#[fg=colour252] "
+set -g status-left " #[fg=colour110,bold]atelier#[nobold] #[fg=colour252]#{@atelier_status}#{@atelier_title}#[fg=colour245] · #{?#{==:#{window_name},claude},#{?#{@atelier_agent},#{@atelier_agent},Agent},Command Line}#[fg=colour252] "
 # While a background action runs, an activity spinner (@atelier_spin) takes the
 # attention slot; otherwise the attention badge (@atelier_attention, pushed by
 # the hooks — event-driven, no polling) shows.
@@ -566,6 +569,16 @@ func syncGitIdentity() {
 	}
 	for _, w := range core.Load().Workspaces {
 		_ = tmux.SetSessionEnv(w.Session, "GIT_CONFIG_GLOBAL", gc)
+	}
+}
+
+// syncAgentNames sets the agent's name on every live workspace session's status
+// line, for sessions whose agent atelier started before it tracked one.
+func syncAgentNames() {
+	for _, w := range core.Load().Workspaces {
+		if tmux.HasSession(w.Session) {
+			_ = tmux.SetAgentName(w.Session, agent.Of(w.Agent).Label())
+		}
 	}
 }
 

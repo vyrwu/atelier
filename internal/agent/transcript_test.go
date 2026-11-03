@@ -97,7 +97,7 @@ func TestExportClaude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"## Operator\n\nfix the login bug", "## Claude\n\nLooking at auth.go.", "- ran `Bash` go test ./..."} {
+	for _, want := range []string{"## Operator\n\nfix the login bug", "## Claude Code\n\nLooking at auth.go.", "- ran `Bash` go test ./..."} {
 		if !strings.Contains(got, want) {
 			t.Errorf("export lacks %q:\n%s", want, got)
 		}

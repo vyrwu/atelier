@@ -77,11 +77,15 @@ func (m Model) renderTrashRow(r row, selected bool) string {
 		when = age(r.ws.RetiredAt)
 	}
 	when = trashTimeStyle.Render(padAge(when))
-	right := m.spaceCounts(r.ws) // right-aligned stats column (collapsed), like Spaces
+	// Right-aligned stats column (collapsed), then the agent's icon — restoring
+	// resumes that agent — like Spaces.
+	right := agentGlyph(agent.Of(r.ws.Agent))
+	if c := m.spaceCounts(r.ws); c != "" {
+		right = c + " " + right
+	}
 	w := m.rowWidth()
-	// Budget the name to match the Spaces view (the 4 is the when/glyph gap and
-	// the agent glyph with its space — restoring resumes that agent).
-	maxName := entryWidth(w - visibleWidth(bar) - visibleWidth(when) - 4 - visibleWidth(right) - 4)
+	// Budget the name to match the Spaces view (the 2 is the when/name gap).
+	maxName := entryWidth(w - visibleWidth(bar) - visibleWidth(when) - 2 - visibleWidth(right) - 4)
 	name := r.ws.Title
 	if name == "" {
 		name = r.ws.Slug
@@ -92,13 +96,7 @@ func (m Model) renderTrashRow(r row, selected bool) string {
 	} else {
 		name = textStyle.Render(name)
 	}
-	left := fmt.Sprintf("%s%s  %s %s", bar, when, dimStyle.Render(agentGlyph(agent.Of(r.ws.Agent))), name)
-	if right == "" {
-		if selected {
-			return highlightRow(left, w)
-		}
-		return left
-	}
+	left := fmt.Sprintf("%s%s  %s", bar, when, name)
 	pad := w - visibleWidth(left) - visibleWidth(right)
 	if pad < 2 {
 		pad = 2

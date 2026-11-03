@@ -50,6 +50,26 @@ func TestSplashCarriesTheKeymapAndDoctor(t *testing.T) {
 	}
 }
 
+// The agents have their own section above the keymap, named and versioned, and
+// the shared tools sit below it.
+func TestSplashShowsTheAgentsFirst(t *testing.T) {
+	out := splashText(splashModel{deps: []dep{
+		{name: "claude", ok: true, version: "2.1.311", agent: "claude"},
+		{name: "codex", ok: false, optional: true, agent: "codex"},
+		{name: "git", ok: true, version: "2.51"},
+	}})
+	agents, keys, tools := strings.Index(out, "Claude Code 2.1"), strings.Index(out, "M-n"), strings.Index(out, "git 2.51")
+	if agents < 0 || keys < 0 || tools < 0 {
+		t.Fatalf("splash lacks the agents, keymap, or tools:\n%s", out)
+	}
+	if agents > keys || keys > tools {
+		t.Errorf("want agents, then keymap, then tools:\n%s", out)
+	}
+	if !strings.Contains(out, "Codex not found") {
+		t.Errorf("missing agent not called out:\n%s", out)
+	}
+}
+
 // M-h is what brings you back here, so it has to be on the legend.
 func TestSplashDocumentsHome(t *testing.T) {
 	found := false

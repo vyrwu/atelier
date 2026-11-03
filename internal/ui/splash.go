@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/tmux"
 )
@@ -83,16 +84,18 @@ func (m splashModel) View() string {
 	logo := []string{logoStyle.Render(asciiLogo), "", dimStyle.Render(Version), ""}
 	name := []string{dimStyle.Render("atelier ") + textStyle.Render(Version), ""}
 	head := []string{dimStyle.Render("a workshop for parallel coding agents"), "", ""}
+	agents := []string{m.agentsView(), "", ""}
 	keys := []string{keysView(), "", ""}
 	deps := []string{m.depsView(), "", ""}
 	footer := []string{faintStyle.Render(plural(m.count, "workspace") + "  ·  q detach")}
 
+	// The agents come first, then the keymap, then the tools both agents share.
 	// On a short terminal the wordmark goes first, then the dependency check, so
 	// the keymap stays on screen instead of the top being cut off.
 	var block string
 	for _, parts := range [][][]string{
-		{logo, head, keys, deps, footer},
-		{name, head, keys, deps, footer},
+		{logo, head, agents, keys, deps, footer},
+		{name, head, agents, keys, deps, footer},
 		{name, head, keys, footer},
 		{keys[:1]},
 	} {
@@ -121,12 +124,45 @@ func keysView() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 }
 
-// depsView is the dependency check: what atelier needs on one line, the
-// optional viewers it hands PRs to on the next. A missing requirement is red, a
-// missing option only faint.
+// agentsView is the agents half of the dependency check: each agent's icon,
+// name, and version. The one new spaces start with is required, so it is red
+// when missing; the other is optional, and only faint.
+func (m splashModel) agentsView() string {
+	var parts []string
+	for _, d := range m.deps {
+		if d.agent == "" {
+			continue
+		}
+		var s string
+		switch {
+		case d.ok:
+			s = agentGlyph(d.agent) + " " + textStyle.Render(d.agent.Label())
+			if d.version != "" {
+				s += " " + dimStyle.Render(majorMinor(d.version))
+			}
+		case d.optional:
+			s = faintStyle.Render(d.agent.Label() + " not found")
+		default:
+			s = lipgloss.NewStyle().Foreground(cClosed).Render(iconCIFail + " " + d.agent.Label() + " not found")
+		}
+		parts = append(parts, s)
+	}
+	line := strings.Join(parts, "     ")
+	if visibleWidth(line) > m.w {
+		line = strings.Join(parts, "\n")
+	}
+	return lipgloss.JoinVertical(lipgloss.Center, faintStyle.Render("agents"), line)
+}
+
+// depsView is the rest of the dependency check, the tools both agents share:
+// what atelier needs on one line, the optional viewers it hands PRs to on the
+// next. A missing requirement is red, a missing option only faint.
 func (m splashModel) depsView() string {
 	var need, opt []string
 	for _, d := range m.deps {
+		if d.agent != "" {
+			continue
+		}
 		var s string
 		switch {
 		case d.ok:
@@ -145,7 +181,7 @@ func (m splashModel) depsView() string {
 			need = append(need, s)
 		}
 	}
-	var lines []string
+	lines := []string{faintStyle.Render("tools")}
 	for _, parts := range [][]string{need, opt} {
 		if line := strings.Join(parts, "   "); visibleWidth(line) <= m.w {
 			lines = append(lines, line)
@@ -171,12 +207,14 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
-// dep is one external dependency's health.
+// dep is one external dependency's health. agent is set when it is one of the
+// coding agents, which the splash shows apart from the tools.
 type dep struct {
 	name     string
 	ok       bool
 	version  string
 	optional bool
+	agent    agent.Kind
 }
 
 var versionRe = regexp.MustCompile(`\d+\.\d+(\.\d+)?`)
@@ -190,19 +228,20 @@ func checkDeps() []dep {
 		name     string
 		args     []string
 		optional bool
+		agent    agent.Kind
 	}{
-		{"git", []string{"--version"}, false},
-		{"gh", []string{"--version"}, false},
-		{"tmux", []string{"-V"}, false},
-		{"claude", []string{"--version"}, codex},
-		{"codex", []string{"--version"}, !codex},
-		{"diffnav", []string{"--version"}, true},
-		{"gh-enhance", []string{"--version"}, true},
+		{"claude", []string{"--version"}, codex, agent.Claude},
+		{"codex", []string{"--version"}, !codex, agent.Codex},
+		{"git", []string{"--version"}, false, ""},
+		{"gh", []string{"--version"}, false, ""},
+		{"tmux", []string{"-V"}, false, ""},
+		{"diffnav", []string{"--version"}, true, ""},
+		{"gh-enhance", []string{"--version"}, true, ""},
 	}
 	out := make([]dep, 0, len(probes))
 	for _, p := range probes {
 		if !found(p.name) {
-			out = append(out, dep{name: p.name, optional: p.optional})
+			out = append(out, dep{name: p.name, optional: p.optional, agent: p.agent})
 			continue
 		}
 		v := ""
@@ -214,7 +253,7 @@ func checkDeps() []dep {
 				v = pathVersion(p.name, real)
 			}
 		}
-		out = append(out, dep{name: p.name, ok: true, version: v, optional: p.optional})
+		out = append(out, dep{name: p.name, ok: true, version: v, optional: p.optional, agent: p.agent})
 	}
 	return out
 }

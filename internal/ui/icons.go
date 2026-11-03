@@ -33,20 +33,19 @@ const (
 	iconReviewPending  = "" // nf-oct-eye (U+F441)
 )
 
-// Agent glyphs mark which agent a space runs. Plain Unicode, not Nerd Font: the
-// brand icons need Nerd Fonts 3.5.1, newer than many installs. Claude's is the
-// mark it draws itself; Codex's echoes OpenAI's hexagonal knot.
+// Agent glyphs mark which agent a space runs: each brand's own icon, from the
+// Codicons block, which needs Nerd Fonts 3.5.0 or newer.
 const (
-	glyphClaude = "✻"
-	glyphCodex  = "⬡"
+	glyphClaude = "\uec82" // nf-cod-claude (U+EC82)
+	glyphCodex  = "\uec81" // nf-cod-openai (U+EC81)
 )
 
-// agentGlyph is the glyph for agent k.
+// agentGlyph is agent k's icon in its brand colour.
 func agentGlyph(k agent.Kind) string {
 	if k == agent.Codex {
-		return glyphCodex
+		return lipgloss.NewStyle().Foreground(cCodex).Render(glyphCodex)
 	}
-	return glyphClaude
+	return lipgloss.NewStyle().Foreground(cClaude).Render(glyphClaude)
 }
 
 // countBadge renders "N<icon>" in colour c, or "" when n<=0 (a zero count is

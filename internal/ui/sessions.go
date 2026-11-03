@@ -111,9 +111,10 @@ func (m Model) renderRow(r row, selected bool) string {
 	} else {
 		g = statusGlyph(m.status[r.ws.Session])
 	}
-	// Right block: PR/worktree counts (collapsed) then age, right-aligned so the
-	// stats form a clean column down the edge (like the PR view).
-	right := dimStyle.Render(ageCell(r.ws.Created))
+	// Right block: PR/worktree counts (collapsed), age, then the agent's icon,
+	// right-aligned so the stats form a clean column down the edge (like the PR
+	// view) and the agent stays out of the way of the title.
+	right := dimStyle.Render(ageCell(r.ws.Created)) + " " + agentGlyph(agent.Of(r.ws.Agent))
 	if c := m.spaceCounts(r.ws); c != "" {
 		right = c + " " + right
 	}
@@ -124,9 +125,8 @@ func (m Model) renderRow(r row, selected bool) string {
 		slug = "  " + dimStyle.Render(r.ws.Slug)
 	}
 	// Budget the title so the row fits on one line and the right block stays put.
-	// The 4 is the status and agent glyphs, each with the space after it.
 	w := m.rowWidth()
-	maxTitle := entryWidth(w - visibleWidth(bar) - 4 - visibleWidth(slug) - visibleWidth(right) - 4)
+	maxTitle := entryWidth(w - visibleWidth(bar) - 2 - visibleWidth(slug) - visibleWidth(right) - 4)
 	name := r.ws.Title
 	if name == "" {
 		name = r.ws.Slug
@@ -140,7 +140,7 @@ func (m Model) renderRow(r row, selected bool) string {
 	default:
 		name = textStyle.Render(name)
 	}
-	left := fmt.Sprintf("%s%s %s %s%s", bar, g, dimStyle.Render(agentGlyph(agent.Of(r.ws.Agent))), name, slug)
+	left := fmt.Sprintf("%s%s %s%s", bar, g, name, slug)
 	pad := w - visibleWidth(left) - visibleWidth(right)
 	if pad < 2 {
 		pad = 2

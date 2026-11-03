@@ -89,6 +89,7 @@ func handoff(slug, toName string) error {
 		return err
 	}
 	k := agent.Of(ws.Agent)
+	_ = tmux.SetAgentName(ws.Session, k.Label())
 	return become(k, k.ResumeCmd(agent.LatestSession(k, ws.Root(), ws.Created), ""))
 }
 

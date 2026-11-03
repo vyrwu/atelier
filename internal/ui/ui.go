@@ -584,6 +584,7 @@ func (m Model) switchTo(session string) (tea.Model, tea.Cmd) {
 	if ws := m.bySession(session); ws != nil {
 		_ = agent.EnsureAgent(*ws)
 		_ = tmux.SetTitle(session, ws.Title) // keep the status line correct (survives revive)
+		_ = tmux.SetAgentName(session, agent.Of(ws.Agent).Label())
 		// Entering a blocked workspace acknowledges it: clear the attention so the
 		// badge is "used up" the moment you land (the agent re-flags via its next
 		// Notification if it still needs you).

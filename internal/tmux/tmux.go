@@ -223,6 +223,13 @@ func SetTitle(session, title string) error {
 	return err
 }
 
+// SetAgentName stores the name of the agent a session runs as a session option
+// the status line renders (#{@atelier_agent}) when the agent's window is in view.
+func SetAgentName(session, name string) error {
+	_, err := Run("set-option", "-t", session, "@atelier_agent", EscapeText(name))
+	return err
+}
+
 // RefreshStatus forces attached clients to redraw their status line now (so a
 // title change shows immediately, not on the next status-interval).
 func RefreshStatus() error {

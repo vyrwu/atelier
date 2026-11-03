@@ -40,7 +40,7 @@ func (k Kind) Label() string {
 	if k == Codex {
 		return "Codex"
 	}
-	return "Claude"
+	return "Claude Code"
 }
 
 // Bin is the CLI that runs the agent.

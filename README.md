@@ -100,7 +100,7 @@ One binary, running on its own tmux server so it never touches yours.
 | git | worktrees and diffs |
 | [GitHub CLI](https://cli.github.com) (`gh`) | PR status and actions — run `gh auth login` first |
 | [Claude Code](https://claude.com/claude-code) (`claude`) and/or [Codex](https://developers.openai.com/codex) (`codex`) | the agents atelier drives — the one new spaces start with (`agent` in the config) at least |
-| A [Nerd Font](https://www.nerdfonts.com) | the PR and worktree views use GitHub's Octicon glyphs |
+| A [Nerd Font](https://www.nerdfonts.com) 3.5.0+ | the PR and worktree views use GitHub's Octicon glyphs, and the Spaces list the agents' icons |
 
 **Optional:** [diffnav](https://github.com/dlvhdr/diffnav) for a file tree beside
 PR diffs, or [delta](https://github.com/dandavison/delta) for highlighted diffs
@@ -238,7 +238,8 @@ your terminal
 gets a memorable handle (`spry-otter`) at once, and its agent gives it a
 descriptive title a moment later. Each space's `CLAUDE.md` and `AGENTS.md` link
 to one shared guide, so you can edit what every agent is told in one place. The
-Spaces list marks each space's agent: `✻` Claude Code, `⬡` Codex.
+Spaces list ends each row with its agent's icon: Claude's in orange, OpenAI's in
+blue.
 
 **Agent status.** atelier installs guarded hooks into Claude Code's global
 settings and Codex's `~/.codex/hooks.json`. They do nothing outside atelier, and
@@ -336,7 +337,8 @@ character rather than as Meta.
 | Alacritty | `option_as_alt = "Both"` |
 | WezTerm | works by default with the left Option key |
 
-**Icons show as boxes or blanks.** Set a Nerd Font as your terminal font.
+**Icons show as boxes or blanks.** Set a Nerd Font as your terminal font. The
+agents' icons need Nerd Fonts 3.5.0 or newer.
 
 **Colours look flat.** atelier passes 24-bit colour through when the terminal
 you start it from sets `COLORTERM=truecolor`. Check `echo $COLORTERM`, then detach

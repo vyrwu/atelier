@@ -44,17 +44,21 @@ func EnsureAgent(ws core.Workspace) error {
 // killing the session (and detaching whoever is in it with its last window).
 func RunAgent(ws core.Workspace, k Kind, cmd string) error {
 	env := Env(ws.Slug, k)
+	var err error
 	switch {
 	case !tmux.HasSession(ws.Session):
-		if err := tmux.NewSession(ws.Session, ws.Root(), env, cmd); err != nil {
-			return err
+		if err = tmux.NewSession(ws.Session, ws.Root(), env, cmd); err == nil {
+			err = tmux.RenameWindow(ws.Session, Window)
 		}
-		return tmux.RenameWindow(ws.Session, Window)
 	case !tmux.HasWindow(ws.Session, Window):
-		return tmux.NewWindowCmd(ws.Session, ws.Root(), Window, cmd, env)
+		err = tmux.NewWindowCmd(ws.Session, ws.Root(), Window, cmd, env)
 	default:
-		return tmux.RespawnWindow(ws.Session, Window, ws.Root(), cmd, env)
+		err = tmux.RespawnWindow(ws.Session, Window, ws.Root(), cmd, env)
 	}
+	if err != nil {
+		return err
+	}
+	return tmux.SetAgentName(ws.Session, k.Label())
 }
 
 // Env is what agent k's process needs from atelier: the space identity its hooks
