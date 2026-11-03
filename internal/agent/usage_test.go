@@ -98,13 +98,13 @@ func TestUsageStatusColorsAndExpiry(t *testing.T) {
 		spent float64
 		want  string
 	}{
-		{0, "#[fg=colour71]100%"},
-		{74, "#[fg=colour71]26%"},
-		{75, "#[fg=colour179]25%"},
-		{89, "#[fg=colour179]11%"},
-		{90, "#[fg=colour167]10%"},
-		{99.7, "#[fg=colour167]0%"},
-		{100, "#[fg=colour167]0%"},
+		{0, "#[fg=colour71]0%"},
+		{74, "#[fg=colour71]74%"},
+		{75, "#[fg=colour179]75%"},
+		{89, "#[fg=colour179]89%"},
+		{90, "#[fg=colour167]90%"},
+		{99.7, "#[fg=colour167]99%"},
+		{100, "#[fg=colour167]100%"},
 	} {
 		w := &UsageWindow{Used: &tc.spent, Minutes: 300, Reset: now.Add(time.Hour).Unix()}
 		u := Usage{Observed: now, Buckets: []UsageBucket{{Primary: w}}}

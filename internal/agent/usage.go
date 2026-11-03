@@ -145,11 +145,11 @@ func decodeCodexUsage(data []byte, now time.Time) (Usage, error) {
 
 const usageDim = "#[fg=colour245,nobold]"
 
-// UsageStatus uses remaining percentages, coloured by the amount spent.
+// UsageStatus shows percentages spent, coloured by usage level.
 // Session-reported readings and metadata older than two minutes are '~'.
-// Expired data never implies 100% left.
+// Expired data never implies an unused allowance.
 func UsageStatus(claude, codex Usage, now time.Time) string {
-	return renderUsage(Claude, claude, now) + usageDim + " · " + renderUsage(Codex, codex, now) + usageDim + " left"
+	return renderUsage(Claude, claude, now) + usageDim + " · " + renderUsage(Codex, codex, now) + usageDim + " spent"
 }
 
 func renderUsage(k Kind, u Usage, now time.Time) string {
@@ -215,10 +215,10 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 			if *w.Used >= 90 {
 				color = 167 // red
 			}
-			text += fmt.Sprintf("#[fg=colour%d]%d%%", color, int(math.Floor(100-*w.Used))) + usageDim
+			text += fmt.Sprintf("#[fg=colour%d]%d%%", color, int(math.Floor(*w.Used))) + usageDim
 			if *w.Used >= 90 {
 				mins := int(math.Ceil(time.Unix(w.Reset, 0).Sub(now).Minutes()))
-				text += "↻" + usageDuration(mins)
+				text += " ↻" + usageDuration(mins)
 			}
 		}
 	}

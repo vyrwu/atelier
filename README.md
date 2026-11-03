@@ -261,10 +261,11 @@ conversation with the same agent instead. A turn in progress is cut off, so
 swap at a pause.
 
 **Allowances at a glance.** The top status line shows both agents' icons and
-their remaining subscription allowance, with each reported window labelled
-(`5h`, `7d`). Icons keep their brand colours; percentages are green below 75%
-spent, amber at 75%, and red at 90%. Low allowances also show a reset countdown
-(`↻`). These are account limits shared across spaces, and across models when
+the percentage of their subscription allowance spent: 0% is unused, 100% is
+exhausted. Each reported window is labelled (`5h`, `7d`). Icons keep their
+brand colours; percentages are green below 75% spent, amber at 75%, and red at
+90%. Nearly exhausted windows also show a spaced reset countdown (`100% ↻10h`).
+These are account limits shared across spaces, and across models when
 the provider meters them together, not context-window percentages.
 
 Both agents' account metadata is refreshed at most once a minute while the
@@ -278,7 +279,7 @@ data is a fallback, marked `~` as last observed. Space-local capture settings
 preserve existing custom status-line output and your global settings. A partial
 capture keeps the other window, and session headers never overwrite a native
 account reading. Metadata older than two minutes is also marked `~`. Missing
-or expired windows remain labelled with `—`, never an assumed 100%. After
+or expired windows remain labelled with `—`, never an assumed 0%. After
 upgrading, open an Atelier popup to backfill capture for existing spaces.
 
 atelier runs Codex with its sandbox and approval prompts off

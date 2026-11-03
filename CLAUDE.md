@@ -52,7 +52,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   `CacheDir()/usage/` hold quota metadata
   only, partitioned by agent config directory. Native account readings take
   precedence over session headers. `~` means last observed or stale; an
-  expired window is unknown. Percentage remaining uses green/amber/red based
+  expired window is unknown. Percentage spent uses green/amber/red based
   on spent quota; the icon retains its brand colour.
 - Lifecycle: create → **active**; `M-d` delete → Trash (kill processes, keep on
   disk); Trash `↵` restore (resume); Trash `M-d` delete permanently (confirm).

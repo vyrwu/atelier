@@ -28,7 +28,7 @@ func TestDecodeClaudeNativeUsage(t *testing.T) {
 		t.Errorf("5h reset = %v", time.Unix(b.Primary.Reset, 0))
 	}
 	got := renderUsage(Claude, u, now)
-	for _, want := range []string{"5h #[fg=colour71]75%", "7d #[fg=colour167]0%"} {
+	for _, want := range []string{"5h #[fg=colour71]25%", "7d #[fg=colour167]100%"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("native usage display lacks %q: %s", want, got)
 		}

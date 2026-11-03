@@ -204,7 +204,7 @@ architectural risk.
 
 | Surface | Hosts | Lifetime | Why |
 |---|---|---|---|
-| **Status line** | Attention badge, workspace title and agent status, create spinner, both agents' remaining allowances | Visible everywhere | When you need to know which session wants you or which harness has quota, you are looking at an agent pane, not a picker. The signal must be ambient, and a background create has to report back somewhere. |
+| **Status line** | Attention badge, workspace title and agent status, create spinner, both agents' usage spent | Visible everywhere | When you need to know which session wants you or which harness has quota, you are looking at an agent pane, not a picker. The signal must be ambient, and a background create has to report back somewhere. |
 | **Home splash** | Keymap, version, dependency check | Persistent | Attaching lands on a real screen, not a bare shell, and `M-h` returns here from anywhere. |
 | **Overlay (popup)** | spaces · trash · new · pull requests · worktrees · confirm | Seconds | Peek and jump: an overlay is one transition, a window would be two. It runs fresh each open and captures the invoking client at once, so it never acts on a stale one. |
 | **Window** | The agent, shells, a PR's diff and checks | Hours | Survives detach, keeps scrollback and copy mode, and shows in tmux's own session list. |
