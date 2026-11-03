@@ -318,8 +318,9 @@ bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 # included. M-c is the workspace base shell. Both toast (no-op) when pressed off
 # a workspace, e.g. the splash.
 bind -n M-a run-shell "%[1]s win '#{session_name}' agent"
-# M-x hands the space to its other agent (Claude <-> Codex), behind a confirm.
-bind -n M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --swap"
+# M-x hands the space to its other agent (Claude <-> Codex), behind a confirm
+# whose popup is sized to the dialog (ui.swapDialogW x swapDialogH).
+bind -n M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 46 -h 9 -E "%[1]s open --swap"
 # A PR's two windows swap in place: M-e in its diff (pr-*) opens its checks,
 # M-d in its checks (ci-*) goes back to the diff. Anywhere else each key is
 # passed through untouched — Alt-d is delete-word in a shell and in Claude's input.

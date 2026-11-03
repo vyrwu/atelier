@@ -53,8 +53,8 @@ func TestSwapAsksFromASpacesRow(t *testing.T) {
 	if got.screen != scrConfirm || !got.confirmSwap {
 		t.Fatalf("M-x on a row: screen %v, confirmSwap %v; want the swap confirm", got.screen, got.confirmSwap)
 	}
-	if !strings.Contains(got.confirm, "from Codex to Claude") {
-		t.Errorf("confirm = %q, want it to name both agents", got.confirm)
+	if v := ansiRe.ReplaceAllString(got.View(), ""); !strings.Contains(v, "Swap to "+glyphClaude+" Claude Code?") {
+		t.Errorf("confirm = %q, want it to name the agent it swaps to", v)
 	}
 	next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyEsc})
 	if back := next.(Model); back.screen != scrActive || back.confirmSwap {

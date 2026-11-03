@@ -9,7 +9,6 @@
 package ui
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"sort"
@@ -496,6 +495,16 @@ func (m Model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return ""
 	}
+	if m.screen == scrConfirm && m.confirmSwap {
+		// Opened by M-x, the popup is sized to the dialog and is all of it;
+		// from a Spaces row, the dialog sits in the middle of the overlay.
+		if m.returnScreen == scrConfirm {
+			return m.swapDialog(m.w, m.h)
+		}
+		inner := lipgloss.Place(m.w-4, m.h-2, lipgloss.Center, lipgloss.Center,
+			m.swapDialog(min(m.w-4, swapDialogW), min(m.h-2, swapDialogH)))
+		return frameStyle.Width(m.w - 2).Height(m.h - 2).Render(inner)
+	}
 	var body string
 	switch m.screen {
 	case scrActive:
@@ -542,9 +551,6 @@ func (m Model) screenFooter() string {
 	case scrWorktrees:
 		return m.footer("shell")
 	case scrConfirm:
-		if m.confirmSwap {
-			return hintStyle.Render("y swap  ·  n cancel")
-		}
 		return hintStyle.Render("y delete  ·  n cancel")
 	}
 	return ""
@@ -631,19 +637,7 @@ func (m Model) beginCreate(intent string, switchIn bool) (tea.Model, tea.Cmd) {
 
 // askSwap puts up the confirm for handing w to its other agent.
 func (m *Model) askSwap(w *core.Workspace) {
-	from := agent.Of(w.Agent)
-	to := from.Other()
-	name := w.Title
-	if name == "" {
-		name = w.Slug
-	}
-	s := fmt.Sprintf("Swap %q from %s to %s?\n\n%s stops now, with any background tasks it started. %s summarises what %s did since it took over, then picks up from there — in its own earlier conversation here, if it had one.",
-		name, from.Label(), to.Label(), from.Label(), to.Label(), from.Label())
-	if m.status[w.Session] == core.StatusWorking {
-		s += "\n\n" + lipglossWarn(from.Label()+" is working — its turn is cut off.")
-	}
 	m.focusWS = w
-	m.confirm = s
 	m.confirmSwap = true
 	m.screen = scrConfirm
 }
