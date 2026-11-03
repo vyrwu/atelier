@@ -139,16 +139,3 @@ func TestExportCodex(t *testing.T) {
 		}
 	}
 }
-
-// What the summarizer gets keeps the task (the start) and where things stand
-// (the end) within its cap.
-func TestClip(t *testing.T) {
-	if Clip("short", 100) != "short" {
-		t.Error("clipped text under the cap")
-	}
-	text := "START\n" + strings.Repeat("middle line\n", 1000) + "END\n"
-	got := Clip(text, 1000)
-	if len(got) > 1100 || !strings.HasPrefix(got, "START") || !strings.HasSuffix(got, "END\n") {
-		t.Errorf("Clip kept %d bytes: %q…%q", len(got), got[:20], got[len(got)-20:])
-	}
-}

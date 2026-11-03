@@ -24,6 +24,7 @@ import (
 // leaving an unparseable file untouched. Best-effort: worst case is a one-time
 // prompt or an unregistered tool, never a corrupt file (atomic write).
 func PrepareProject(dir, slug string) error {
+	_ = InstallClaudeUsage(dir)
 	path := claudeConfigJSON()
 	unlock, err := lockConfig(path)
 	if err != nil {

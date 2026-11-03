@@ -343,19 +343,3 @@ func exportCodex(r io.Reader, since time.Time, w *exportWriter) error {
 		}
 	}
 }
-
-// Clip keeps text within n bytes for a summarizer, keeping its start (the task)
-// and as much of its end (where things stand) as fits, cut at line breaks.
-func Clip(text string, n int) string {
-	if len(text) <= n {
-		return text
-	}
-	head, tail := text[:n/5], text[len(text)-(n-n/5):]
-	if i := strings.LastIndexByte(head, '\n'); i > 0 {
-		head = head[:i]
-	}
-	if i := strings.IndexByte(tail, '\n'); i >= 0 {
-		tail = tail[i+1:]
-	}
-	return head + "\n\n[… the middle of the conversation is left out …]\n\n" + tail
-}

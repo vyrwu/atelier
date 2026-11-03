@@ -91,6 +91,7 @@ type Model struct {
 	spin         spinner.Model   // the one activity indicator, shared by the views
 	confirm      string          // the confirmation prompt
 	confirmSwap  bool            // the confirm is for a swap of focusWS, not a delete
+	swapTo       agent.Kind      // the agent the swap hands focusWS to (Tab toggles)
 	prPending    map[string]bool // PRs (repo#num) with a state change in flight
 
 	err  string
@@ -638,6 +639,7 @@ func (m Model) beginCreate(intent string, switchIn bool) (tea.Model, tea.Cmd) {
 // askSwap puts up the confirm for handing w to its other agent.
 func (m *Model) askSwap(w *core.Workspace) {
 	m.focusWS = w
+	m.swapTo = agent.Of(w.Agent).Other()
 	m.confirmSwap = true
 	m.screen = scrConfirm
 }

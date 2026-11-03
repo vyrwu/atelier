@@ -57,6 +57,7 @@ func TestDeterministicTitleCutsOnRunes(t *testing.T) {
 func TestRefreshBindingsFollowsTheServer(t *testing.T) {
 	cfg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("ATELIER_SOCKET", "atelier-test-no-server") // sourcing fails harmlessly
 	path := filepath.Join(cfg, "atelier", "atelier.tmux")
 	frag, version := bindingsFragment()

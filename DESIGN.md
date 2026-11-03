@@ -125,8 +125,8 @@ overlay's screens is a state change in one process: no spawn, no clear-screen,
 no visible reconstruction.
 
 **NFR-P5 — Zero cost when idle.** With no interaction and no agent activity,
-atelier uses no CPU: no timer, no tick, no polling loop. An open pull request
-view is the one exception (§5), and it stops when the view closes.
+atelier uses no CPU except for visible information that has no push source:
+an open pull request view and account allowances in the status line (§5).
 
 ### Reliability
 
@@ -204,7 +204,7 @@ architectural risk.
 
 | Surface | Hosts | Lifetime | Why |
 |---|---|---|---|
-| **Status line** | Attention badge, current workspace title and agent status, create spinner | Visible everywhere | When you need to know which session wants you, you are looking at an agent pane, not a picker. The signal must be ambient, and a background create has to report back somewhere. |
+| **Status line** | Attention badge, workspace title and agent status, create spinner, both agents' remaining allowances | Visible everywhere | When you need to know which session wants you or which harness has quota, you are looking at an agent pane, not a picker. The signal must be ambient, and a background create has to report back somewhere. |
 | **Home splash** | Keymap, version, dependency check | Persistent | Attaching lands on a real screen, not a bare shell, and `M-h` returns here from anywhere. |
 | **Overlay (popup)** | spaces · trash · new · pull requests · worktrees · confirm | Seconds | Peek and jump: an overlay is one transition, a window would be two. It runs fresh each open and captures the invoking client at once, so it never acts on a stale one. |
 | **Window** | The agent, shells, a PR's diff and checks | Hours | Survives detach, keeps scrollback and copy mode, and shows in tmux's own session list. |
@@ -293,10 +293,12 @@ predictable failure mode. They are enforced in review.
   process (NFR-P4).
 - **State lives in one JSON file, never in tmux**, and it is a cache and an
   index. Don't store what can be derived (NFR-R2).
-- **Nothing polls, and there is no daemon.** If something needs to know when a
-  thing changed, an event tells it. The one exception: GitHub can't push to
-  atelier, so an open pull request view re-queries once a minute. The popup is
-  the process, so closing it ends the poll.
+- **Prefer events, and there is no daemon.** GitHub can't push to atelier, so
+  an open pull request view re-queries once a minute. Codex account allowances
+  are also fetched at most once a minute, through an asynchronous tmux status
+  job while a status line is visible. Neither fetch blocks rendering or agent
+  startup. Claude's allowances arrive through its native status-line payload;
+  cached and expired observations are marked explicitly.
 - **No plugin system, ever.**
 - **Delete dead code** rather than keeping it around.
 - **A feature ships only after it has been wanted three separate times.** Open
@@ -315,8 +317,7 @@ Deferred deliberately. Each needs the three-times rule to return.
 - CI failure triage (atelier opens a PR's logs in gh-enhance; it does not read
   them)
 - Workspace rename, tagging, or grouping
-- Any summary or recap of what an agent did — except the handoff note one agent
-  writes for the other when a workspace swaps
+- Any summary or recap of what an agent did
 - Repository indexing, caching, or search
 - Concurrent agents in one workspace, a third agent, or multi-forge support
 - Recovery of **deleted** workspaces (retire/restore covers deactivated ones)
@@ -361,13 +362,14 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
 9. **Distribution.** A Homebrew cask that strips the quarantine attribute on
    install, so the un-notarized binary runs without a Gatekeeper prompt.
 10. **Swapping agents is a handoff, not a shared session.** Claude Code and
-    Codex can't continue each other's conversations, so `M-x` hands over a
-    summary. The swap replaces the agent with the handoff in the same window:
-    stopping the outgoing agent first is what makes its transcript final before
-    it is read, and the window keeps the session alive (killing a session's
-    last window would detach whoever is in it). The incoming agent writes the
-    summary, since the usual reason to swap is that the outgoing one is out of
-    quota, and it resumes its own earlier conversation in the workspace, so
-    swapping back and forth never piles up new ones. Codex runs with its sandbox
+    Codex can't continue each other's conversations, so `M-x` hands over the
+    outgoing one's, exported to a file. The swap replaces the agent with the
+    handoff in the same window: stopping the outgoing agent first is what makes
+    its transcript final before it is read, and the window keeps the session
+    alive (killing a session's last window would detach whoever is in it).
+    Nothing waits on a model: an earlier summary step cost every swap a model
+    call, and the incoming agent reads the export itself. It resumes its own
+    earlier conversation in the workspace, so swapping back and forth never
+    piles up new ones. Codex runs with its sandbox
     and approval prompts off: a worktree's git data lives in its source
     repository, outside the workspace, so the sandbox would stop every commit.

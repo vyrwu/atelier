@@ -17,8 +17,8 @@ type Config struct {
 	// Naming turns on async title generation by the space's agent; false →
 	// deterministic title from the intent text.
 	Naming bool `toml:"naming"`
-	// NamingModel is the model Claude generates titles and handoff summaries
-	// with (default "sonnet"; Haiku follows the "reply with ONLY…" instruction
+	// NamingModel is the model Claude generates titles with (default "sonnet";
+	// Haiku follows the "reply with ONLY…" instruction
 	// too loosely — it adds preamble/quotes that fail extraction and fall back
 	// to the raw prompt). Codex uses its own default model.
 	NamingModel string `toml:"naming_model"`

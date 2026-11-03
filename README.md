@@ -52,7 +52,7 @@ leaving the terminal.
 
 Each space runs [Claude Code](https://claude.com/claude-code) or
 [Codex](https://developers.openai.com/codex), and one key hands it to the other:
-when one runs out of quota, the other picks the work up from a summary of it,
+when one runs out of quota, the other picks the work up from its conversation,
 and swapping back resumes where the first left off.
 
 One binary, running on its own tmux server so it never touches yours.
@@ -79,9 +79,10 @@ One binary, running on its own tmux server so it never touches yours.
   freshly fetched default branch, and the worktree view shows how far each has
   drifted.
 - **Swap agents mid-task.** `M-x` hands a space from Claude Code to Codex or
-  back. The incoming agent gets the outgoing one's conversation and a summary
-  of it, and returns to its own earlier conversation in the space if it had one,
-  so swapping back and forth doesn't pile up new ones.
+  back, or to a fresh conversation with the same agent. The incoming agent
+  starts at once with the outgoing one's conversation, and returns to its own
+  earlier conversation in the space if it had one, so swapping back and forth
+  doesn't pile up new ones.
 - **Finish without losing anything.** Retire a space to clear it from your active
   list. Restore it later and the agent picks the conversation back up.
 - **Your name on the commits.** Agents commit under your git identity, not the
@@ -187,7 +188,7 @@ filter, then closes.
 | View | Key | Does |
 |---|---|---|
 | **Spaces** | `Enter` | open |
-| | `M-x` | swap the space's agent (asks first) |
+| | `M-x` | swap the space's agent (asks first; `Tab` there picks a fresh conversation with the same one) |
 | | `M-d` | retire to Trash |
 | **Trash** | `Enter` | restore, resuming the conversation |
 | | `M-d` | delete permanently (asks first) |
@@ -252,10 +253,30 @@ its limit reads as working until the status goes stale.
 **Swapping agents.** `M-x` replaces the space's agent with a handoff that runs
 in the same window: it writes the outgoing agent's conversation since it took
 over (your messages, its replies, and one line per tool it ran) to
-`.atelier/handoff/` in the space, has the incoming agent summarise it there,
-then becomes the incoming agent. That agent resumes its own latest conversation
-in the space, found from its transcripts on disk, or starts one, with the
-handoff as its next message. A turn in progress is cut off, so swap at a pause.
+`.atelier/handoff/` in the space, then becomes the incoming agent straight
+away; the status line reports it. That agent resumes its own latest
+conversation in the space, found from its transcripts on disk, or starts one,
+with the handoff as its next message. `Tab` in the confirm picks a fresh
+conversation with the same agent instead. A turn in progress is cut off, so
+swap at a pause.
+
+**Allowances at a glance.** The top status line shows both agents' icons and
+their remaining subscription allowance, with each reported window labelled
+(`5h`, `7d`). Icons keep their brand colours; percentages are green below 75%
+spent, amber at 75%, and red at 90%. Low allowances also show a reset countdown
+(`↻`). These are account limits shared across spaces, and across models when
+the provider meters them together, not context-window percentages.
+
+Claude's figures come from its native status-line data after its first response;
+`~` marks them as last observed. Existing custom Claude status-line commands
+keep their output. Capture is installed in each space's local Claude settings,
+which existing sessions reload; your global status-line setting is untouched.
+Codex's account metadata is refreshed at most once a minute while the status
+line is visible, including while Claude is active. Codex readings older than two
+minutes are marked `~`. Missing or expired windows show `—`, never an assumed
+100%. No model calls or API keys are needed. After upgrading, opening an Atelier
+popup installs capture for existing spaces too; no agent restart is required.
+
 atelier runs Codex with its sandbox and approval prompts off
 (`--dangerously-bypass-approvals-and-sandbox`): a worktree's git data lives in
 its source repository, outside the space, so the sandbox would stop every
@@ -298,7 +319,7 @@ root         = "~/ateliers"  # where spaces live
 socket       = "atelier"     # name of atelier's tmux socket
 agent        = "claude"      # the agent new spaces start with: "claude" or "codex"
 naming       = true          # let the agent title new spaces
-naming_model = "sonnet"      # Claude's model for titles and handoff summaries
+naming_model = "sonnet"      # the model Claude titles them with
 ```
 
 | Environment variable | |

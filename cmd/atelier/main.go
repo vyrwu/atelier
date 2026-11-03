@@ -63,6 +63,8 @@ func run(cmd string, args []string) error {
 		return winNav(arg(args, 0), arg(args, 1), arg(args, 2))
 	case "hook": // atelier hook <working|blocked|idle>
 		return hook(arg(args, 0))
+	case "usage": // tmux quota status job, or native Claude status-line input
+		return usage(args)
 	case "mcp":
 		return mcp.Serve()
 	case "install":
@@ -229,14 +231,21 @@ func self() string {
 
 // ensureBindings writes atelier's tmux fragment and sources it into its own
 // server. This is atelier's dedicated server, not the user's config (NFR-S4).
-func ensureBindings() error { return writeBindings(true) }
+func ensureBindings() error {
+	err := writeBindings(true)
+	syncUsageCapture()
+	return err
+}
 
 // refreshBindings re-syncs the bindings when the running server's differ from
 // this binary's, and does nothing when they don't. The popup and the window
 // keys call it, so a rebuilt or upgraded atelier corrects its own bindings the
 // first time it runs, instead of the old ones calling actions the new binary no
 // longer has until someone thinks to restart.
-func refreshBindings() { _ = writeBindings(false) }
+func refreshBindings() {
+	_ = writeBindings(false)
+	syncUsageCapture()
+}
 
 // liveBindings is the version of the bindings the running server last sourced,
 // read from the marker the fragment sets. The server's own record, not the file
@@ -276,6 +285,11 @@ func bindingsFragment() (frag, version string) {
 }
 
 func bindingsBody() string {
+	// Reserve the actual right-hand width and the window label before giving
+	// the title any space. In particular, usage must not cut "Claude Code" or
+	// "Command Line" in half on smaller terminals.
+	budget := "#{e|-:#{client_width},#{e|+:#{w:#{E:status-right}},32}}"
+	title := "#{?#{>:" + budget + ",50},#{=/50/…:@atelier_title},#{?#{>:" + budget + ",0},#{=/" + budget + "/…:@atelier_title},}}"
 	return fmt.Sprintf(`# atelier — generated bindings for its own tmux server
 %[2]sset -g status-position top
 set -g status-style "bg=colour236,fg=colour252"
@@ -283,15 +297,17 @@ set -g status-style "bg=colour236,fg=colour252"
 # window-context marker (grey) so you can tell the agent from a shell, working
 # from idle: the agent's own name (@atelier_agent, set when atelier starts it;
 # "Agent" on a session from before there was a choice). @atelier_status is
-# pushed by the lifecycle hooks (event-driven, no poll). The title is cut to 50
-# cells, so a long one can't push the window's name past status-left-length.
+# pushed by the lifecycle hooks (event-driven, no poll). The title gets at most
+# 50 cells, after reserving the window name and the quota display on the right.
 # Only fg is ever changed (never bg), so the subtle grey bar stays intact.
-set -g status-left " #[fg=colour110,bold]atelier#[nobold] #[fg=colour252]#{@atelier_status}#{=/50/…:@atelier_title}#[fg=colour245] · #{?#{==:#{window_name},claude},#{?#{@atelier_agent},#{@atelier_agent},Agent},Command Line}#[fg=colour252] "
+set -g status-left " #[fg=colour110,bold]atelier#[nobold] #[fg=colour252]#{@atelier_status}%[4]s#[fg=colour245] · #{?#{==:#{window_name},claude},#{?#{@atelier_agent},#{@atelier_agent},Agent},Command Line}#[fg=colour252] "
 # While a background action runs, an activity spinner (@atelier_spin) takes the
 # attention slot; otherwise the attention badge (@atelier_attention, pushed by
 # the hooks — event-driven, no polling) shows.
-set -g status-right "#{?#{@atelier_spin},#{@atelier_spin},#{@atelier_attention}}  %%H:%%M "
+set -g status-right "#{?#{@atelier_spin},#{@atelier_spin},#{@atelier_attention}}  #(%[3]s)  %%H:%%M "
 set -g status-left-length 80
+set -g status-right-length 160
+set -g status-interval 15
 # Toast (display-message) look: subtle raised gray with soft-green italic text.
 set -g message-style "bg=colour238,fg=colour151,italics"
 set -g window-status-format ""
@@ -320,7 +336,7 @@ bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 bind -n M-a run-shell "%[1]s win '#{session_name}' agent"
 # M-x hands the space to its other agent (Claude <-> Codex), behind a confirm
 # whose popup is sized to the dialog (ui.swapDialogW x swapDialogH).
-bind -n M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 46 -h 9 -E "%[1]s open --swap"
+bind -n M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 46 -h 11 -E "%[1]s open --swap"
 # A PR's two windows swap in place: M-e in its diff (pr-*) opens its checks,
 # M-d in its checks (ci-*) goes back to the diff. Anywhere else each key is
 # passed through untouched — Alt-d is delete-word in a shell and in Claude's input.
@@ -332,7 +348,7 @@ bind -n M-c run-shell "%[1]s win '#{session_name}' shell"
 bind -n M-h set-option -gF @atelier_outer "#{client_name}" \; run-shell "%[1]s home --switch"
 # M-q detaches atelier — back to the shell that spawned it.
 bind -n M-q detach-client
-`, self(), rgbSetting())
+`, self(), rgbSetting(), usageJob(), title)
 }
 
 func execTmux(args ...string) error {

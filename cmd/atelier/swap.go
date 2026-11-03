@@ -21,8 +21,9 @@ const (
 	failMark = "#[fg=colour167]✗#[fg=colour252] "
 )
 
-// swapAgent hands a space to its other agent (M-x, or `atelier swap <slug>
-// [--to claude|codex]`). It checks the swap can happen, then puts the handoff in
+// swapAgent hands a space to its other agent, or to a new conversation with the
+// same one (M-x, or `atelier swap <slug> [--to claude|codex]`; the other agent
+// by default). It checks the swap can happen, then puts the handoff in
 // the space's agent window in place of the agent: stopping the outgoing agent
 // first is what makes its transcript final before anything reads it. It returns
 // at once; the window shows the handoff as it runs.
@@ -42,9 +43,6 @@ func swapAgent(args []string) error {
 			return fmt.Errorf("--to %q: want claude or codex", t)
 		}
 		to = agent.Of(t)
-	}
-	if to == from {
-		return nil
 	}
 	if _, err := exec.LookPath(to.Bin()); err != nil {
 		_ = tmux.Flash(failMark+to.Bin()+" is not installed", 5)
@@ -71,11 +69,10 @@ func swapLock(slug string) string {
 
 // handoff is the swap itself, run in the space's agent window in place of the
 // outgoing agent (see swapAgent). It writes out what the outgoing agent did since
-// the last swap, has the incoming agent summarise it — the outgoing one is
-// usually out of quota, which is why you swap — records the swap, then becomes
-// the incoming agent. That agent resumes its own earlier conversation in the
-// space, so swapping back and forth never piles up new ones, or starts one,
-// with the handoff as its next message.
+// the last swap, records the swap, then becomes the incoming agent at once. That
+// agent resumes its own earlier conversation in the space, so swapping back and
+// forth never piles up new ones, or starts one, with the handoff as its next
+// message.
 func handoff(slug, toName string) error {
 	err := runHandoff(slug, agent.Of(toName))
 	// Reached only on failure: success replaces this process with the agent.
@@ -127,7 +124,10 @@ func runHandoff(slug string, to agent.Kind) error {
 	finish := startSpinner("swapping " + slug + " → " + to.Label())
 	defer finish("")
 
-	note := handoffNote(*ws, from, to, start)
+	note, err := handoffNote(*ws, from, to, start)
+	if err != nil {
+		return err
+	}
 	_ = to.Prepare(ws.Root(), slug)
 	agent.LinkGuide(ws.Root())
 	if err := core.Update(func(s *core.State) {
@@ -142,82 +142,62 @@ func runHandoff(slug string, to agent.Kind) error {
 	_ = tmux.SetStatusMarker(ws.Session, agent.StatusMarker(core.StatusWorking))
 	agent.RefreshAttention()
 
-	cmd := to.ResumeCmd(agent.LatestSession(to, ws.Root(), ws.Created), note)
+	// The incoming agent resumes its own earlier conversation here; handed to
+	// itself, the point is deliberately a new one.
+	id := ""
+	if to != from {
+		id = agent.LatestSession(to, ws.Root(), ws.Created)
+	}
+	cmd := handoffAgentCmd(from, to, id, note)
 	finish("")
 	_ = tmux.Flash(okMark+tmux.EscapeText(spaceName(*ws))+" → "+to.Label(), 4)
 	return become(to, cmd)
 }
 
-// handoffPrompt asks the incoming agent for the note it will start from.
-const handoffPrompt = `You are taking over a coding task from another coding agent. On stdin is ` +
-	`its conversation: the operator's messages, its replies, and one line per tool it ran (without ` +
-	`the output). Write the handoff note you will work from: the goal, what is done (files, ` +
-	`branches, worktrees, pull requests), where things stand right now, open problems, and the ` +
-	`next steps. Be specific and brief: under 400 words of Markdown, no preamble.`
+// handoffAgentCmd makes the session rule explicit and easy to test: crossing
+// agents resumes the target's existing conversation, while handing an agent to
+// itself always starts a fresh conversation seeded by the export.
+func handoffAgentCmd(from, to agent.Kind, targetSession, note string) string {
+	if from == to {
+		return to.LaunchCmd(note)
+	}
+	return to.ResumeCmd(targetSession, note)
+}
 
-// summaryInput caps what the summarizer is given. The export on disk is whole;
-// a long conversation keeps its start and as much of its end as fits.
-const summaryInput = 200_000
-
-// handoffNote writes the outgoing agent's conversation since the last swap, and
-// the incoming agent's summary of it, under the space's .atelier/handoff, and
-// returns the message the incoming agent opens with — which says only what there
-// is, when there is no conversation to hand over or no summary of it.
-func handoffNote(ws core.Workspace, from, to agent.Kind, at time.Time) string {
+// handoffNote writes the outgoing agent's conversation since the last swap
+// under the space's .atelier/handoff, and returns the message the incoming
+// agent opens with: where that is, or, with no conversation to hand over, the
+// task. Nothing here waits on a model — the incoming agent starts at once and
+// reads what it needs.
+func handoffNote(ws core.Workspace, from, to agent.Kind, at time.Time) (string, error) {
 	head := fmt.Sprintf("%s %s worked on this space and has handed it to you.", agent.HandoffMark, from.Label())
+	if from == to {
+		head = fmt.Sprintf("%s A previous %s conversation worked on this space and has handed it to you.", agent.HandoffMark, from.Label())
+	}
 	text := ""
 	if path := agent.Transcript(from, ws.Root(), ws.Created); path != "" {
 		fmt.Printf("Exporting %s's conversation…\n", from.Label())
 		t, err := agent.Export(from, path, ws.SwappedAt)
 		if err != nil {
-			fmt.Printf("  could not read all of it: %v\n", err)
+			return "", fmt.Errorf("export %s's conversation: %w", from.Label(), err)
 		}
 		text = strings.TrimSpace(t)
 	}
 	if text == "" {
 		fmt.Printf("  %s left no conversation to hand over.\n", from.Label())
-		return head + " It left no conversation to hand over. The task: " + ws.Intent
+		return head + " It left no conversation to hand over. The task: " + ws.Intent, nil
 	}
 	dir := filepath.Join(ws.Root(), ".atelier", "handoff")
-	stamp := at.Format("2006-01-02T15-04-05")
-	export := filepath.Join(dir, stamp+"-"+string(from)+".md")
+	export := filepath.Join(dir, at.Format("2006-01-02T15-04-05.000000000")+"-"+string(from)+".md")
 	err := os.MkdirAll(dir, 0o755)
 	if err == nil {
 		err = os.WriteFile(export, []byte(text+"\n"), 0o644)
 	}
 	if err != nil {
-		fmt.Printf("  could not save it: %v\n", err)
-		return head + " Its conversation could not be saved. The task: " + ws.Intent
+		return "", fmt.Errorf("save handoff: %w", err)
 	}
-	what := fmt.Sprintf("its conversation (the operator's messages, %s's replies, and the tools it ran, without their output) is in %s", from.Label(), export)
-	fmt.Printf("Asking %s to summarise it…\n", to.Label())
-	model := ""
-	if to == agent.Claude {
-		model = core.LoadConfig().NamingModel
-	}
-	sum, err := to.Ask(handoffPrompt, agent.Clip(text, summaryInput), model)
-	summary := filepath.Join(dir, stamp+"-summary.md")
-	if err == nil && sum != "" {
-		err = os.WriteFile(summary, []byte(sum+"\n"), 0o644)
-	}
-	if err != nil || sum == "" {
-		if err == nil {
-			err = fmt.Errorf("empty answer")
-		}
-		fmt.Printf("  no summary (%v); handing over the conversation alone.\n", err)
-		return head + " " + upper(what) + ". Read it, then pick up where " + from.Label() + " left off."
-	}
-	return head + " Read the handoff summary in " + summary + " first; " + what +
-		". Then pick up where " + from.Label() + " left off, checking the worktrees' state before you change anything." +
-		" Earlier handoffs in this space are beside them."
-}
-
-// upper capitalises s's first letter.
-func upper(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	return head + fmt.Sprintf(" Its conversation since it took over — the operator's messages, its replies, and the tools it ran, without their output — is in %s; earlier handoffs are beside it.", export) +
+		" Read it, check the worktrees' state, then pick up where it left off.", nil
 }
 
 // spaceName is how a space is named to the operator: its title, or its slug.

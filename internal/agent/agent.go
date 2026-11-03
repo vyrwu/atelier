@@ -44,6 +44,7 @@ func EnsureAgent(ws core.Workspace) error {
 // killing the session (and detaching whoever is in it with its last window).
 func RunAgent(ws core.Workspace, k Kind, cmd string) error {
 	env := Env(ws.Slug, k)
+	_ = InstallClaudeUsage(ws.Root())
 	var err error
 	switch {
 	case !tmux.HasSession(ws.Session):

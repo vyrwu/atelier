@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
@@ -59,6 +60,35 @@ func TestSwapAsksFromASpacesRow(t *testing.T) {
 	next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyEsc})
 	if back := next.(Model); back.screen != scrActive || back.confirmSwap {
 		t.Errorf("cancel left screen %v, confirmSwap %v", back.screen, back.confirmSwap)
+	}
+}
+
+// Tab in the swap dialog flips between the other agent and a new conversation
+// with the same one, and Enter swaps to whichever is shown.
+func TestSwapDialogTabTogglesTheTarget(t *testing.T) {
+	ws := core.Workspace{Slug: "brave-otter", Session: "brave-otter"}
+	m := Model{w: swapDialogW, h: swapDialogH, returnScreen: scrConfirm, status: map[string]core.AgentStatus{}}
+	m.askSwap(&ws)
+	if m.swapTo != agent.Codex {
+		t.Fatalf("swap from Claude defaults to %q, want codex", m.swapTo)
+	}
+	next, _ := m.updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
+	got := next.(Model)
+	if got.swapTo != agent.Claude {
+		t.Errorf("after Tab swapTo = %q, want claude", got.swapTo)
+	}
+	if v := ansiRe.ReplaceAllString(got.View(), ""); !strings.Contains(v, "new Claude Code?") || !strings.Contains(v, "a new conversation") || !strings.Contains(v, "tab switch agent") {
+		t.Errorf("same-agent dialog = %q", v)
+	}
+	for _, status := range []core.AgentStatus{core.StatusIdle, core.StatusWorking} {
+		got.status[ws.Session] = status
+		if h := lipgloss.Height(got.View()); h > swapDialogH {
+			t.Errorf("status %q: dialog is %d lines, popup is %d", status, h, swapDialogH)
+		}
+	}
+	next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
+	if next.(Model).swapTo != agent.Codex {
+		t.Error("a second Tab must return to the other harness")
 	}
 }
 

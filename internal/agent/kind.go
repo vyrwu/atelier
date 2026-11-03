@@ -100,8 +100,7 @@ func codexArg(prompt string) string {
 	return " -- " + shellQuote(prompt)
 }
 
-// askTimeout bounds one non-interactive run: a title takes seconds, a handoff
-// summary of a long conversation can take a few minutes.
+// askTimeout bounds one non-interactive run, such as a title.
 const askTimeout = 5 * time.Minute
 
 // Ask runs the agent once, non-interactively, on prompt with input piped after

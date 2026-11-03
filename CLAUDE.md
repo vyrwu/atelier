@@ -32,13 +32,24 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   `automatic-rename`/`allow-rename` are off).
 - Swap (`M-x`, or on a Spaces row): `atelier swap` respawns the agent window
   with `atelier handoff`, which exports the outgoing agent's conversation since
-  `SwappedAt` to `.atelier/handoff/`, has the incoming agent summarise it
-  (`Kind.Ask`, isolated: no hooks, MCP, tools, or persistence), records the
-  swap, then execs into the incoming agent — resuming its latest conversation
-  in the space (derived from its transcripts, never recorded), or starting one.
+  `SwappedAt` to `.atelier/handoff/`, records the swap, then execs into the
+  incoming agent at once — resuming its latest conversation in the space
+  (derived from its transcripts, never recorded), or starting one; a swap to
+  the same agent (`Tab` in the confirm, `--to`) always starts one.
   Codex runs with `--dangerously-bypass-approvals-and-sandbox` and always a
   `-c` (without one it can attach to an app-server daemon lacking the space's
   env). Each agent's hooks are guarded on `$ATELIER_AGENT`.
+- Allowances: `atelier usage` is tmux's asynchronous status job. It renders
+  cached account quotas immediately, then asks `codex app-server` for metadata
+  at most once a minute (shared file lock; no threads or model calls). Claude
+  spaces use project-local `statusLine` settings to capture native JSON with
+  `atelier usage claude`, chaining any existing custom command without editing
+  global settings. Updating bindings backfills these settings so existing
+  Claude sessions hot-reload the collector too. Cache files under
+  `CacheDir()/usage/` hold quota metadata
+  only, partitioned by agent config directory. `~` means last observed; an
+  expired window is unknown. Percentage remaining uses green/amber/red based
+  on spent quota; the icon retains its brand colour.
 - Lifecycle: create → **active**; `M-d` delete → Trash (kill processes, keep on
   disk); Trash `↵` restore (resume); Trash `M-d` delete permanently (confirm).
   `Retired bool` + `RetiredAt` on the workspace (zero value = active, no migration).
@@ -69,7 +80,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   to its PR). Both bindings test the window name first and send the key through
   anywhere else (Alt-d is delete-word). `M-a` is the agent everywhere — never
   overload it, not even in a PR's windows.
-- Status line is event-driven: the per-session marker (`@atelier_status`) and the
+- Agent status is event-driven: the per-session marker (`@atelier_status`) and the
   attention badge (`@atelier_attention`) are pushed by the agents' hooks (Codex's
   run only once the user trusts them). Entering
   a blocked space sets it idle, so the badge clears until the agent asks again.

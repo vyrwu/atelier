@@ -2,12 +2,14 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 )
 
@@ -41,6 +43,27 @@ func TestFrameFitsThePopup(t *testing.T) {
 				m.rebuild()
 				if got := lipgloss.Height(m.View()); got > m.h {
 					t.Errorf("screen %d at %dx%d with %q: frame is %d lines, popup is %d", scr, sz[0], sz[1], extra, got, m.h)
+				}
+			}
+		}
+	}
+}
+
+func TestSwapFrameFitsPopup(t *testing.T) {
+	for _, size := range [][2]int{{swapDialogW, swapDialogH}, {80, 24}, {120, 40}, {60, 16}} {
+		for _, from := range []agent.Kind{agent.Claude, agent.Codex} {
+			for _, to := range []agent.Kind{agent.Claude, agent.Codex} {
+				for _, status := range []core.AgentStatus{core.StatusIdle, core.StatusWorking} {
+					m := Model{w: size[0], h: size[1], status: map[string]core.AgentStatus{"s": status}}
+					if size[0] == swapDialogW {
+						m.returnScreen = scrConfirm
+					}
+					m.askSwap(&core.Workspace{Agent: string(from), Session: "s"})
+					m.swapTo = to
+					view := m.View()
+					if lipgloss.Height(view) > m.h || visibleWidth(strings.Split(view, "\n")[0]) > m.w {
+						t.Errorf("%s → %s (%s) at %dx%d: frame doesn't fit", from, to, status, m.w, m.h)
+					}
 				}
 			}
 		}
