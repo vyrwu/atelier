@@ -57,7 +57,7 @@ func run(cmd string, args []string) error {
 	case "swap": // atelier swap <slug> [--to claude|codex] — hand a space to its other agent (M-x)
 		return swapAgent(args)
 	case "handoff": // atelier handoff <slug> <agent> — the swap itself, run in the space's agent window
-		return handoff(arg(args, 0), arg(args, 1))
+		return handoff(arg(args, 0), arg(args, 1), arg(args, 2))
 	case "win": // atelier win <session> <agent|shell|diff|checks> [window] — intra-workspace window nav
 		refreshBindings()
 		return winNav(arg(args, 0), arg(args, 1), arg(args, 2))
@@ -220,6 +220,16 @@ func rgbSetting() string {
 	return ""
 }
 
+// WezTerm can hold a terminal redraw until tmux has sent the complete frame.
+// Enable that capability for its clients so popup borders do not appear in
+// partially drawn frames. A fixed array slot keeps repeated sourcing idempotent.
+func syncSetting() string {
+	if os.Getenv("TERM_PROGRAM") == "WezTerm" || os.Getenv("WEZTERM_PANE") != "" {
+		return "set -g terminal-features[101] \"*:sync\"\n"
+	}
+	return ""
+}
+
 // self is the path to this binary, for the tmux bindings and the splash session
 // to invoke. Falls back to the PATH lookup.
 func self() string {
@@ -348,7 +358,7 @@ bind -n M-c run-shell "%[1]s win '#{session_name}' shell"
 bind -n M-h set-option -gF @atelier_outer "#{client_name}" \; run-shell "%[1]s home --switch"
 # M-q detaches atelier — back to the shell that spawned it.
 bind -n M-q detach-client
-`, self(), rgbSetting(), usageJob(), title)
+`, self(), rgbSetting()+syncSetting(), usageJob(), title)
 }
 
 func execTmux(args ...string) error {

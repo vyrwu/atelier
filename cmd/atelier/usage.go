@@ -16,7 +16,7 @@ import (
 )
 
 // usage is the asynchronous tmux status job, or Claude's status-line capture.
-// Rendering never waits on the network: tmux sees the cache immediately, and a
+// Rendering never waits on the network: tmux sees the cache immediately, and
 // fresh readings replace it when the metadata fetches finish.
 func usage(args []string) error {
 	if arg(args, 0) == "claude" {
@@ -37,16 +37,19 @@ func usage(args []string) error {
 		}
 		return nil
 	}
-	printUsage := func() {
-		fmt.Println(agent.UsageStatus(agent.LoadUsage(agent.Claude), agent.LoadUsage(agent.Codex), time.Now()))
+	status := func() string {
+		return agent.UsageStatus(agent.LoadUsage(agent.Claude), agent.LoadUsage(agent.Codex), time.Now())
 	}
-	printUsage()
+	prior := status()
+	fmt.Println(prior)
 	var refresh sync.WaitGroup
 	for _, k := range []agent.Kind{agent.Claude, agent.Codex} {
 		refresh.Go(func() { _ = agent.RefreshUsage(k) })
 	}
 	refresh.Wait()
-	printUsage()
+	if current := status(); current != prior {
+		fmt.Println(current)
+	}
 	return nil
 }
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +64,19 @@ func TestClaudePartialCaptureKeepsBothWindows(t *testing.T) {
 	}
 	if got := LoadUsage(Claude); *got.Buckets[0].Secondary.Used != 100 || got.Source != "native" {
 		t.Error("stale session headers replaced the native account reading")
+	}
+	// After the native 5h window expires, a capture can restore that window
+	// while the still-applicable native weekly counter remains authoritative.
+	afterReset := time.Unix(2000000000, 0)
+	for _, spent := range []int{10, 20} {
+		capture := fmt.Sprintf(`{"rate_limits":{"five_hour":{"used_percentage":%d,"resets_at":2000018000},"seven_day":{"used_percentage":85,"resets_at":2000000001}}}`, spent)
+		if err := CaptureClaudeUsage([]byte(capture), afterReset); err != nil {
+			t.Fatal(err)
+		}
+		got := LoadUsage(Claude)
+		if *got.Buckets[0].Primary.Used != float64(spent) || *got.Buckets[0].Secondary.Used != 100 || got.Source != "statusline" {
+			t.Fatalf("fallback did not preserve independent windows: %+v", got)
+		}
 	}
 }
 

@@ -35,6 +35,7 @@ type UsageWindow struct {
 	Used    *float64 `json:"usedPercent"`
 	Minutes int      `json:"windowDurationMins"`
 	Reset   int64    `json:"resetsAt"`
+	Native  bool     `json:"native,omitempty"`
 }
 
 // usagePath separates dev/prod caches and agent config directories, so another
@@ -98,17 +99,34 @@ func CaptureClaudeUsage(data []byte, now time.Time) error {
 	defer unlock()
 	cached := LoadUsage(Claude)
 	// /usage is an account-wide reading. A session may be replaying headers
-	// from its last response, so it must not replace a fresh native reading.
-	if cached.Source == "native" {
-		return nil
-	}
+	// from its last response. Preserve each applicable native window, but let
+	// a newer reset revive an expired window when native refresh is unavailable.
+	var prior UsageBucket
 	if len(cached.Buckets) > 0 {
-		if b.Primary == nil {
-			b.Primary = cached.Buckets[0].Primary
+		prior = cached.Buckets[0]
+		if cached.Source == "native" {
+			// Cache compatibility: older builds marked only the snapshot.
+			for _, w := range []*UsageWindow{prior.Primary, prior.Secondary} {
+				if w != nil {
+					w.Native = true
+				}
+			}
 		}
-		if b.Secondary == nil {
-			b.Secondary = cached.Buckets[0].Secondary
+	}
+	merge := func(old, incoming *UsageWindow) (*UsageWindow, bool) {
+		if incoming == nil || incoming.Reset <= now.Unix() || *incoming.Used < 0 || *incoming.Used > 100 {
+			return old, false
 		}
+		if old != nil && ((old.Native && old.Reset > now.Unix()) || incoming.Reset < old.Reset || (old.Native && incoming.Reset == old.Reset)) {
+			return old, false
+		}
+		return incoming, true
+	}
+	var primaryChanged, secondaryChanged bool
+	b.Primary, primaryChanged = merge(prior.Primary, b.Primary)
+	b.Secondary, secondaryChanged = merge(prior.Secondary, b.Secondary)
+	if !primaryChanged && !secondaryChanged {
+		return nil
 	}
 	return saveUsage(Claude, Usage{Observed: now, Source: "statusline", Buckets: []UsageBucket{b}})
 }

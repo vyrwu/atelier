@@ -10,6 +10,14 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 )
 
+func (m *Model) clearConfirmation() {
+	m.focusWS = nil
+	m.confirmSwap = false
+	m.confirm = ""
+	m.swapTo = ""
+	m.returnScreen = scrActive
+}
+
 func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "enter":

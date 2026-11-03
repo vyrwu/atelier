@@ -397,6 +397,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		return m, nil
 	case tea.KeyMsg:
+		switch msg.String() {
+		case "alt+s", "alt+t", "alt+n", "alt+p", "alt+w", "alt+h":
+			m.clearConfirmation()
+		}
 		// Global keys work from every screen: C-c closes; M-s/M-p/M-w/M-t/M-n jump
 		// to a view; M-h goes home; M-d retires the selection in Spaces and deletes
 		// it (with confirm) in Trash; M-x swaps the selection's agent in Spaces.

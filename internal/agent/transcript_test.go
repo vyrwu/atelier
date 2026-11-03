@@ -88,6 +88,8 @@ func TestExportClaude(t *testing.T) {
 		`{"type":"user","timestamp":"2026-01-01T12:01:01Z","isMeta":true,"message":{"content":"injected"}}`,
 		`{"type":"user","timestamp":"2026-01-01T12:01:02Z","message":{"content":"<command-name>/model</command-name>"}}`,
 		`{"type":"user","timestamp":"2026-01-01T12:01:03Z","message":{"content":"[atelier handoff] Codex worked on this space"}}`,
+		`{"type":"user","timestamp":"2026-01-01T12:01:04Z","message":{"content":"<instructions>Preserve this HTML: <div>login</div></instructions>"}}`,
+		`{"type":"user","timestamp":"2026-01-01T12:01:05Z","message":{"content":"<task-notification>synthetic task result</task-notification>"}}`,
 		`{"type":"assistant","timestamp":"2026-01-01T12:02:00Z","message":{"content":[{"type":"thinking","thinking":"hmm"}]}}`,
 		`{"type":"assistant","timestamp":"2026-01-01T12:02:01Z","message":{"content":[{"type":"text","text":"Looking at auth.go."}]}}`,
 		`{"type":"assistant","timestamp":"2026-01-01T12:02:02Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]}}`,
@@ -97,12 +99,12 @@ func TestExportClaude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"## Operator\n\nfix the login bug", "## Claude Code\n\nLooking at auth.go.", "- ran `Bash` go test ./..."} {
+	for _, want := range []string{"## Operator\n\nfix the login bug", "<instructions>Preserve this HTML: <div>login</div></instructions>", "## Claude Code\n\nLooking at auth.go.", "- ran `Bash` go test ./..."} {
 		if !strings.Contains(got, want) {
 			t.Errorf("export lacks %q:\n%s", want, got)
 		}
 	}
-	for _, leak := range []string{"before the swap", "injected", "/model", "atelier handoff", "hmm", "SECRET OUTPUT"} {
+	for _, leak := range []string{"before the swap", "injected", "/model", "atelier handoff", "synthetic task result", "hmm", "SECRET OUTPUT"} {
 		if strings.Contains(got, leak) {
 			t.Errorf("export includes %q:\n%s", leak, got)
 		}

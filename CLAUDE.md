@@ -36,6 +36,8 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   incoming agent at once — resuming its latest conversation in the space
   (derived from its transcripts, never recorded), or starting one; a swap to
   the same agent (`Tab` in the confirm, `--to`) always starts one.
+  A launch reservation covers the gap before the handoff owns the per-space
+  lock; abandoned launches expire after 30 seconds. Exports are owner-only.
   Codex runs with `--dangerously-bypass-approvals-and-sandbox` and always a
   `-c` (without one it can attach to an app-server daemon lacking the space's
   env). Each agent's hooks are guarded on `$ATELIER_AGENT`.
@@ -50,8 +52,9 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   global settings. Updating bindings backfills these settings so existing
   Claude sessions hot-reload the collector too. Cache files under
   `CacheDir()/usage/` hold quota metadata
-  only, partitioned by agent config directory. Native account readings take
-  precedence over session headers. `~` means last observed or stale; an
+  only, partitioned by agent config directory. Applicable native windows take
+  precedence; captures can restore an expired window with a newer reset.
+  `~` means last observed or stale; an
   expired window is unknown. Percentage spent uses green/amber/red based
   on spent quota; the icon retains its brand colour.
 - Lifecycle: create → **active**; `M-d` delete → Trash (kill processes, keep on
@@ -99,6 +102,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   stack takes its most active member's state.
 - The generated tmux fragment advertises 24-bit colour (`terminal-features
   ",*:RGB"`) when `$COLORTERM` says the launching terminal has it.
+  WezTerm also gets synchronized redraws (`sync`) for complete popup frames.
 - Bindings are regenerated from the binary: `up`/`install` always write and
   source the fragment, and the popup and window keys (`open`, `win`) re-sync it
   whenever the server's `@atelier_bindings` marker (a hash the fragment sets

@@ -36,6 +36,26 @@ func swapAgent(args []string) error {
 	if ws.Retired {
 		return fmt.Errorf("%s is in the trash; restore it first", slug)
 	}
+	token, unlock, err := reserveSwap(slug)
+	if err != nil {
+		return err
+	}
+	if token == "" {
+		_ = tmux.Flash(failMark+tmux.EscapeText(spaceName(*ws))+" is already swapping", 4)
+		return nil
+	}
+	defer unlock()
+	launched := false
+	defer func() {
+		if !launched {
+			_ = os.Remove(swapPending(slug))
+		}
+	}()
+	// A handoff may have finished between the initial lookup and reservation.
+	ws = core.Load().Find(slug)
+	if ws == nil || ws.Retired {
+		return fmt.Errorf("%s is no longer active", slug)
+	}
 	from := agent.Of(ws.Agent)
 	to := from.Other()
 	if t := flagVal(args, "--to"); t != "" {
@@ -48,18 +68,9 @@ func swapAgent(args []string) error {
 		_ = tmux.Flash(failMark+to.Bin()+" is not installed", 5)
 		return fmt.Errorf("%s is not installed", to.Bin())
 	}
-	// The handoff holds this lock while it runs. Checking it here keeps a second
-	// M-x from killing a handoff half-way through.
-	unlock, ok, err := core.TryLockFile(swapLock(slug))
-	if err != nil {
-		return err
-	}
-	if !ok {
-		_ = tmux.Flash(failMark+tmux.EscapeText(spaceName(*ws))+" is already swapping", 4)
-		return nil
-	}
-	unlock()
-	return agent.RunAgent(*ws, to, agent.HandoffCmd(slug, to))
+	err = agent.RunAgent(*ws, to, agent.HandoffCmd(slug, to, token))
+	launched = err == nil
+	return err
 }
 
 // swapLock is the lock a space's handoff holds.
@@ -73,8 +84,8 @@ func swapLock(slug string) string {
 // agent resumes its own earlier conversation in the space, so swapping back and
 // forth never piles up new ones, or starts one, with the handoff as its next
 // message.
-func handoff(slug, toName string) error {
-	err := runHandoff(slug, agent.Of(toName))
+func handoff(slug, toName, token string) error {
+	err := runHandoff(slug, agent.Of(toName), token)
 	// Reached only on failure: success replaces this process with the agent.
 	// Hold the error on screen, then go back to the space's agent rather than
 	// exit — this is often the session's last window, and closing it would end
@@ -103,21 +114,18 @@ func become(k agent.Kind, cmd string) error {
 	return syscall.Exec("/bin/sh", []string{"sh", "-lc", cmd}, env)
 }
 
-func runHandoff(slug string, to agent.Kind) error {
+func runHandoff(slug string, to agent.Kind, token string) error {
+	// The descriptor is close-on-exec: the reservation transfers to this lock,
+	// then the lock releases when this process becomes the incoming agent.
+	unlock, err := takeSwap(slug, token)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	ws := core.Load().Find(slug)
 	if ws == nil {
 		return fmt.Errorf("no space %q", slug)
 	}
-	// The descriptor is close-on-exec: the lock is released when this process
-	// becomes the agent.
-	unlock, ok, err := core.TryLockFile(swapLock(slug))
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("%s is already swapping", slug)
-	}
-	defer unlock()
 	from := agent.Of(ws.Agent)
 	start := time.Now()
 	fmt.Printf("atelier: handing %s from %s to %s\n\n", spaceName(*ws), from.Label(), to.Label())
@@ -189,15 +197,40 @@ func handoffNote(ws core.Workspace, from, to agent.Kind, at time.Time) (string, 
 	}
 	dir := filepath.Join(ws.Root(), ".atelier", "handoff")
 	export := filepath.Join(dir, at.Format("2006-01-02T15-04-05.000000000")+"-"+string(from)+".md")
-	err := os.MkdirAll(dir, 0o755)
-	if err == nil {
-		err = os.WriteFile(export, []byte(text+"\n"), 0o644)
-	}
-	if err != nil {
+	if err := writeHandoff(export, text); err != nil {
 		return "", fmt.Errorf("save handoff: %w", err)
 	}
 	return head + fmt.Sprintf(" Its conversation since it took over — the operator's messages, its replies, and the tools it ran, without their output — is in %s; earlier handoffs are beside it.", export) +
 		" Read it, check the worktrees' state, then pick up where it left off.", nil
+}
+
+// Conversations can contain credentials and private source. Tighten an older
+// handoff directory too, so exports made by previous versions are protected.
+func writeHandoff(path, text string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("handoff directory is not a directory: %s", dir)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(text + "\n")
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 // spaceName is how a space is named to the operator: its title, or its slug.

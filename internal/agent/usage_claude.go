@@ -77,7 +77,7 @@ func decodeClaudeUsage(data []byte, now time.Time) (Usage, error) {
 		if now.UTC().Month() == time.December && reset.Month() == time.January {
 			reset = reset.AddDate(1, 0, 0)
 		}
-		w := &UsageWindow{Used: &used, Reset: reset.Unix(), Minutes: 300}
+		w := &UsageWindow{Used: &used, Reset: reset.Unix(), Minutes: 300, Native: true}
 		if m[1] == "session" {
 			b.Primary = w
 		} else {

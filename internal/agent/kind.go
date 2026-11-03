@@ -169,6 +169,6 @@ func (k Kind) Prepare(dir, slug string) error {
 
 // HandoffCmd is the shell command a swap puts in a space's agent window: the
 // handoff to agent to, which ends by becoming that agent.
-func HandoffCmd(slug string, to Kind) string {
-	return shellQuote(selfPath()) + " handoff " + shellQuote(slug) + " " + string(to)
+func HandoffCmd(slug string, to Kind, token string) string {
+	return shellQuote(selfPath()) + " handoff " + shellQuote(slug) + " " + string(to) + " " + shellQuote(token)
 }

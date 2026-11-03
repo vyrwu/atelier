@@ -102,3 +102,22 @@ func TestSwapKeyIsSwallowedElsewhere(t *testing.T) {
 		t.Errorf("M-x in Trash: screen %v, filter %q", got.screen, got.filter.Value())
 	}
 }
+
+// Leaving a swap dialog for Trash must not turn a later permanent-delete
+// confirmation into another swap. Stop before confirmation so no files change.
+func TestLeavingSwapClearsConfirmation(t *testing.T) {
+	active := core.Workspace{Slug: "active", Session: "active"}
+	retired := core.Workspace{Slug: "retired", Session: "retired", Retired: true}
+	m := Model{w: 120, h: 40, all: []core.Workspace{active, retired}, filter: textinput.New()}
+	m.askSwap(&active)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}, Alt: true})
+	trash := next.(Model)
+	if trash.confirmSwap || trash.focusWS != nil {
+		t.Fatal("navigation retained the pending swap")
+	}
+	next, _ = trash.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}, Alt: true})
+	confirm := next.(Model)
+	if confirm.screen != scrConfirm || confirm.confirmSwap || confirm.focusWS == nil || confirm.focusWS.Slug != retired.Slug {
+		t.Fatalf("Trash delete opened the wrong confirmation: %+v", confirm)
+	}
+}

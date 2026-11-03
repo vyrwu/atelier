@@ -259,6 +259,8 @@ conversation in the space, found from its transcripts on disk, or starts one,
 with the handoff as its next message. `Tab` in the confirm picks a fresh
 conversation with the same agent instead. A turn in progress is cut off, so
 swap at a pause.
+Concurrent swap requests are ignored until the handoff finishes. Conversation
+exports are stored in an owner-only directory with owner-only file permissions.
 
 **Allowances at a glance.** The top status line shows both agents' icons and
 the percentage of their subscription allowance spent: 0% is unused, 100% is
@@ -277,9 +279,11 @@ Atelier does not read subscription credentials.
 If Claude's non-interactive `/usage` is unavailable, its native status-line
 data is a fallback, marked `~` as last observed. Space-local capture settings
 preserve existing custom status-line output and your global settings. A partial
-capture keeps the other window, and session headers never overwrite a native
-account reading. Metadata older than two minutes is also marked `~`. Missing
-or expired windows remain labelled with `—`, never an assumed 0%. After
+capture keeps the other window. Applicable native account windows take
+precedence; if native refresh is unavailable, a session capture can restore an
+expired window with a newer reset. Metadata older than two minutes is also
+marked `~`. Missing or expired windows remain labelled with `—`, never an
+assumed 0%. After
 upgrading, open an Atelier popup to backfill capture for existing spaces.
 
 atelier runs Codex with its sandbox and approval prompts off

@@ -228,8 +228,8 @@ func (w *exportWriter) tool(name, input string) {
 // exportClaude walks a Claude transcript. Each record is one message part: a
 // user prompt (a string, or text blocks beside tool results), or an assistant
 // text, thinking, or tool_use block. Prompts atelier or Claude itself injected —
-// meta records, command echoes, task notifications — start with a tag or are
-// marked, and are skipped; a compaction summary is kept, since it stands in for
+// meta records, command echoes, task notifications — are marked or use known
+// tags, and are skipped; a compaction summary is kept, since it stands in for
 // everything before it.
 func exportClaude(r io.Reader, since time.Time, w *exportWriter) error {
 	type block struct {
@@ -275,7 +275,7 @@ func exportClaude(r io.Reader, since time.Time, w *exportWriter) error {
 					text += b.Text
 				}
 			}
-			if !strings.HasPrefix(strings.TrimSpace(text), "<") {
+			if rec.IsCompactSummary || !syntheticClaudeText(text) {
 				w.say(who, text)
 			}
 			continue
@@ -289,6 +289,16 @@ func exportClaude(r io.Reader, since time.Time, w *exportWriter) error {
 			}
 		}
 	}
+}
+
+func syntheticClaudeText(text string) bool {
+	text = strings.TrimSpace(text)
+	for _, tag := range []string{"<command-name>", "<command-message>", "<local-command-stdout>", "<local-command-caveat>", "<task-notification>"} {
+		if strings.HasPrefix(text, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // toolInput is the gist of a tool call's input: a shell command, a file, or

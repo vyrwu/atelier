@@ -31,6 +31,49 @@ func TestHandoffAgentCmdSessionChoice(t *testing.T) {
 	}
 }
 
+// The second launcher must be refused both while RunAgent is launching and in
+// the gap before its child starts. The handoff then owns the same exclusion.
+func TestSwapReservationCoversLaunchAndHandoff(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	const slug = "test-space"
+	token, releaseLaunch, err := reserveSwap(slug)
+	if err != nil || token == "" {
+		t.Fatalf("reserve launch: %q, %v", token, err)
+	}
+	assertBusy := func() {
+		t.Helper()
+		if other, release, err := reserveSwap(slug); err != nil || other != "" {
+			if release != nil {
+				release()
+			}
+			t.Fatalf("competing launch was admitted: %q, %v", other, err)
+		}
+	}
+	assertBusy()
+	releaseLaunch()
+	assertBusy() // the old bug: no process holds the lock at this point
+	releaseHandoff, err := takeSwap(slug, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBusy()
+	releaseHandoff()
+	next, release, err := reserveSwap(slug)
+	if err != nil || next == "" {
+		t.Fatalf("completed handoff did not release the space: %q, %v", next, err)
+	}
+	release()
+	if stale, err := takeSwap(slug, token); err == nil {
+		stale()
+		t.Fatal("an obsolete handoff claimed the next launch")
+	}
+	finish, err := takeSwap(slug, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finish()
+}
+
 // A fresh same-agent conversation gets a saved export and no model is asked
 // to summarize first. A failed save aborts rather than handing over just the
 // original task and silently losing the recent work.
@@ -40,6 +83,14 @@ func TestHandoffNoteExportsOrFails(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(dir, "claude"))
 	ws := core.Workspace{Slug: "test-space", Intent: "fix login", Created: time.Now().Add(-time.Hour)}
 	if err := os.MkdirAll(ws.Root(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a directory made by the older, permissive build.
+	handoffDir := filepath.Join(ws.Root(), ".atelier", "handoff")
+	if err := os.MkdirAll(handoffDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(handoffDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	project := regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(ws.Root(), "-")
@@ -58,6 +109,15 @@ func TestHandoffNoteExportsOrFails(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(ws.Root(), ".atelier", "handoff", "*.md"))
 	if len(files) != 1 {
 		t.Fatalf("handoff files = %v", files)
+	}
+	for path, mode := range map[string]os.FileMode{handoffDir: 0o700, files[0]: 0o600} {
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != mode {
+			t.Errorf("%s mode = %o, want %o", path, fi.Mode().Perm(), mode)
+		}
 	}
 	export, _ := os.ReadFile(files[0])
 	if !strings.Contains(string(export), "fix the new regression") || !strings.Contains(note, files[0]) {
