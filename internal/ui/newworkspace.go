@@ -30,7 +30,8 @@ func (m Model) viewNew() string {
 	var b strings.Builder
 	// The agent is part of the question, so Tab reads as asking the other one.
 	b.WriteString(titleStyle.Render("What can ") + agentGlyph(m.newAgent) + " " +
-		titleStyle.Render(m.newAgent.Label()+" do for you?"))
+		titleStyle.Foreground(agentColor(m.newAgent)).Render(m.newAgent.Label()) +
+		titleStyle.Render(" do for you?"))
 	b.WriteString("\n\n")
 	b.WriteString(m.intent.View())
 	return b.String()

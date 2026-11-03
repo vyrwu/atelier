@@ -40,12 +40,21 @@ const (
 	glyphCodex  = "\uec81" // nf-cod-openai (U+EC81)
 )
 
+// agentColor is agent k's brand colour.
+func agentColor(k agent.Kind) lipgloss.Color {
+	if k == agent.Codex {
+		return cCodex
+	}
+	return cClaude
+}
+
 // agentGlyph is agent k's icon in its brand colour.
 func agentGlyph(k agent.Kind) string {
+	g := glyphClaude
 	if k == agent.Codex {
-		return lipgloss.NewStyle().Foreground(cCodex).Render(glyphCodex)
+		g = glyphCodex
 	}
-	return lipgloss.NewStyle().Foreground(cClaude).Render(glyphClaude)
+	return lipgloss.NewStyle().Foreground(agentColor(k)).Render(g)
 }
 
 // countBadge renders "N<icon>" in colour c, or "" when n<=0 (a zero count is
