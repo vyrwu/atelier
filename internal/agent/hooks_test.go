@@ -18,6 +18,7 @@ func TestAtelierHooksMapping(t *testing.T) {
 		"PostToolUse":      "working",
 		"Notification":     "blocked", // Claude needs the user
 		"Stop":             "idle",    // the turn finished — idle, not working
+		"StopFailure":      "blocked", // an API error (a usage limit) ended the turn: swap it
 	}
 	got := atelierHooks()
 	if len(got) != len(want) {
@@ -52,12 +53,12 @@ func TestNotificationMatchesOnlyWhatNeedsYou(t *testing.T) {
 
 // The matcher is written into the hook group, where Claude reads it.
 func TestMergeEventHookWritesTheMatcher(t *testing.T) {
-	groups := mergeEventHook(nil, hookCommand("blocked"), needsYou)
+	groups := mergeEventHook(nil, hookCommand("blocked", Claude), needsYou)
 	g, ok := groups[0].(map[string]any)
 	if !ok || g["matcher"] != needsYou {
 		t.Errorf("group = %+v, want matcher %q", groups[0], needsYou)
 	}
-	if _, has := mergeEventHook(nil, hookCommand("idle"), "")[0].(map[string]any)["matcher"]; has {
+	if _, has := mergeEventHook(nil, hookCommand("idle", Claude), "")[0].(map[string]any)["matcher"]; has {
 		t.Error("an unmatched hook was written with a matcher key")
 	}
 }
@@ -66,9 +67,17 @@ func TestMergeEventHookWritesTheMatcher(t *testing.T) {
 // sessions too, so it must be a no-op without $ATELIER_SESSION and must never
 // fail a turn.
 func TestHookCommandIsGuarded(t *testing.T) {
-	cmd := hookCommand("working")
+	cmd := hookCommand("working", Claude)
 	if !strings.Contains(cmd, `[ -n "$ATELIER_SESSION" ]`) {
 		t.Errorf("hookCommand = %q, want it guarded on $ATELIER_SESSION", cmd)
+	}
+	// Each agent's hooks answer only for a window running that agent; a window
+	// from before there was a choice runs Claude.
+	if !strings.Contains(cmd, `[ "${ATELIER_AGENT:-claude}" = claude ]`) {
+		t.Errorf("hookCommand = %q, want it guarded on $ATELIER_AGENT", cmd)
+	}
+	if c := hookCommand("idle", Codex); !strings.Contains(c, `[ "${ATELIER_AGENT:-claude}" = codex ]`) {
+		t.Errorf("codex hookCommand = %q, want it guarded on $ATELIER_AGENT = codex", c)
 	}
 	if !strings.HasSuffix(cmd, "|| true") {
 		t.Errorf("hookCommand = %q, want it to always succeed", cmd)
@@ -107,7 +116,7 @@ func TestClaudeConfigPaths(t *testing.T) {
 // once, keep every hook that isn't atelier's, and drop a stale atelier hook
 // rather than stacking a second copy on every install.
 func TestMergeEventHook(t *testing.T) {
-	cmd := hookCommand("working")
+	cmd := hookCommand("working", Claude)
 	userGroup := map[string]any{
 		"matcher": "Bash",
 		"hooks":   []any{map[string]any{"type": "command", "command": "my-own-linter"}},

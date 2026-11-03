@@ -80,6 +80,12 @@ type Workspace struct {
 	// RetiredAt is when it was moved to trash — drives the Trash view's ordering
 	// and its "time since close" column. Zero unless retired.
 	RetiredAt time.Time `json:"retired_at,omitempty"`
+	// Agent is which coding agent the space runs now: "claude" or "codex". Empty
+	// means claude, so state written before there was a choice loads unchanged.
+	Agent string `json:"agent,omitempty"`
+	// SwappedAt is when the agent last changed. A handoff carries over only what
+	// the outgoing agent did since then; zero means since the space began.
+	SwappedAt time.Time `json:"swapped_at,omitempty"`
 }
 
 // Root is the workspace directory path (~/ateliers/<slug>).
@@ -138,8 +144,9 @@ func ConfigPath() string {
 }
 
 // WorkspaceGuidePath is the central, user-editable per-workspace instruction
-// file. Each new workspace's CLAUDE.md is a symlink to it, so edits here reach
-// every workspace at once.
+// file. Each new workspace's CLAUDE.md and AGENTS.md are symlinks to it, so
+// edits here reach every workspace, and either agent, at once. The name
+// predates Codex.
 func WorkspaceGuidePath() string {
 	return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "atelier", "WORKSPACE_CLAUDE.md")
 }

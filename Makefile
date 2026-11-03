@@ -23,8 +23,8 @@ run: build
 
 # dev runs the freshly-built binary in a fully isolated instance: its own tmux
 # socket, its own state/config/cache, its own workspace root, and the dev binary
-# first on PATH. It shares only $HOME/.claude (Claude auth + the guarded hooks,
-# which route to this binary via the dev PATH/env). Nothing here touches your
+# first on PATH. It shares only the agents' config, $HOME/.claude and ~/.codex
+# (auth + the guarded hooks, which route to this binary via the dev PATH/env). Nothing here touches your
 # real atelier server, state, config, or installed binary. Reset with `dev-clean`.
 dev: build
 	@ATELIER_DEV=1 \

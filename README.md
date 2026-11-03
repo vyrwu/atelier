@@ -6,7 +6,7 @@
 
 <h1>atelier</h1>
 
-<p><strong>A workshop for parallel Claude Code agents.</strong></p>
+<p><strong>A workshop for parallel coding agents — Claude Code and Codex.</strong></p>
 
 <p>
 <a href="https://github.com/vyrwu/atelier/releases"><img src="https://img.shields.io/github/v/release/vyrwu/atelier?style=flat-square" alt="Release"></a>
@@ -32,7 +32,7 @@
 
 ---
 
-Running several Claude Code agents at once is powerful, but it's taxing. You
+Running several coding agents at once is powerful, but it's taxing. You
 switch contexts constantly, and you're never quite sure which session is working,
 which is blocked waiting on you, and which is done.
 
@@ -49,6 +49,11 @@ confirmation. One keystroke shows every space you have open; a single marker
 tells you which agent actually needs you. The pull requests your agents open
 come to you, with live CI and review status and a diff you can read without
 leaving the terminal.
+
+Each space runs [Claude Code](https://claude.com/claude-code) or
+[Codex](https://developers.openai.com/codex), and one key hands it to the other:
+when one runs out of quota, the other picks the work up from a summary of it,
+and swapping back resumes where the first left off.
 
 One binary, running on its own tmux server so it never touches yours.
 
@@ -73,12 +78,16 @@ One binary, running on its own tmux server so it never touches yours.
 - **Worktrees that are never stale.** Agents branch every worktree from the
   freshly fetched default branch, and the worktree view shows how far each has
   drifted.
+- **Swap agents mid-task.** `M-x` hands a space from Claude Code to Codex or
+  back. The incoming agent gets the outgoing one's conversation and a summary
+  of it, and returns to its own earlier conversation in the space if it had one,
+  so swapping back and forth doesn't pile up new ones.
 - **Finish without losing anything.** Retire a space to clear it from your active
   list. Restore it later and the agent picks the conversation back up.
 - **Your name on the commits.** Agents commit under your git identity, not the
   machine's default.
 - **Light by design.** No daemon and no background polling: agent state is
-  pushed by Claude Code's own lifecycle hooks, worktrees are read from disk, and
+  pushed by the agents' own lifecycle hooks, worktrees are read from disk, and
   PRs come from `gh`.
 
 ## Install
@@ -90,7 +99,7 @@ One binary, running on its own tmux server so it never touches yours.
 | [tmux](https://github.com/tmux/tmux) 3.3+ | atelier runs its own server on a dedicated socket |
 | git | worktrees and diffs |
 | [GitHub CLI](https://cli.github.com) (`gh`) | PR status and actions — run `gh auth login` first |
-| [Claude Code](https://claude.com/claude-code) (`claude`) | the agent atelier drives |
+| [Claude Code](https://claude.com/claude-code) (`claude`) and/or [Codex](https://developers.openai.com/codex) (`codex`) | the agents atelier drives — the one new spaces start with (`agent` in the config) at least |
 | A [Nerd Font](https://www.nerdfonts.com) | the PR and worktree views use GitHub's Octicon glyphs |
 
 **Optional:** [diffnav](https://github.com/dlvhdr/diffnav) for a file tree beside
@@ -130,20 +139,25 @@ make install   # builds ./bin/atelier and links it into ~/.local/bin
 ## Quick start
 
 ```sh
-atelier install   # once: Claude Code hooks, tmux bindings, the per-space guide
+atelier install   # once: the agents' hooks, tmux bindings, the per-space guide
 atelier           # start (or re-attach) and land on the splash
 ```
 
 Run `atelier` from a plain terminal, not from inside another tmux session. Press
 `M-n`, describe a task, and press `Enter`. The space builds in the
-background; press `M-s` when you want to go to it.
+background; press `M-s` when you want to go to it. `Tab` in the prompt picks the
+other agent for that space.
+
+Using Codex? Its first launch after `atelier install` asks you to review and
+trust hooks: trust atelier's (the ones running `atelier hook`). Until you do,
+Codex spaces show no status.
 
 `M-` means `Alt` (`Option` on a Mac). Your terminal has to send
 it as Meta — see [Troubleshooting](#troubleshooting) if nothing happens.
 
 ## Keys
 
-`M-x` means `Alt-x` (`Option-x` on a Mac). The splash (`M-h`) lists them all.
+`M-a` means `Alt-a` (`Option-a` on a Mac). The splash (`M-h`) lists them all.
 
 ### Anywhere
 
@@ -159,7 +173,8 @@ it as Meta — see [Troubleshooting](#troubleshooting) if nothing happens.
 
 | Key | Does |
 |---|---|
-| `M-a` | **Agent**: respawns and resumes Claude if you exited it |
+| `M-a` | **Agent**: respawns and resumes the space's agent if you exited it |
+| `M-x` | **Swap agent**: hand the space from Claude Code to Codex, or back (asks first) |
 | `M-c` | **Command line** in the space's directory |
 | `M-p` | **Pull requests** for the space |
 | `M-w` | **Worktrees** for the space |
@@ -172,6 +187,7 @@ filter, then closes.
 | View | Key | Does |
 |---|---|---|
 | **Spaces** | `Enter` | open |
+| | `M-x` | swap the space's agent (asks first) |
 | | `M-d` | retire to Trash |
 | **Trash** | `Enter` | restore, resuming the conversation |
 | | `M-d` | delete permanently (asks first) |
@@ -184,6 +200,7 @@ filter, then closes.
 | **Worktrees** | `Enter` | open a shell in that worktree |
 | **New** | `Enter` | start in the background |
 | | `Alt-Enter` | start and switch to it |
+| | `Tab` | start it with the other agent |
 | | `Ctrl-j` | newline |
 
 On the splash, `r` re-runs the dependency check and `q` detaches.
@@ -209,7 +226,7 @@ your terminal
 └── tmux -L atelier               atelier's own server; your tmux is untouched
     ├── home                      the splash: keymap, version, dependency check
     ├── spry-otter                one session per space
-    │   ├── claude                the agent
+    │   ├── claude                the agent (Claude Code or Codex; the name is historical)
     │   ├── shell                 M-c
     │   ├── atelier-feat-login    a shell per worktree, opened from M-w
     │   ├── pr-atelier-128        a PR diff, opened from M-p
@@ -218,14 +235,30 @@ your terminal
 ```
 
 **Spaces.** A space is a directory, `~/ateliers/<slug>/`, and a tmux session. It
-gets a memorable handle (`spry-otter`) at once, and Claude gives it a descriptive
-title a moment later. Each space's `CLAUDE.md` links to one shared guide, so you
-can edit what every agent is told in one place.
+gets a memorable handle (`spry-otter`) at once, and its agent gives it a
+descriptive title a moment later. Each space's `CLAUDE.md` and `AGENTS.md` link
+to one shared guide, so you can edit what every agent is told in one place. The
+Spaces list marks each space's agent: `✻` Claude Code, `⬡` Codex.
 
 **Agent status.** atelier installs guarded hooks into Claude Code's global
-settings. They do nothing outside atelier, and inside it they record whether the
-agent is working, waiting on you, or idle. The status line and the attention
-badge update the moment that changes; nothing is sampled.
+settings and Codex's `~/.codex/hooks.json`. They do nothing outside atelier, and
+inside it they record whether the agent is working, waiting on you, or idle. The
+status line and the attention badge update the moment that changes; nothing is
+sampled. A Claude turn cut off by an API error, such as a usage limit, marks the
+space as needing you. Codex reports no such event, so a Codex space that hits
+its limit reads as working until the status goes stale.
+
+**Swapping agents.** `M-x` replaces the space's agent with a handoff that runs
+in the same window: it writes the outgoing agent's conversation since it took
+over (your messages, its replies, and one line per tool it ran) to
+`.atelier/handoff/` in the space, has the incoming agent summarise it there,
+then becomes the incoming agent. That agent resumes its own latest conversation
+in the space, found from its transcripts on disk, or starts one, with the
+handoff as its next message. A turn in progress is cut off, so swap at a pause.
+atelier runs Codex with its sandbox and approval prompts off
+(`--dangerously-bypass-approvals-and-sandbox`): a worktree's git data lives in
+its source repository, outside the space, so the sandbox would stop every
+commit.
 
 **Worktrees.** Agents create worktrees through atelier's MCP server rather than
 with raw `git`. `create_worktree` branches off the freshly fetched default branch
@@ -262,8 +295,9 @@ Everything is optional. `$XDG_CONFIG_HOME/atelier/config.toml`
 ```toml
 root         = "~/ateliers"  # where spaces live
 socket       = "atelier"     # name of atelier's tmux socket
-naming       = true          # let Claude title new spaces
-naming_model = "sonnet"      # the model that does it
+agent        = "claude"      # the agent new spaces start with: "claude" or "codex"
+naming       = true          # let the agent title new spaces
+naming_model = "sonnet"      # Claude's model for titles and handoff summaries
 ```
 
 | Environment variable | |
@@ -272,7 +306,9 @@ naming_model = "sonnet"      # the model that does it
 | `ATELIER_SOCKET` | overrides `socket` |
 
 **What agents are told.** `$XDG_CONFIG_HOME/atelier/WORKSPACE_CLAUDE.md` is the
-guide every space links to. `atelier install` writes a default; edit it freely.
+guide every space links to, as `CLAUDE.md` and `AGENTS.md`. `atelier install`
+writes a default; edit it freely. A guide written by an earlier version opens
+"You are Claude Code"; change that line if your spaces also run Codex.
 
 **The diff window** uses the first of `diffnav`, `delta`, and `less` it finds, and
 leaves how it looks to that tool's own configuration. For diffnav, for example:
@@ -313,9 +349,18 @@ upgrade — open any overlay once. `atelier install` forces it.
 **A PR doesn't appear.** Check `gh auth status`. A PR shows up when its head
 branch is a worktree in the space, or when the agent registered it.
 
-**The splash's dependency check** (`M-h`) shows which of git, gh, tmux, and
-claude atelier can find, and their versions, then the optional diffnav and
-gh-enhance.
+**The splash's dependency check** (`M-h`) shows which of git, gh, tmux, and the
+default agent atelier can find, and their versions, then the optional ones: the
+other agent, diffnav, and gh-enhance.
+
+**A Codex space shows no status.** Codex runs hooks only once you trust them.
+Start Codex in any atelier space and review the hooks it lists; trust atelier's.
+An upgrade that changes them asks again.
+
+**A space swapped to the wrong place after an upgrade.** Agents keep running
+the atelier binary they started with, and an older one rewrites the state
+without the agent field. Restart the spaces' agents (`M-a` after exiting them)
+once after upgrading.
 
 ## Roadmap
 

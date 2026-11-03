@@ -14,13 +14,17 @@ type Config struct {
 	// Socket is the dedicated tmux socket atelier runs its sessions on, so it
 	// never disturbs the user's main tmux server (default "atelier").
 	Socket string `toml:"socket"`
-	// Naming turns on async Claude title generation; false → deterministic
-	// title from the intent text.
+	// Naming turns on async title generation by the space's agent; false →
+	// deterministic title from the intent text.
 	Naming bool `toml:"naming"`
-	// NamingModel is the model used for title generation (default "sonnet";
-	// Haiku follows the "reply with ONLY…" instruction too loosely — it adds
-	// preamble/quotes that fail extraction and fall back to the raw prompt).
+	// NamingModel is the model Claude generates titles and handoff summaries
+	// with (default "sonnet"; Haiku follows the "reply with ONLY…" instruction
+	// too loosely — it adds preamble/quotes that fail extraction and fall back
+	// to the raw prompt). Codex uses its own default model.
 	NamingModel string `toml:"naming_model"`
+	// Agent is the coding agent new spaces start with: "claude" (default) or
+	// "codex". M-n can pick the other one per space.
+	Agent string `toml:"agent"`
 }
 
 // LoadConfig reads config.toml (missing file → defaults) and applies ATELIER_ROOT

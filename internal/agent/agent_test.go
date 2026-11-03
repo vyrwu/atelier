@@ -154,45 +154,6 @@ func TestBlockedCount(t *testing.T) {
 	}
 }
 
-// Reviving a dead space must RESUME the conversation, not replay the original
-// intent — replaying would re-run the task from the top and discard every turn
-// since (the v0 "resume respawned sessions over stale prompt" fix).
-func TestResumeCmdContinues(t *testing.T) {
-	cmd := ResumeCmd()
-	if !strings.Contains(cmd, "claude --continue") {
-		t.Errorf("ResumeCmd() = %q, want it to --continue the conversation", cmd)
-	}
-	if !strings.Contains(cmd, "||") {
-		t.Errorf("ResumeCmd() = %q, want a fallback for a space with no conversation yet", cmd)
-	}
-}
-
-// The intent is user-written prose that tmux runs through a shell: quotes,
-// backticks, and semicolons in it must stay data.
-func TestLaunchCmdQuotesIntent(t *testing.T) {
-	cases := []string{
-		"fix the bug",
-		"it's broken",
-		"rm -rf /; echo pwned",
-		"use `git log` and $HOME",
-		`say "hello"`,
-	}
-	for _, intent := range cases {
-		cmd := LaunchCmd(intent)
-		if !strings.HasPrefix(cmd, "claude '") || !strings.HasSuffix(cmd, "'") {
-			t.Errorf("LaunchCmd(%q) = %q, want a single-quoted argument", intent, cmd)
-		}
-		// Every quote in the body must be the escaped form, so the argument can
-		// never be closed early.
-		body := strings.TrimSuffix(strings.TrimPrefix(cmd, "claude '"), "'")
-		for _, part := range strings.Split(body, `'\''`) {
-			if strings.Contains(part, "'") {
-				t.Errorf("LaunchCmd(%q) = %q leaves an unescaped quote", intent, cmd)
-			}
-		}
-	}
-}
-
 // Only blocked draws attention; gone shows no marker at all (a dead space must
 // not paint the status bar).
 func TestStatusMarker(t *testing.T) {

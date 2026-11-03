@@ -162,16 +162,16 @@ func NewWindowCmd(session, cwd, name, cmd string, env map[string]string) error {
 	return err
 }
 
-// RespawnWindow runs cmd at cwd in session's window name afresh, killing
-// whatever the window was running.
-func RespawnWindow(session, name, cwd, cmd string) error {
-	_, err := Run("respawn-window", "-k", "-c", cwd, "-t", "="+session+":"+name, wrap(nil, cmd))
+// RespawnWindow runs cmd at cwd in session's window name afresh, with env
+// exported, killing whatever the window was running.
+func RespawnWindow(session, name, cwd, cmd string, env map[string]string) error {
+	_, err := Run("respawn-window", "-k", "-c", cwd, "-t", "="+session+":"+name, wrap(env, cmd))
 	return err
 }
 
 // RenameWindow renames session's active window (used right after NewSession to
-// label the agent window "claude"; a manual rename disables automatic-rename for
-// that window, so the label sticks even as Claude runs).
+// label the agent window; a manual rename disables automatic-rename for that
+// window, so the label sticks even as the agent runs).
 func RenameWindow(session, name string) error {
 	_, err := Run("rename-window", "-t", "="+session, name)
 	return err
@@ -186,7 +186,7 @@ func SelectWindow(session, window string) error {
 
 // SelectFirstWindow activates a session's lowest-indexed window — the one it was
 // created with (the agent) — regardless of the server's base-index (the user's
-// ~/.tmux.conf may set base-index 1). Used so a switch lands on Claude, not a
+// ~/.tmux.conf may set base-index 1). Used so a switch lands on the agent, not a
 // shell opened later in the same session.
 func SelectFirstWindow(session string) error {
 	out, err := Run("list-windows", "-t", "="+session, "-F", "#{window_index}")

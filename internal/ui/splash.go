@@ -34,7 +34,7 @@ var splashKeys = []keyGroup{
 		{"M-n", "new space"}, {"M-s", "spaces"}, {"M-t", "trash"}, {"M-h", "home"}, {"M-q", "detach"},
 	}},
 	{"in a space", [][2]string{
-		{"M-a", "agent"}, {"M-c", "command line"}, {"M-p", "pull requests"}, {"M-w", "worktrees"},
+		{"M-a", "agent"}, {"M-x", "swap agent"}, {"M-c", "command line"}, {"M-p", "pull requests"}, {"M-w", "worktrees"},
 	}},
 }
 
@@ -82,7 +82,7 @@ func (m splashModel) View() string {
 	// wordmark doesn't fit.
 	logo := []string{logoStyle.Render(asciiLogo), "", dimStyle.Render(Version), ""}
 	name := []string{dimStyle.Render("atelier ") + textStyle.Render(Version), ""}
-	head := []string{dimStyle.Render("a workshop for parallel Claude Code agents"), "", ""}
+	head := []string{dimStyle.Render("a workshop for parallel coding agents"), "", ""}
 	keys := []string{keysView(), "", ""}
 	deps := []string{m.depsView(), "", ""}
 	footer := []string{faintStyle.Render(plural(m.count, "workspace") + "  ·  q detach")}
@@ -182,8 +182,10 @@ type dep struct {
 var versionRe = regexp.MustCompile(`\d+\.\d+(\.\d+)?`)
 
 // checkDeps probes the external tools atelier drives and returns each one's
-// presence + version (the Doctor part of the splash).
+// presence + version (the Doctor part of the splash). Of the two agents, the
+// configured default is required and the other optional.
 func checkDeps() []dep {
+	codex := core.LoadConfig().Agent == "codex"
 	probes := []struct {
 		name     string
 		args     []string
@@ -192,7 +194,8 @@ func checkDeps() []dep {
 		{"git", []string{"--version"}, false},
 		{"gh", []string{"--version"}, false},
 		{"tmux", []string{"-V"}, false},
-		{"claude", []string{"--version"}, false},
+		{"claude", []string{"--version"}, codex},
+		{"codex", []string{"--version"}, !codex},
 		{"diffnav", []string{"--version"}, true},
 		{"gh-enhance", []string{"--version"}, true},
 	}

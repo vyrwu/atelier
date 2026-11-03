@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/git"
 )
@@ -123,8 +124,9 @@ func (m Model) renderRow(r row, selected bool) string {
 		slug = "  " + dimStyle.Render(r.ws.Slug)
 	}
 	// Budget the title so the row fits on one line and the right block stays put.
+	// The 4 is the status and agent glyphs, each with the space after it.
 	w := m.rowWidth()
-	maxTitle := entryWidth(w - visibleWidth(bar) - 2 - visibleWidth(slug) - visibleWidth(right) - 4)
+	maxTitle := entryWidth(w - visibleWidth(bar) - 4 - visibleWidth(slug) - visibleWidth(right) - 4)
 	name := r.ws.Title
 	if name == "" {
 		name = r.ws.Slug
@@ -138,7 +140,7 @@ func (m Model) renderRow(r row, selected bool) string {
 	default:
 		name = textStyle.Render(name)
 	}
-	left := fmt.Sprintf("%s%s %s%s", bar, g, name, slug)
+	left := fmt.Sprintf("%s%s %s %s%s", bar, g, dimStyle.Render(agentGlyph(agent.Of(r.ws.Agent))), name, slug)
 	pad := w - visibleWidth(left) - visibleWidth(right)
 	if pad < 2 {
 		pad = 2

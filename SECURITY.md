@@ -16,6 +16,7 @@ Fixes land on the latest release only.
 ## Scope
 
 atelier runs locally and acts with your credentials. It writes hooks into Claude
-Code's settings, runs git and `gh` as you, and runs shell commands in tmux. Issues
+Code's and Codex's settings, runs Codex without its sandbox or approval prompts,
+runs git and `gh` as you, and runs shell commands in tmux. Issues
 that let untrusted input — a branch name, a PR title, a repository's contents —
 run commands or reach those credentials are in scope.

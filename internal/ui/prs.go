@@ -67,7 +67,7 @@ func refreshPRsCmd(slug string, wts []core.Worktree) tea.Cmd {
 }
 
 // prPollInterval is how often an open PR view re-queries GitHub on its own.
-// Nothing else in atelier polls (status is pushed by the Claude hooks), and this
+// Nothing else in atelier polls (status is pushed by the agents' hooks), and this
 // only runs while you are looking at the view: the popup is the process, so
 // closing it ends the poll.
 const prPollInterval = time.Minute

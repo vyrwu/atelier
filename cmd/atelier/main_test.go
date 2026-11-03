@@ -94,6 +94,21 @@ func TestRefreshBindingsFollowsTheServer(t *testing.T) {
 	}
 }
 
+// M-x opens the overlay straight onto the swap confirm for the space it was
+// pressed in, capturing the client first like every other popup key.
+func TestFragmentBindsSwap(t *testing.T) {
+	frag, _ := bindingsFragment()
+	for _, line := range strings.Split(frag, "\n") {
+		if strings.HasPrefix(line, "bind -n M-x ") {
+			if !strings.Contains(line, "@atelier_outer") || !strings.HasSuffix(line, ` open --swap"`) {
+				t.Errorf("M-x binding = %q", line)
+			}
+			return
+		}
+	}
+	t.Error("no M-x binding")
+}
+
 // Sourcing the fragment is what records its version in the server.
 func TestFragmentRecordsItsVersion(t *testing.T) {
 	frag, version := bindingsFragment()

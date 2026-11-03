@@ -44,7 +44,7 @@ func run(cmd string, args []string) error {
 	switch cmd {
 	case "", "up":
 		return up()
-	case "open": // the overlay; --prs / --worktrees / --new / --trash pick the starting screen
+	case "open": // the overlay; --prs / --worktrees / --new / --trash / --swap pick the starting screen
 		refreshBindings()
 		return ui.Run(tmux.GlobalOption("@atelier_outer"), startScreen(args))
 	case "home": // the landing splash — the home window's program, or --switch to move a client onto it (M-h)
@@ -54,6 +54,10 @@ func run(cmd string, args []string) error {
 		return ui.RunHome()
 	case "create": // headless background workspace builder (fired detached by M-n)
 		return createWorkspace(args)
+	case "swap": // atelier swap <slug> [--to claude|codex] — hand a space to its other agent (M-x)
+		return swapAgent(args)
+	case "handoff": // atelier handoff <slug> <agent> — the swap itself, run in the space's agent window
+		return handoff(arg(args, 0), arg(args, 1))
 	case "win": // atelier win <session> <agent|shell|diff|checks> [window] — intra-workspace window nav
 		refreshBindings()
 		return winNav(arg(args, 0), arg(args, 1), arg(args, 2))
@@ -77,10 +81,11 @@ func up() error {
 	if err := tmux.EnsureServer(); err != nil {
 		return err
 	}
-	// Dev mode ($ATELIER_DEV) shares the real ~/.claude (for auth + the guarded,
-	// env-routed hooks) but must not rewrite it — so it skips hook install.
+	// Dev mode ($ATELIER_DEV) shares the real ~/.claude and ~/.codex (for auth +
+	// the guarded, env-routed hooks) but must not rewrite them — so it skips hook
+	// install.
 	if os.Getenv("ATELIER_DEV") == "" {
-		_ = agent.InstallHooks()
+		_ = installHooks()
 	}
 	// Create the landing splash BEFORE sourcing bindings: a tmux server with no
 	// sessions exits immediately, so `source-file` needs a session alive first.
@@ -163,9 +168,21 @@ func hook(status string) error {
 	return nil
 }
 
-// install wires the Claude hooks and prints how to run atelier.
-func install() error {
+// installHooks wires atelier's status hooks into Claude, and into Codex when it
+// is installed — a Codex config is not written for someone who doesn't use it.
+func installHooks() error {
 	if err := agent.InstallHooks(); err != nil {
+		return err
+	}
+	if _, err := exec.LookPath("codex"); err == nil {
+		return agent.InstallCodexHooks()
+	}
+	return nil
+}
+
+// install wires the agent hooks and prints how to run atelier.
+func install() error {
+	if err := installHooks(); err != nil {
 		return err
 	}
 	if err := ensureBindings(); err != nil {
@@ -177,10 +194,13 @@ func install() error {
 	// Backfill trust + MCP registration for workspaces created before this ran
 	// (or by a build that wrote to the wrong Claude config dir).
 	for _, w := range core.Load().Workspaces {
-		_ = agent.PrepareProject(w.Root(), w.Slug)
+		_ = agent.Of(w.Agent).Prepare(w.Root(), w.Slug)
 	}
 	fmt.Println("atelier: hooks installed, bindings written.")
-	fmt.Println("Run `atelier` to start. Inside: M-s spaces · M-p PRs · M-w worktrees · M-t trash · M-n new · M-a agent · M-c shell · M-h home · M-q detach.")
+	if _, err := exec.LookPath("codex"); err == nil {
+		fmt.Println("Codex runs hooks only once you trust them: on the first Codex launch, review the hooks and trust atelier's (the ones running `atelier hook`).")
+	}
+	fmt.Println("Run `atelier` to start. Inside: M-s spaces · M-p PRs · M-w worktrees · M-t trash · M-n new · M-a agent · M-x swap agent · M-c shell · M-h home · M-q detach.")
 	return nil
 }
 
@@ -259,8 +279,8 @@ func bindingsBody() string {
 %[2]sset -g status-position top
 set -g status-style "bg=colour236,fg=colour252"
 # Brand (accent "atelier") + live status glyph + workspace name (white) ·
-# window-context marker (grey) so you can tell Claude from a shell, working from
-# idle. @atelier_status is pushed by the lifecycle hooks (event-driven, no poll).
+# window-context marker (grey) so you can tell the agent from a shell, working
+# from idle. @atelier_status is pushed by the lifecycle hooks (event-driven, no poll).
 # Only fg is ever changed (never bg), so the subtle grey bar stays intact.
 set -g status-left " #[fg=colour110,bold]atelier#[nobold] #[fg=colour252]#{@atelier_status}#{@atelier_title}#[fg=colour245] · #{?#{==:#{window_name},claude},Agent,Command Line}#[fg=colour252] "
 # While a background action runs, an activity spinner (@atelier_spin) takes the
@@ -290,10 +310,12 @@ bind -n M-w set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 bind -n M-t set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --trash"
 bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --new"
 # Intra-workspace window nav (run-shell DOES expand #{session_name}). M-a brings
-# the agent (Claude) back, respawning it if you exited it — everywhere, a PR's
-# windows included. M-c is the workspace base shell. Both toast (no-op) when
-# pressed off a workspace, e.g. the splash.
+# the agent back, respawning it if you exited it — everywhere, a PR's windows
+# included. M-c is the workspace base shell. Both toast (no-op) when pressed off
+# a workspace, e.g. the splash.
 bind -n M-a run-shell "%[1]s win '#{session_name}' agent"
+# M-x hands the space to its other agent (Claude <-> Codex), behind a confirm.
+bind -n M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --swap"
 # A PR's two windows swap in place: M-e in its diff (pr-*) opens its checks,
 # M-d in its checks (ci-*) goes back to the diff. Anywhere else each key is
 # passed through untouched — Alt-d is delete-word in a shell and in Claude's input.
@@ -365,6 +387,8 @@ func startScreen(args []string) string {
 		return "prs"
 	case hasFlag(args, "--worktrees"):
 		return "worktrees"
+	case hasFlag(args, "--swap"):
+		return "swap"
 	}
 	return ""
 }
@@ -379,20 +403,25 @@ func flagVal(args []string, name string) string {
 	return ""
 }
 
-// createWorkspace builds a workspace headlessly, launching Claude INSTANTLY under
-// a friendly reference name (dir + session), then naming it with Claude/Sonnet
-// mid-work. The referential name is the stable, path-keyed identity (trust, MCP,
-// transcript, worktrees all anchor to it — never renamed); the title is a mutable
-// display label. Run detached by M-n so the popup closes immediately; --switch
+// createWorkspace builds a workspace headlessly, launching its agent INSTANTLY
+// under a friendly reference name (dir + session), then naming it with that
+// agent mid-work. The referential name is the stable, path-keyed identity
+// (trust, MCP, transcript, worktrees all anchor to it — never renamed); the
+// title is a mutable display label. Run detached by M-n so the popup closes immediately; --switch
 // also lands you in it right away, before the naming call.
 func createWorkspace(args []string) error {
 	intent := strings.TrimSpace(arg(args, 0))
 	if intent == "" {
 		return nil
 	}
+	cfg := core.LoadConfig()
+	k := agent.Of(cfg.Agent)
+	if a := flagVal(args, "--agent"); a != "" {
+		k = agent.Of(a)
+	}
 	// Reserve an instant, unique referential name — no model call on the hot path.
 	w, err := core.AddUniqueWorkspace(core.Workspace{
-		Title: deterministicTitle(intent), Intent: intent, Created: time.Now(),
+		Title: deterministicTitle(intent), Intent: intent, Created: time.Now(), Agent: string(k),
 	}, core.FriendlyName)
 	if err != nil {
 		return err
@@ -407,36 +436,28 @@ func createWorkspace(args []string) error {
 		_ = core.RemoveWorkspace(slug)
 		return err
 	}
-	_ = agent.PrepareProject(root, slug)
-	if guide, err := agent.EnsureWorkspaceGuide(); err == nil {
-		_ = os.Symlink(guide, filepath.Join(root, "CLAUDE.md"))
-	}
-	env := map[string]string{"ATELIER_SESSION": slug, "ATELIER_SLUG": slug}
-	gitCfg := realGitConfigGlobal()
-	if gitCfg != "" {
-		env["GIT_CONFIG_GLOBAL"] = gitCfg // so the agent commits as the operator
-	}
-	if err := tmux.NewSession(slug, root, env, agent.LaunchCmd(intent)); err != nil {
+	_ = k.Prepare(root, slug)
+	agent.LinkGuide(root)
+	if err := agent.RunAgent(w, k, k.LaunchCmd(intent)); err != nil {
 		_ = core.RemoveWorkspace(slug)
 		return err
 	}
-	if gitCfg != "" {
+	if gitCfg := agent.GitConfigGlobal(); gitCfg != "" {
 		_ = tmux.SetSessionEnv(slug, "GIT_CONFIG_GLOBAL", gitCfg) // future windows too
 	}
-	_ = tmux.RenameWindow(slug, agent.ClaudeWindow)                        // so M-c can find/respawn it
 	_ = tmux.SetTitle(slug, w.Title)                                       // placeholder title on the status line
 	_ = tmux.SetStatusMarker(slug, agent.StatusMarker(core.StatusWorking)) // it's launching — show working at once
 
 	outer := flagVal(args, "--outer")
 	if hasFlag(args, "--switch") {
-		_ = tmux.SelectWindow(slug, agent.ClaudeWindow)
+		_ = tmux.SelectWindow(slug, agent.Window)
 		_ = tmux.SwitchClient(outer, slug)
 	}
 
 	// Name it properly, mid-work: update the title in state and the status line.
 	title := w.Title
-	if cfg := core.LoadConfig(); cfg.Naming {
-		if ttl := agent.GenerateTitle(intent, cfg.NamingModel); ttl != "" {
+	if cfg.Naming {
+		if ttl := agent.GenerateTitle(k, intent, cfg.NamingModel); ttl != "" {
 			title = ttl
 			_ = core.Update(func(s *core.State) {
 				if x := s.FindBySession(slug); x != nil {
@@ -523,10 +544,10 @@ func winNav(session, target, window string) error {
 		_, err := tmux.Run("send-keys", "-t", "="+session+":"+window, key)
 		return err
 	case "agent":
-		if err := agent.EnsureClaude(session, ws.Root(), ws.Slug); err != nil {
+		if err := agent.EnsureAgent(*ws); err != nil {
 			return err
 		}
-		if tmux.SelectWindow(session, agent.ClaudeWindow) != nil {
+		if tmux.SelectWindow(session, agent.Window) != nil {
 			_ = tmux.SelectFirstWindow(session)
 		}
 	case "shell":
@@ -535,47 +556,11 @@ func winNav(session, target, window string) error {
 	return nil
 }
 
-// realGitConfigGlobal locates the operator's real global git config so workspace
-// agents commit as them, not the OS default. Under `make dev` the XDG redirect
-// hides ~/.config/git/config and a long-lived tmux server can lack
-// GIT_CONFIG_GLOBAL, so resolving it by explicit path (rather than trusting env
-// inheritance) is what makes agent attribution reliable. Prefers an existing
-// GIT_CONFIG_GLOBAL (Makefile/prod), then the standard locations, picking the
-// first that actually configures an identity. "" if none is found.
-func realGitConfigGlobal() string {
-	var cands []string
-	if g := os.Getenv("GIT_CONFIG_GLOBAL"); g != "" {
-		cands = append(cands, g)
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		cands = append(cands, filepath.Join(home, ".config", "git", "config"), filepath.Join(home, ".gitconfig"))
-	}
-	for _, p := range cands {
-		if hasGitEmail(p) {
-			return p
-		}
-	}
-	return ""
-}
-
-// hasGitEmail reports whether the git config file at path actually configures a
-// user.email — parsed with git, not a substring match: a "[sendemail]" header or
-// a URL containing "email" would false-match, and since GIT_CONFIG_GLOBAL
-// *replaces* the global config chain (not augments it), a wrong pick would strand
-// the agent with no identity.
-func hasGitEmail(path string) bool {
-	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
-		return false
-	}
-	out, err := exec.Command("git", "config", "--file", path, "--get", "user.email").Output()
-	return err == nil && strings.TrimSpace(string(out)) != ""
-}
-
 // syncGitIdentity pins GIT_CONFIG_GLOBAL on every existing workspace session, so
 // a respawned agent or a new shell commits as the operator even if the session
 // was created before this fix (the already-running agent needs a relaunch).
 func syncGitIdentity() {
-	gc := realGitConfigGlobal()
+	gc := agent.GitConfigGlobal()
 	if gc == "" {
 		return
 	}

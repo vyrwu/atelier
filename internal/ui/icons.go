@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 )
 
@@ -31,6 +32,22 @@ const (
 	iconReviewChanges  = "" // nf-oct-comment_discussion (U+F442)
 	iconReviewPending  = "" // nf-oct-eye (U+F441)
 )
+
+// Agent glyphs mark which agent a space runs. Plain Unicode, not Nerd Font: the
+// brand icons need Nerd Fonts 3.5.1, newer than many installs. Claude's is the
+// mark it draws itself; Codex's echoes OpenAI's hexagonal knot.
+const (
+	glyphClaude = "✻"
+	glyphCodex  = "⬡"
+)
+
+// agentGlyph is the glyph for agent k.
+func agentGlyph(k agent.Kind) string {
+	if k == agent.Codex {
+		return glyphCodex
+	}
+	return glyphClaude
+}
 
 // countBadge renders "N<icon>" in colour c, or "" when n<=0 (a zero count is
 // left off the row rather than shown as noise).
