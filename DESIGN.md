@@ -8,9 +8,9 @@ behind it. Read it before changing anything.
 
 ## 1. What atelier is
 
-atelier is a **workshop for parallel coding agents** — Claude Code and Codex:
-a terminal-based agentic development environment. What an IDE is to writing
-code, atelier is to directing the agents that write it.
+atelier is a **workshop for parallel coding agents**: a terminal-based agentic
+development environment. What an IDE is to writing code, atelier is to
+directing the agents that write it.
 
 **Goal:** reviewing a pull request should be as easy as making a manual code
 change or running a command in a repository. atelier is terminal-based,
@@ -45,10 +45,10 @@ atelier is **not**:
   gh-enhance) rather than drawing its own
 - a general-purpose terminal multiplexer
 
-It supports **two agents** (Claude Code and Codex), one live per workspace, and
-**one forge** (GitHub). A workspace can hand its work from one agent to the
-other — when one runs out of quota, say — which is sequential, not
-orchestration. This is a design decision, not a limitation to be worked around.
+It supports **Claude Code and Codex**, with Grok via Cursor CLI next, one agent
+live per workspace, and **one forge** (GitHub). A workspace can hand its work
+from one agent to another — when one runs out of quota, say — which is
+sequential, not orchestration. This is a design decision, not a limitation to be worked around.
 Any abstraction that exists to support a further implementation is out of scope
 until one actually exists.
 
@@ -282,9 +282,10 @@ line calls nothing; it renders options the hooks push. Users run only
 Tripwires, not sentiments. Every one exists because its absence has a
 predictable failure mode. They are enforced in review.
 
-- **Two agents, one forge, one renderer** — Claude Code and Codex, GitHub,
-  Bubble Tea. A third agent, a second forge, or a second renderer means deleting
-  one first.
+- **Few agents, one forge, one renderer** — Claude Code and Codex (Grok via
+  Cursor CLI next), GitHub, Bubble Tea. An agent joins only with launch, resume,
+  handoff, hooks, and usage all working; a second forge or renderer means
+  deleting the first.
 - **Extract an interface only when a second real implementation exists and is in
   production.** Never for a mock, never for a hypothetical.
 - **All UI is Bubble Tea**, in `internal/ui`. No second UI technology, no
@@ -322,7 +323,7 @@ Deferred deliberately. Each needs the three-times rule to return.
 - Workspace rename, tagging, or grouping
 - Any summary or recap of what an agent did
 - Repository indexing, caching, or search
-- Concurrent agents in one workspace, a third agent, or multi-forge support
+- Concurrent agents in one workspace, or multi-forge support
 - Recovery of **deleted** workspaces (retire/restore covers deactivated ones)
 
 What is wanted next is in the README's [Roadmap](README.md#roadmap).
