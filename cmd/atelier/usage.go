@@ -47,10 +47,10 @@ func usage(args []string) error {
 	prior := status()
 	fmt.Println(prior)
 	// Agents refresh their own reading when a turn ends. Fetch here only what
-	// has gone stale without one, so idle agents cost no fetches every minute.
+	// has gone stale without one, by each agent's own measure of stale.
 	var refresh sync.WaitGroup
 	for _, k := range []agent.Kind{agent.Claude, agent.Codex} {
-		if time.Since(agent.LoadUsage(k).Observed) > agent.UsageStale {
+		if time.Since(agent.LoadUsage(k).Observed) > agent.UsageStale(k) {
 			refresh.Go(func() { _ = agent.RefreshUsage(k) })
 		}
 	}

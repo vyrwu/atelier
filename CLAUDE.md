@@ -42,8 +42,9 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   `-c` (without one it can attach to an app-server daemon lacking the space's
   env). Each agent's hooks are guarded on `$ATELIER_AGENT`.
 - Allowances: `atelier usage` is tmux's asynchronous status job. It renders
-  cached account quotas immediately and refetches only readings over 15
-  minutes old; a finished turn's hook refreshes that agent detached
+  cached account quotas immediately and refetches stale readings
+  (`UsageStale`: Codex 1 min, Claude 15 min — its `/usage` boots the CLI);
+  a finished turn's hook refreshes that agent detached
   (`atelier usage refresh <agent>`), at most once a minute each (shared file
   locks; no model calls). Codex uses
   `account/rateLimits/read`; Claude uses native `claude -p /usage`, validating

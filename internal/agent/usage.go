@@ -166,10 +166,18 @@ func decodeCodexUsage(data []byte, now time.Time) (Usage, error) {
 
 const usageDim = "#[fg=colour245,nobold]"
 
-// UsageStale is how old a reading may get before the status job fetches it
-// itself. An agent refreshes its own reading when one of its turns ends, which
-// is when allowances move; this catches the rest: a reset, or use elsewhere.
-const UsageStale = 15 * time.Minute
+// UsageStale is how old agent k's reading may get before the status job
+// fetches it itself; an agent also refreshes its own reading when one of its
+// turns ends. The fetch sets the age: Codex's app-server answers in a tenth of
+// a second of CPU, so its reading stays a minute fresh. Claude's /usage boots
+// the whole CLI, about 4s of CPU and 0.5GB, so its reading waits for a turn,
+// its own status line while a session runs, or 15 minutes.
+func UsageStale(k Kind) time.Duration {
+	if k == Codex {
+		return time.Minute
+	}
+	return 15 * time.Minute
+}
 
 // UsageStatus shows percentages spent, coloured by usage level.
 // Session-reported readings and readings older than UsageStale are '~'.
@@ -190,7 +198,7 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 		}
 		return text + " —"
 	}
-	if (k == Claude && u.Source != "native") || now.Sub(u.Observed) > UsageStale {
+	if (k == Claude && u.Source != "native") || now.Sub(u.Observed) > UsageStale(k)+time.Minute {
 		text += "~"
 	}
 	for _, b := range u.Buckets {

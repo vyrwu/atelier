@@ -271,9 +271,10 @@ These are account limits shared across spaces, and across models when
 the provider meters them together, not context-window percentages.
 
 Each agent's reading is refreshed when one of its turns ends, at most once a
-minute, and by the status line when it is over 15 minutes old (a reset, or use
-outside atelier), regardless of which agent is active. Idle agents cost no
-fetches beyond that. Codex supplies its
+minute, and by the status line once it is stale, regardless of which agent is
+active: Codex's after a minute, since its check is cheap; Claude's after 15
+minutes, since its check starts the whole Claude Code CLI, and a running Claude
+session keeps it current through its own status line anyway. Codex supplies its
 app-server rate limits; current Claude Code supplies the native `/usage` local
 command in print mode (verified with 2.1.316). Neither invokes a model, and
 Atelier does not read subscription credentials.
@@ -286,8 +287,8 @@ layout settings are preserved. Wrappers from earlier development builds without
 origin metadata keep their saved nonempty command as a local override. A partial
 capture keeps the other window. Applicable native account windows take
 precedence; if native refresh is unavailable, a session capture can restore an
-expired window with a newer reset. Readings older than 15 minutes are also
-marked `~`. Missing or expired windows remain labelled with `—`, never an
+expired window with a newer reset. Readings past their refresh by more than a
+minute are also marked `~`. Missing or expired windows remain labelled with `—`, never an
 assumed 0%. After
 upgrading, open an Atelier popup to backfill capture for existing spaces.
 
