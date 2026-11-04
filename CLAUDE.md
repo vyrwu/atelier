@@ -103,8 +103,8 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   a contiguous run, base first, joined by a gutter line — derived per render,
   never stored. Rows are ordered open · draft · merged · closed, newest first; a
   stack takes its most active member's state.
-- The generated tmux fragment advertises 24-bit colour (`terminal-features
-  ",*:RGB"`) when `$COLORTERM` says the launching terminal has it.
+- The generated tmux fragment advertises 24-bit colour (`terminal-features[100]
+  "*:RGB"`) when `$COLORTERM` says the launching terminal has it.
   WezTerm also gets synchronized redraws (`sync`) for complete popup frames.
 - Bindings are regenerated from the binary: `up`/`install` always write and
   source the fragment, and the popup and window keys (`open`, `win`) re-sync it

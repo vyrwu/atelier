@@ -224,10 +224,12 @@ func install() error {
 // program emits down to the 256-palette, which is why themes inside atelier can
 // look flatter than the same tool run outside it. Read from the launching
 // terminal rather than assumed, so a terminal that can't do it isn't promised.
+// A fixed array slot keeps repeated sourcing idempotent; appending added an
+// entry on every source.
 func rgbSetting() string {
 	switch strings.ToLower(os.Getenv("COLORTERM")) {
 	case "truecolor", "24bit":
-		return "set -as terminal-features \",*:RGB\"\n"
+		return "set -g terminal-features[100] \"*:RGB\"\n"
 	}
 	return ""
 }
