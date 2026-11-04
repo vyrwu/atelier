@@ -168,7 +168,19 @@ func hook(status string) error {
 		_ = tmux.SetStatusMarker(session, agent.StatusMarker(core.AgentStatus(status)))
 		agent.RefreshAttention() // recompute + push the blocked-count badge + redraw
 	}
+	// A turn ending (or cut off by a usage limit) is when an agent's allowance
+	// moves. Refresh it detached, so the hook never holds up the agent.
+	if session != "" && status != string(core.StatusWorking) {
+		detach("usage", "refresh", os.Getenv("ATELIER_AGENT"))
+	}
 	return nil
+}
+
+// detach runs this binary with args in its own session, outliving the caller.
+func detach(args ...string) {
+	c := exec.Command(self(), args...)
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	_ = c.Start()
 }
 
 // installHooks wires atelier's status hooks into Claude, and into Codex when it

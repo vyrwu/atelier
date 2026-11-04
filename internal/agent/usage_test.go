@@ -144,7 +144,7 @@ func TestUsageStatusFreshnessAndLabels(t *testing.T) {
 	if strings.Contains(renderUsage(Codex, u, now), "~") {
 		t.Error("fresh Codex data marked stale")
 	}
-	if !strings.Contains(renderUsage(Codex, u, now.Add(3*time.Minute)), "~") || !strings.Contains(renderUsage(Claude, u, now), "~") {
+	if !strings.Contains(renderUsage(Codex, u, now.Add(UsageStale+time.Minute)), "~") || !strings.Contains(renderUsage(Claude, u, now), "~") {
 		t.Error("last observed usage must be marked cached")
 	}
 	u.Buckets = append(u.Buckets, UsageBucket{Name: "#[fg=red]\n#{shell}"})

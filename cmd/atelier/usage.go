@@ -15,10 +15,14 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 )
 
-// usage is the asynchronous tmux status job, or Claude's status-line capture.
-// Rendering never waits on the network: tmux sees the cache immediately, and
-// fresh readings replace it when the metadata fetches finish.
+// usage is the asynchronous tmux status job, an agent's refresh after a turn
+// (see hook), or Claude's status-line capture. Rendering never waits on the
+// network: tmux sees the cache immediately, and fresh readings replace it when
+// the metadata fetches finish.
 func usage(args []string) error {
+	if arg(args, 0) == "refresh" { // atelier usage refresh <agent>
+		return agent.RefreshUsage(agent.Of(arg(args, 1)))
+	}
 	if arg(args, 0) == "claude" {
 		data, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20))
 		if err != nil {
@@ -42,9 +46,13 @@ func usage(args []string) error {
 	}
 	prior := status()
 	fmt.Println(prior)
+	// Agents refresh their own reading when a turn ends. Fetch here only what
+	// has gone stale without one, so idle agents cost no fetches every minute.
 	var refresh sync.WaitGroup
 	for _, k := range []agent.Kind{agent.Claude, agent.Codex} {
-		refresh.Go(func() { _ = agent.RefreshUsage(k) })
+		if time.Since(agent.LoadUsage(k).Observed) > agent.UsageStale {
+			refresh.Go(func() { _ = agent.RefreshUsage(k) })
+		}
 	}
 	refresh.Wait()
 	if current := status(); current != prior {

@@ -295,8 +295,9 @@ predictable failure mode. They are enforced in review.
   index. Don't store what can be derived (NFR-R2).
 - **Prefer events, and there is no daemon.** GitHub can't push to atelier, so
   an open pull request view re-queries once a minute. Agent account allowances
-  are also fetched at most once a minute each, through an asynchronous tmux status
-  job while a status line is visible. Neither fetch blocks rendering or agent
+  are fetched when an agent's turn ends (its hook), at most once a minute each,
+  and by the asynchronous tmux status job only once a reading is 15 minutes old,
+  for resets and use outside atelier. Neither fetch blocks rendering or agent
   startup. Current Claude Code has a non-interactive native `/usage` command;
   session status-line payloads are a fallback for versions without it. Cached
   and expired observations are marked explicitly.

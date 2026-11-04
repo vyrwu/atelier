@@ -166,8 +166,13 @@ func decodeCodexUsage(data []byte, now time.Time) (Usage, error) {
 
 const usageDim = "#[fg=colour245,nobold]"
 
+// UsageStale is how old a reading may get before the status job fetches it
+// itself. An agent refreshes its own reading when one of its turns ends, which
+// is when allowances move; this catches the rest: a reset, or use elsewhere.
+const UsageStale = 15 * time.Minute
+
 // UsageStatus shows percentages spent, coloured by usage level.
-// Session-reported readings and metadata older than two minutes are '~'.
+// Session-reported readings and readings older than UsageStale are '~'.
 // Expired data never implies an unused allowance.
 func UsageStatus(claude, codex Usage, now time.Time) string {
 	return renderUsage(Claude, claude, now) + usageDim + " · " + renderUsage(Codex, codex, now) + usageDim + " spent"
@@ -185,7 +190,7 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 		}
 		return text + " —"
 	}
-	if (k == Claude && u.Source != "native") || now.Sub(u.Observed) > 2*time.Minute {
+	if (k == Claude && u.Source != "native") || now.Sub(u.Observed) > UsageStale {
 		text += "~"
 	}
 	for _, b := range u.Buckets {

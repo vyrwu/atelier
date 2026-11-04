@@ -13,8 +13,8 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 )
 
-// RefreshUsage fetches account metadata at most once per minute per agent
-// across all attached clients. Neither provider needs a model call or a live
+// RefreshUsage fetches account metadata at most once per minute per agent,
+// however many turns end or status lines ask. Neither provider needs a model call or a live
 // interactive session, so both balances stay current regardless of focus.
 func RefreshUsage(k Kind) error {
 	path := usagePath(k)

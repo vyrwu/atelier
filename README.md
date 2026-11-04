@@ -270,8 +270,10 @@ brand colours; percentages are green below 75% spent, amber at 75%, and red at
 These are account limits shared across spaces, and across models when
 the provider meters them together, not context-window percentages.
 
-Both agents' account metadata is refreshed at most once a minute while the
-status line is visible, regardless of the active agent. Codex supplies its
+Each agent's reading is refreshed when one of its turns ends, at most once a
+minute, and by the status line when it is over 15 minutes old (a reset, or use
+outside atelier), regardless of which agent is active. Idle agents cost no
+fetches beyond that. Codex supplies its
 app-server rate limits; current Claude Code supplies the native `/usage` local
 command in print mode (verified with 2.1.316). Neither invokes a model, and
 Atelier does not read subscription credentials.
@@ -284,7 +286,7 @@ layout settings are preserved. Wrappers from earlier development builds without
 origin metadata keep their saved nonempty command as a local override. A partial
 capture keeps the other window. Applicable native account windows take
 precedence; if native refresh is unavailable, a session capture can restore an
-expired window with a newer reset. Metadata older than two minutes is also
+expired window with a newer reset. Readings older than 15 minutes are also
 marked `~`. Missing or expired windows remain labelled with `—`, never an
 assumed 0%. After
 upgrading, open an Atelier popup to backfill capture for existing spaces.
