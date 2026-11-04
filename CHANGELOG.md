@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/vyrwu/atelier/compare/v1.0.1...v1.1.0) (2026-11-04)
+
+
+### Features
+
+* **agent:** Add Codex, session handoffs, and usage indicators ([#107](https://github.com/vyrwu/atelier/issues/107)) ([845f806](https://github.com/vyrwu/atelier/commit/845f80605407528fd10db9896261a488b9a088b0))
+
 ## [1.0.1](https://github.com/vyrwu/atelier/compare/v1.0.0...v1.0.1) (2026-10-25)
 
 
