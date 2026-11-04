@@ -297,25 +297,34 @@ func InstallClaudeUsage(root string) error {
 		if v, ok := cfg["statusLine"]; ok {
 			fields, _ := v.(map[string]any)
 			if fields == nil {
-				fields = map[string]any{}
+				status = map[string]any{}
+				localStatus = p == path
+				continue
 			}
 			if p == path {
-				command, _ := fields["command"].(string)
+				command, hasCommand := fields["command"].(string)
+				localStatus = hasCommand
 				if strings.HasPrefix(command, usageCaptureMark) {
 					original, err := unwrapUsageCommand(command)
 					if err != nil {
 						return err
 					}
 					if strings.HasPrefix(command, usageInheritedMark) || original == "" {
-						continue // re-read the current global/project status command
+						// Inherit the current command, keeping local fields such
+						// as padding. Command provenance is independent of them.
+						delete(fields, "command")
+						delete(fields, "type")
+						localStatus = false
+					} else {
+						// Older wrappers did not record provenance. Preserve their
+						// nonempty command as a local override rather than lose it.
+						fields["command"] = original
 					}
-					// Older wrappers did not record provenance. Preserve their
-					// nonempty command as a local override rather than lose it.
-					fields["command"] = original
 				}
-				localStatus = true
 			}
-			status = fields
+			for key, value := range fields {
+				status[key] = value
+			}
 		}
 	}
 	original, _ := status["command"].(string)

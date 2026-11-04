@@ -204,6 +204,19 @@ func TestInstallClaudeUsagePreservesSettings(t *testing.T) {
 	if string(got) != string(data) || !json.Valid(got) {
 		t.Error("InstallClaudeUsage changed global settings")
 	}
+	// A local layout override must survive refreshing an inherited command.
+	var edited map[string]any
+	if err := json.Unmarshal(local, &edited); err != nil {
+		t.Fatal(err)
+	}
+	edited["statusLine"].(map[string]any)["padding"] = 5
+	local, err = json.Marshal(edited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localPath, local, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// Generated local wrappers must keep following inherited settings, while
 	// commands explicitly authored in settings.local.json remain local.
 	for _, tc := range []struct{ path, command, want string }{
@@ -212,7 +225,11 @@ func TestInstallClaudeUsagePreservesSettings(t *testing.T) {
 		{localPath, "local-status", "local-status"},
 		{filepath.Join(root, ".claude", "settings.json"), "new-project-status", "local-status"},
 	} {
-		data := fmt.Sprintf(`{"statusLine":{"type":"command","command":%q}}`, tc.command)
+		padding := 2
+		if tc.path == localPath {
+			padding = 5
+		}
+		data := fmt.Sprintf(`{"statusLine":{"type":"command","command":%q,"padding":%d}}`, tc.command, padding)
 		if err := os.WriteFile(tc.path, []byte(data), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -220,6 +237,7 @@ func TestInstallClaudeUsagePreservesSettings(t *testing.T) {
 			t.Fatal(err)
 		}
 		local, _ := os.ReadFile(localPath)
+		cfg.Status.Padding = 0
 		if err := json.Unmarshal(local, &cfg); err != nil {
 			t.Fatal(err)
 		}
@@ -227,6 +245,9 @@ func TestInstallClaudeUsagePreservesSettings(t *testing.T) {
 		original, err := base64.StdEncoding.DecodeString(strings.Trim(fields[len(fields)-1], "'"))
 		if err != nil || string(original) != tc.want {
 			t.Fatalf("wrapped status = %q, %v, want %q", original, err, tc.want)
+		}
+		if cfg.Status.Padding != 5 {
+			t.Fatalf("local padding reverted to %d, want 5", cfg.Status.Padding)
 		}
 	}
 }
