@@ -67,7 +67,8 @@ func syncUsageCapture() {
 // and socket. A long-lived tmux server need not have inherited today's env.
 func usageJob() string {
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-	cmd := "env ATELIER_SOCKET=" + quote(core.LoadConfig().Socket)
+	// A removed override must also disappear from the old server's environment.
+	cmd := "env -u XDG_CACHE_HOME -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u PATH ATELIER_SOCKET=" + quote(core.LoadConfig().Socket)
 	for _, key := range []string{"XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH"} {
 		if value, ok := os.LookupEnv(key); ok {
 			cmd += " " + key + "=" + quote(value)
