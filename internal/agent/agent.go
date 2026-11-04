@@ -1,6 +1,5 @@
-// Package agent launches Claude Code in a workspace and tracks each session's
-// runtime status. Claude is the one agent atelier drives, so there is no
-// adapter abstraction here.
+// Package agent launches a space's coding agent — Claude Code or Codex — hands
+// a space from one to the other, and tracks each session's runtime status.
 //
 // Status is per-session runtime state — "is this agent working, blocked on the
 // user, idle, or gone?" — stored as a tiny file under CacheDir()/agents/<session>
@@ -22,65 +21,69 @@ import (
 	"github.com/vyrwu/atelier/internal/tmux"
 )
 
-// ClaudeWindow is the tmux window name of the agent (Claude) within a workspace
-// session, so it can always be found and respawned regardless of window index.
-const ClaudeWindow = "claude"
+// Window is the tmux window name of a space's agent, so it can always be found
+// and respawned regardless of window index. The name predates Codex; it runs
+// whichever agent the space has.
+const Window = "claude"
 
-// EnsureClaude makes sure the workspace's Claude window is running and ready to
-// select: it revives the whole session if it's gone, or respawns just the
-// "claude" window if you exited Claude but left other windows (shells) open —
-// so M-a always brings Claude back. Resumes the prior conversation.
-func EnsureClaude(session, root, slug string) error {
-	env := map[string]string{"ATELIER_SESSION": slug, "ATELIER_SLUG": slug}
-	if !tmux.HasSession(session) {
-		if err := tmux.NewSession(session, root, env, ResumeCmd()); err != nil {
-			return err
+// EnsureAgent makes sure the space's agent window is running and ready to
+// select: it revives the whole session if it's gone, or respawns just the agent
+// window if you exited the agent but left other windows (shells) open — so M-a
+// always brings it back. It resumes the space's conversation with its agent.
+func EnsureAgent(ws core.Workspace) error {
+	if tmux.HasSession(ws.Session) && tmux.HasWindow(ws.Session, Window) {
+		return nil
+	}
+	k := Of(ws.Agent)
+	return RunAgent(ws, k, k.ResumeCmd(LatestSession(k, ws.Root(), ws.Created), ""))
+}
+
+// RunAgent runs cmd as the space's agent k: in a new session if the space has
+// none, in a new agent window if that was closed, or in place of the agent that
+// is running — which is how a swap replaces one agent with the other without
+// killing the session (and detaching whoever is in it with its last window).
+func RunAgent(ws core.Workspace, k Kind, cmd string) error {
+	env := Env(ws.Slug, k)
+	_ = InstallClaudeUsage(ws.Root())
+	var err error
+	switch {
+	case !tmux.HasSession(ws.Session):
+		if err = tmux.NewSession(ws.Session, ws.Root(), env, cmd); err == nil {
+			err = tmux.RenameWindow(ws.Session, Window)
 		}
-		return tmux.RenameWindow(session, ClaudeWindow)
+	case !tmux.HasWindow(ws.Session, Window):
+		err = tmux.NewWindowCmd(ws.Session, ws.Root(), Window, cmd, env)
+	default:
+		err = tmux.RespawnWindow(ws.Session, Window, ws.Root(), cmd, env)
 	}
-	if !tmux.HasWindow(session, ClaudeWindow) {
-		return tmux.NewWindowCmd(session, root, ClaudeWindow, ResumeCmd(), env)
+	if err != nil {
+		return err
 	}
-	return nil
+	return tmux.SetAgentName(ws.Session, k.Label())
 }
 
-// LaunchCmd returns the shell command that starts Claude Code in the workspace
-// with intent as its opening prompt. Claude Code accepts an initial prompt as a
-// positional argument, so the command is `claude <shell-quoted-intent>`. The
-// tmux layer runs the returned string.
-func LaunchCmd(intent string) string {
-	return "claude " + shellQuote(intent)
-}
-
-// ResumeCmd starts Claude resuming the workspace's most recent conversation,
-// falling back to a fresh session if there is none. Used to revive a workspace
-// whose agent session died (e.g. the tmux server was restarted) so switching to
-// it picks up where the agent left off instead of re-running the intent.
-func ResumeCmd() string {
-	return "claude --continue || claude"
-}
-
-// GenerateTitle asks Claude for a short human title for intent (used to name the
-// workspace and its directory). It shells out to `claude -p` with an optional
-// model override and returns "" on any failure or an implausible answer, so the
-// caller can fall back to a deterministic title. Blocking: the caller runs it
-// off the UI's update loop (as a tea.Cmd).
-func GenerateTitle(intent, model string) string {
-	// --no-session-persistence: a print-mode session is otherwise saved under the
-	// directory it ran in — here, whatever space the overlay was opened from — and
-	// would become the conversation `claude --continue` resumes there.
-	args := []string{"-p", "--no-session-persistence",
-		"Reply with ONLY a 3-6 word title for this task, no trailing punctuation:\n\n" + intent}
-	if model != "" {
-		args = append([]string{"--model", model}, args...)
+// Env is what agent k's process needs from atelier: the space identity its hooks
+// and MCP server key on, which agent it is (see hookCommand), and the operator's
+// git identity so it commits as them.
+func Env(slug string, k Kind) map[string]string {
+	env := map[string]string{"ATELIER_SESSION": slug, "ATELIER_SLUG": slug, "ATELIER_AGENT": string(k)}
+	if g := GitConfigGlobal(); g != "" {
+		env["GIT_CONFIG_GLOBAL"] = g
 	}
-	out, err := exec.Command("claude", args...).Output()
+	return env
+}
+
+// GenerateTitle asks agent k for a short human title for intent (used to name
+// the workspace and its directory), with an optional model override. It returns
+// "" on any failure or an implausible answer, so the caller can fall back to a
+// deterministic title. Blocking: the caller runs it off the UI's update loop.
+func GenerateTitle(k Kind, intent, model string) string {
+	t, err := k.Ask("Reply with ONLY a 3-6 word title for this task, no trailing punctuation:\n\n"+intent, "", model)
 	if err != nil {
 		return ""
 	}
 	// Be forgiving of minor chattiness: take the first non-empty line and drop
 	// any wrapping quotes, rather than rejecting the whole answer.
-	t := strings.TrimSpace(string(out))
 	if i := strings.IndexByte(t, '\n'); i >= 0 {
 		t = strings.TrimSpace(t[:i])
 	}
@@ -89,6 +92,42 @@ func GenerateTitle(intent, model string) string {
 		return ""
 	}
 	return t
+}
+
+// GitConfigGlobal locates the operator's real global git config so workspace
+// agents commit as them, not the OS default. Under `make dev` the XDG redirect
+// hides ~/.config/git/config and a long-lived tmux server can lack
+// GIT_CONFIG_GLOBAL, so resolving it by explicit path (rather than trusting env
+// inheritance) is what makes agent attribution reliable. Prefers an existing
+// GIT_CONFIG_GLOBAL (Makefile/prod), then the standard locations, picking the
+// first that actually configures an identity. "" if none is found.
+func GitConfigGlobal() string {
+	var cands []string
+	if g := os.Getenv("GIT_CONFIG_GLOBAL"); g != "" {
+		cands = append(cands, g)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		cands = append(cands, filepath.Join(home, ".config", "git", "config"), filepath.Join(home, ".gitconfig"))
+	}
+	for _, p := range cands {
+		if hasGitEmail(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// hasGitEmail reports whether the git config file at path actually configures a
+// user.email — parsed with git, not a substring match: a "[sendemail]" header or
+// a URL containing "email" would false-match, and since GIT_CONFIG_GLOBAL
+// *replaces* the global config chain (not augments it), a wrong pick would strand
+// the agent with no identity.
+func hasGitEmail(path string) bool {
+	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
+		return false
+	}
+	out, err := exec.Command("git", "config", "--file", path, "--get", "user.email").Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
 // statusFile is the path of the status file for session.

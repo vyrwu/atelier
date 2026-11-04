@@ -15,6 +15,9 @@ func (m Model) updateNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.beginCreate(m.intent.Value(), false) // Enter → start in the background
 	case tea.KeyEsc:
 		return m, tea.Quit
+	case tea.KeyTab:
+		m.newAgent = m.newAgent.Other()
+		return m, nil
 	}
 	// Enter is submit; newline is Ctrl-J only (Alt+Enter is start-and-open).
 	m.intent.KeyMap.InsertNewline.SetKeys("ctrl+j")
@@ -25,7 +28,10 @@ func (m Model) updateNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) viewNew() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("What are we doing today?"))
+	// The agent is part of the question, so Tab reads as asking the other one.
+	b.WriteString(titleStyle.Render("What can ") + agentGlyph(m.newAgent) + " " +
+		dimStyle.Bold(true).Render(m.newAgent.Label()) +
+		titleStyle.Render(" do for you?"))
 	b.WriteString("\n\n")
 	b.WriteString(m.intent.View())
 	return b.String()

@@ -1,7 +1,8 @@
 # CLAUDE.md — atelier
 
-A workshop for parallel Claude Code agents: a terminal-based agentic development
-environment, where reviewing a PR should be as easy as making the change by hand.
+A workshop for parallel coding agents (Claude Code and Codex today; Grok via
+Cursor CLI next): a terminal-based agentic development environment, where
+reviewing a PR should be as easy as making the change by hand.
 The design, its principles (`NFR-*`, cited in code), and the rules (§5) are in
 DESIGN.md, imported below. User-facing behaviour is README.md; contributor
 workflow is CONTRIBUTING.md — keep all three in step with the code.
@@ -14,19 +15,51 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/tmux` — tmux CLI wrapper (dedicated socket)
 - `internal/git` — worktree derivation + git queries
 - `internal/forge` — `gh` PR queries + open-in-browser
-- `internal/agent` — Claude launch/resume, per-session status, hooks, Claude
-  config (trust + MCP registration), the per-workspace guide
+- `internal/agent` — the two agents (Claude Code, Codex): launch/resume, finding
+  and exporting their conversations for a handoff, per-session status, hooks,
+  their config (trust + MCP registration), the per-workspace guide
 - `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
 - `internal/ui` — the Bubble Tea overlay + the home splash (the only UI)
-- `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `win` / `hook`
-  / `mcp` / `install` / `version`
+- `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
+  `handoff` / `win` / `hook` / `usage` / `mcp` / `install` / `version`
 
 ## Model & bindings
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
-  `claude` window runs the agent (named windows: `claude`, `shell`,
+  `claude` window runs the agent — Claude Code or Codex, `Workspace.Agent` (""
+  = claude); the window name predates Codex (named windows: `claude`, `shell`,
   `<repo>-<branch>` per worktree — nav is keyed on names, so
   `automatic-rename`/`allow-rename` are off).
+- Swap (`M-x`, or on a Spaces row): `atelier swap` respawns the agent window
+  with `atelier handoff`, which exports the outgoing agent's conversation since
+  `SwappedAt` to `.atelier/handoff/`, records the swap, then execs into the
+  incoming agent at once — resuming its latest conversation in the space
+  (derived from its transcripts, never recorded), or starting one; a swap to
+  the same agent (`Tab` in the confirm, `--to`) always starts one.
+  A launch reservation covers the gap before the handoff owns the per-space
+  lock; abandoned launches expire after 30 seconds. Exports are owner-only.
+  Codex runs with `--dangerously-bypass-approvals-and-sandbox` and always a
+  `-c` (without one it can attach to an app-server daemon lacking the space's
+  env). Each agent's hooks are guarded on `$ATELIER_AGENT`.
+- Allowances: `atelier usage` is tmux's asynchronous status job. It renders
+  cached account quotas immediately and refetches stale readings
+  (`UsageStale`: Codex 1 min, Claude 15 min — its `/usage` boots the CLI);
+  a finished turn's hook refreshes that agent detached
+  (`atelier usage refresh <agent>`), at most once a minute each (shared file
+  locks; no model calls). Codex uses
+  `account/rateLimits/read`; Claude uses native `claude -p /usage`, validating
+  `local_command=usage` and zero turns/cost. Reset dates are parsed in UTC;
+  unsupported output fails closed. Claude spaces also use local `statusLine`
+  settings as a fallback to capture native JSON with
+  `atelier usage claude`, chaining any existing custom command without editing
+  global settings. Updating bindings backfills these settings so existing
+  Claude sessions hot-reload the collector too. Cache files under
+  `CacheDir()/usage/` hold quota metadata
+  only, partitioned by agent config directory. Applicable native windows take
+  precedence; captures can restore an expired window with a newer reset.
+  `~` means last observed or stale; an
+  expired window is unknown. Percentage spent uses green/amber/red based
+  on spent quota; the icon retains its brand colour.
 - Lifecycle: create → **active**; `M-d` delete → Trash (kill processes, keep on
   disk); Trash `↵` restore (resume); Trash `M-d` delete permanently (confirm).
   `Retired bool` + `RetiredAt` on the workspace (zero value = active, no migration).
@@ -34,7 +67,8 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   (background). `M-h` switches to the home splash (a session switch, not an
   overlay); the keymap, version, and dependency doctor live there — there is no
   Help screen. `M-p` and `M-w` are scoped to the current space (off one they
-  toast and close). In-space: `M-a` agent · `M-c` shell. `M-q` detaches. Leader is `M-`
+  toast and close). In-space: `M-a` agent · `M-x` swap agent · `M-c` shell.
+  `M-n`: `Tab` picks the agent. `M-q` detaches. Leader is `M-`
   (Alt), hardcoded. New spaces build via a detached `atelier create`; feedback is
   a status-line spinner (`@atelier_spin`) that resolves into a check-mark.
 - PR view: `↵` opens the diff as a window, `M-e` its checks, `M-b` the
@@ -56,8 +90,9 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   to its PR). Both bindings test the window name first and send the key through
   anywhere else (Alt-d is delete-word). `M-a` is the agent everywhere — never
   overload it, not even in a PR's windows.
-- Status line is event-driven: the per-session marker (`@atelier_status`) and the
-  attention badge (`@atelier_attention`) are pushed by the Claude hooks. Entering
+- Agent status is event-driven: the per-session marker (`@atelier_status`) and the
+  attention badge (`@atelier_attention`) are pushed by the agents' hooks (Codex's
+  run only once the user trusts them). Entering
   a blocked space sets it idle, so the badge clears until the agent asks again.
   The hooks never refresh PRs. PR status
   is one GraphQL query for the whole space (worktree branches + registered PRs by
@@ -68,8 +103,9 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   a contiguous run, base first, joined by a gutter line — derived per render,
   never stored. Rows are ordered open · draft · merged · closed, newest first; a
   stack takes its most active member's state.
-- The generated tmux fragment advertises 24-bit colour (`terminal-features
-  ",*:RGB"`) when `$COLORTERM` says the launching terminal has it.
+- The generated tmux fragment advertises 24-bit colour (`terminal-features[100]
+  "*:RGB"`) when `$COLORTERM` says the launching terminal has it.
+  WezTerm also gets synchronized redraws (`sync`) for complete popup frames.
 - Bindings are regenerated from the binary: `up`/`install` always write and
   source the fragment, and the popup and window keys (`open`, `win`) re-sync it
   whenever the server's `@atelier_bindings` marker (a hash the fragment sets
@@ -81,8 +117,10 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 ## Working here
 
 - **Tests cover the headless core only** — the domain (state file, paths,
-  config), agent status + the Claude hook merge, worktree derivation, the PR query, and list rendering. Anything that shells out to tmux, `gh`, or
-  Claude stays untested; don't add an abstraction to make it mockable.
+  config), agent status + the hook merges, finding and exporting agent
+  conversations, worktree derivation, the PR query, and list rendering.
+  Anything that shells out to tmux, `gh`, or an agent stays untested; don't add
+  an abstraction to make it mockable.
   Run `make test`, `go vet ./...`, and `golangci-lint run ./...` before
   committing. Commits are Conventional Commits (release-please reads them).
 - Delete dead code rather than keep it. Elegance and fitness-for-purpose over

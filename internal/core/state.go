@@ -170,3 +170,21 @@ func LockFile(path string) (func(), error) {
 	}
 	return func() { _ = funlock(f); _ = f.Close() }, nil
 }
+
+// TryLockFile takes the lock at path only if nobody holds it: ok is false when
+// another process does. The kernel drops the lock with its holder, so a crashed
+// holder never leaves it taken.
+func TryLockFile(path string) (unlock func(), ok bool, err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, false, err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tryFlock(f); err != nil {
+		_ = f.Close()
+		return nil, false, nil
+	}
+	return func() { _ = funlock(f); _ = f.Close() }, true, nil
+}

@@ -109,7 +109,7 @@ func (m Model) openWorktreeShell(wt core.Worktree) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	session := m.curWS.Session
-	_ = agent.EnsureClaude(session, m.curWS.Root(), m.curWS.Slug) // ensure the session is alive
+	_ = agent.EnsureAgent(*m.curWS) // ensure the session is alive
 	name := wtWindow(wt)
 	if tmux.HasWindow(session, name) {
 		_ = tmux.SelectWindow(session, name)

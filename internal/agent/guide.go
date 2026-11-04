@@ -1,10 +1,11 @@
 package agent
 
-// workspaceGuide is the default per-workspace CLAUDE.md. It is written once to
-// the central WorkspaceGuidePath and symlinked into every workspace; the user
-// owns it thereafter. Kept short and imperative so the agent actually follows it.
+// workspaceGuide is the default per-workspace guide. It is written once to the
+// central WorkspaceGuidePath and symlinked into every workspace as both
+// CLAUDE.md and AGENTS.md; the user owns it thereafter. Kept short and
+// imperative so the agent actually follows it.
 const workspaceGuide = "# Working inside an atelier workspace\n" + `
-You are Claude Code running in an **atelier workspace**: a dedicated scratch
+You are a coding agent running in an **atelier workspace**: a dedicated scratch
 directory for ONE task. Your operator runs many of these in parallel and
 switches between them. This directory is yours alone, it starts empty, and it is
 NOT a repository — you do your work in git worktrees you create here.

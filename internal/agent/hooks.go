@@ -24,6 +24,7 @@ import (
 // leaving an unparseable file untouched. Best-effort: worst case is a one-time
 // prompt or an unregistered tool, never a corrupt file (atomic write).
 func PrepareProject(dir, slug string) error {
+	_ = InstallClaudeUsage(dir)
 	path := claudeConfigJSON()
 	unlock, err := lockConfig(path)
 	if err != nil {
@@ -64,32 +65,41 @@ func PrepareProject(dir, slug string) error {
 	return writeConfig(path, out, 0o600)
 }
 
-// atelierMCPServer is the local-scope MCP server entry for a workspace. It pins
-// the workspace via ATELIER_SESSION and forwards the path-controlling env that
-// is active now, so the server (launched later by Claude) reads the same state,
-// config, and ateliers root — critical under `make dev`, which relocates them.
+// atelierMCPServer is the local-scope MCP server entry for a workspace.
 func atelierMCPServer(slug string) map[string]any {
-	self, err := os.Executable()
-	if err != nil {
-		self = "atelier"
+	return map[string]any{
+		"type":    "stdio",
+		"command": selfPath(),
+		"args":    []string{"mcp"},
+		"env":     mcpEnv(slug),
 	}
+}
+
+// mcpEnv is the environment atelier's MCP server is launched with, by either
+// agent. It pins the workspace via ATELIER_SESSION and forwards the
+// path-controlling env that is active now, so the server reads the same state,
+// config, and ateliers root — critical under `make dev`, which relocates them.
+func mcpEnv(slug string) map[string]string {
 	env := map[string]string{"ATELIER_SESSION": slug}
 	for _, k := range []string{"ATELIER_ROOT", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"} {
 		if v := os.Getenv(k); v != "" {
 			env[k] = v
 		}
 	}
-	return map[string]any{
-		"type":    "stdio",
-		"command": self,
-		"args":    []string{"mcp"},
-		"env":     env,
-	}
+	return env
 }
 
-// EnsureWorkspaceGuide writes the default per-workspace CLAUDE.md to the central
+// selfPath is this binary, for agents to launch as the MCP server.
+func selfPath() string {
+	if p, err := os.Executable(); err == nil {
+		return p
+	}
+	return "atelier"
+}
+
+// EnsureWorkspaceGuide writes the default per-workspace guide to the central
 // WorkspaceGuidePath if it does not exist yet (never overwriting the user's
-// edits), and returns its path. New workspaces symlink their CLAUDE.md to it.
+// edits), and returns its path. Workspaces symlink to it (see LinkGuide).
 func EnsureWorkspaceGuide() (string, error) {
 	path := core.WorkspaceGuidePath()
 	if _, err := os.Stat(path); err == nil {
@@ -104,11 +114,29 @@ func EnsureWorkspaceGuide() (string, error) {
 	return path, nil
 }
 
-// hookCommand builds the guarded shell command atelier wires into a Claude
-// lifecycle event: it is a no-op unless $ATELIER_SESSION is set, so a user's
-// non-atelier Claude sessions are unaffected.
-func hookCommand(status string) string {
-	return `[ -n "$ATELIER_SESSION" ] && atelier hook ` + status + " || true"
+// LinkGuide links the central guide into a workspace under the name each agent
+// reads — CLAUDE.md for Claude, AGENTS.md for Codex, which never reads the
+// other's — so whichever agent the space runs, now or after a swap, has it. An
+// existing file of either name is left alone.
+func LinkGuide(root string) {
+	guide, err := EnsureWorkspaceGuide()
+	if err != nil {
+		return
+	}
+	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		_ = os.Symlink(guide, filepath.Join(root, name))
+	}
+}
+
+// hookCommand builds the guarded shell command atelier wires into agent k's
+// lifecycle event. It is a no-op unless $ATELIER_SESSION is set, so a user's
+// non-atelier sessions are unaffected, and unless $ATELIER_AGENT names k: a
+// space's agent can start the other one on the side (codex-plugin-cc runs Codex
+// from inside Claude), whose hooks must not report as the space's. Windows from
+// before there was a choice have no $ATELIER_AGENT, and run Claude. It prints
+// nothing: both agents add what some hooks print to the model's context.
+func hookCommand(status string, k Kind) string {
+	return `[ -n "$ATELIER_SESSION" ] && [ "${ATELIER_AGENT:-claude}" = ` + string(k) + ` ] && atelier hook ` + status + " || true"
 }
 
 // atelierHook is one lifecycle event atelier listens to: the status it records,
@@ -134,6 +162,8 @@ const needsYou = "permission_prompt|elicitation_dialog|elicitation_url_dialog|ag
 //     which is work under way; the first prompt or tool flips it to working)
 //   - Notification, when Claude needs you → blocked
 //   - Stop                             → idle    (the turn finished)
+//   - StopFailure                      → blocked (an API error ended the turn —
+//     above all a usage limit, which is when you hand the space to Codex)
 func atelierHooks() map[string]atelierHook {
 	return map[string]atelierHook{
 		"UserPromptSubmit": {status: "working"},
@@ -142,6 +172,7 @@ func atelierHooks() map[string]atelierHook {
 		"PostToolUse":      {status: "working"},
 		"Notification":     {status: "blocked", matcher: needsYou},
 		"Stop":             {status: "idle"},
+		"StopFailure":      {status: "blocked"},
 	}
 }
 
@@ -175,12 +206,15 @@ func settingsPath() string {
 }
 
 // InstallHooks merges atelier's lifecycle hooks into the user's global Claude
-// settings (~/.claude/settings.json), preserving all existing content. It reads
-// the current settings, adds one guarded command hook per lifecycle event
-// (replacing any prior atelier hook for that event while keeping the user's own
-// hooks), and writes the result atomically.
-func InstallHooks() error {
-	path := settingsPath()
+// settings (~/.claude/settings.json), preserving all existing content.
+func InstallHooks() error { return installHooks(settingsPath(), Claude, atelierHooks(), 0o644) }
+
+// installHooks merges one guarded command hook for agent k per lifecycle event
+// in table into the "hooks" object of the JSON file at path — the same shape in Claude's
+// settings and Codex's hooks.json — replacing any prior atelier hook for that
+// event while keeping the user's own hooks and everything else in the file, and
+// writes the result atomically.
+func installHooks(path string, k Kind, table map[string]atelierHook, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -202,8 +236,8 @@ func InstallHooks() error {
 		hooks = map[string]any{}
 	}
 
-	for event, h := range atelierHooks() {
-		hooks[event] = mergeEventHook(hooks[event], hookCommand(h.status), h.matcher)
+	for event, h := range table {
+		hooks[event] = mergeEventHook(hooks[event], hookCommand(h.status, k), h.matcher)
 	}
 	settings["hooks"] = hooks
 
@@ -211,7 +245,7 @@ func InstallHooks() error {
 	if err != nil {
 		return err
 	}
-	return writeConfig(path, out, 0o644)
+	return writeConfig(path, out, mode)
 }
 
 // mergeEventHook returns the matcher-group list for one event with atelier's
@@ -305,7 +339,7 @@ func writeConfig(path string, data []byte, defaultMode os.FileMode) error {
 }
 
 // HandleHook is the body of the `atelier hook <status>` command. It is guarded:
-// with no $ATELIER_SESSION it does nothing (a non-atelier Claude session).
+// with no $ATELIER_SESSION it does nothing (a non-atelier agent session).
 // Otherwise it records status as the session's runtime state. PR refresh is the
 // caller's concern, not this function's.
 func HandleHook(status string) error {

@@ -28,6 +28,12 @@ var (
 	cClosed   = lipgloss.Color("167") // red
 	cPending  = lipgloss.Color("179") // amber/yellow
 	cWorktree = lipgloss.Color("136") // dark yellow — worktree counts (vs grey draft PRs)
+
+	// Agent palette — each agent's brand colour for its icon: Claude orange,
+	// Codex blue. Claude's is brighter than the terracotta attention colour, so
+	// an icon never reads as "needs you".
+	cClaude = lipgloss.Color("209") // orange
+	cCodex  = lipgloss.Color("39")  // blue
 )
 
 var (

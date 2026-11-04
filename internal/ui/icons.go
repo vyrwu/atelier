@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 )
 
@@ -31,6 +32,30 @@ const (
 	iconReviewChanges  = "" // nf-oct-comment_discussion (U+F442)
 	iconReviewPending  = "" // nf-oct-eye (U+F441)
 )
+
+// Agent glyphs mark which agent a space runs: each brand's own icon, from the
+// Codicons block, which needs Nerd Fonts 3.5.0 or newer.
+const (
+	glyphClaude = "\uec82" // nf-cod-claude (U+EC82)
+	glyphCodex  = "\uec81" // nf-cod-openai (U+EC81)
+)
+
+// agentColor is agent k's brand colour.
+func agentColor(k agent.Kind) lipgloss.Color {
+	if k == agent.Codex {
+		return cCodex
+	}
+	return cClaude
+}
+
+// agentGlyph is agent k's icon in its brand colour.
+func agentGlyph(k agent.Kind) string {
+	g := glyphClaude
+	if k == agent.Codex {
+		g = glyphCodex
+	}
+	return lipgloss.NewStyle().Foreground(agentColor(k)).Render(g)
+}
 
 // countBadge renders "N<icon>" in colour c, or "" when n<=0 (a zero count is
 // left off the row rather than shown as noise).

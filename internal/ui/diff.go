@@ -60,7 +60,7 @@ func startWindow(session, name, cwd, cmd string, restart bool) error {
 	case !tmux.HasWindow(session, name):
 		return tmux.NewWindowCmd(session, cwd, name, cmd, nil)
 	case restart:
-		return tmux.RespawnWindow(session, name, cwd, cmd)
+		return tmux.RespawnWindow(session, name, cwd, cmd, nil)
 	}
 	return nil
 }

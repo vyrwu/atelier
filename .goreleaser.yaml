@@ -45,7 +45,7 @@ homebrew_casks:
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
     directory: Casks
     homepage: https://github.com/vyrwu/atelier
-    description: A workshop for parallel Claude Code agents — one binary, tmux + Bubble Tea
+    description: A workshop for parallel coding agents — one binary, tmux + Bubble Tea
     dependencies:
       - formula: tmux
       - formula: git
@@ -94,7 +94,7 @@ release:
   header: |
     ## atelier {{ .Tag }}
 
-    A workshop for parallel Claude Code agents. One binary, one renderer
+    A workshop for parallel coding agents. One binary, one renderer
     (Bubble Tea), tmux-driven. See the [README](https://github.com/vyrwu/atelier#quick-start).
   footer: |
     ---

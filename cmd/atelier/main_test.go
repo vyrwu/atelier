@@ -57,6 +57,7 @@ func TestDeterministicTitleCutsOnRunes(t *testing.T) {
 func TestRefreshBindingsFollowsTheServer(t *testing.T) {
 	cfg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("ATELIER_SOCKET", "atelier-test-no-server") // sourcing fails harmlessly
 	path := filepath.Join(cfg, "atelier", "atelier.tmux")
 	frag, version := bindingsFragment()
@@ -92,6 +93,40 @@ func TestRefreshBindingsFollowsTheServer(t *testing.T) {
 	if fi, _ := os.Stat(path); !fi.ModTime().Equal(old) {
 		t.Error("bindings rewritten although the server was current")
 	}
+}
+
+// M-x opens the overlay straight onto the swap confirm for the space it was
+// pressed in, capturing the client first like every other popup key.
+func TestFragmentBindsSwap(t *testing.T) {
+	frag, _ := bindingsFragment()
+	for _, line := range strings.Split(frag, "\n") {
+		if strings.HasPrefix(line, "bind -n M-x ") {
+			if !strings.Contains(line, "@atelier_outer") || !strings.HasSuffix(line, ` open --swap"`) {
+				t.Errorf("M-x binding = %q", line)
+			}
+			return
+		}
+	}
+	t.Error("no M-x binding")
+}
+
+// The status line names the window — the agent, or "Command Line" — after the
+// title; a long title is cut short so that name is never what gets cut.
+func TestStatusLeftKeepsTheWindowName(t *testing.T) {
+	frag, _ := bindingsFragment()
+	for _, line := range strings.Split(frag, "\n") {
+		if !strings.HasPrefix(line, "set -g status-left ") {
+			continue
+		}
+		if !strings.Contains(line, "#{=/50/…:@atelier_title}") {
+			t.Errorf("status-left = %q, want the title truncated", line)
+		}
+		if !strings.Contains(line, "#{@atelier_agent}") || !strings.Contains(line, "Command Line") {
+			t.Errorf("status-left = %q, want the agent's name and the shell's", line)
+		}
+		return
+	}
+	t.Error("no status-left")
 }
 
 // Sourcing the fragment is what records its version in the server.

@@ -8,8 +8,8 @@ behind it. Read it before changing anything.
 
 ## 1. What atelier is
 
-atelier is a **workshop for parallel Claude Code agents**: a terminal-based
-agentic development environment. What an IDE is to writing code, atelier is to
+atelier is a **workshop for parallel coding agents**: a terminal-based agentic
+development environment. What an IDE is to writing code, atelier is to
 directing the agents that write it.
 
 **Goal:** reviewing a pull request should be as easy as making a manual code
@@ -45,10 +45,12 @@ atelier is **not**:
   gh-enhance) rather than drawing its own
 - a general-purpose terminal multiplexer
 
-It supports **one agent** (Claude Code) and **one forge** (GitHub). This is a
-design decision, not a limitation to be worked around. Any abstraction that
-exists to support a second implementation is out of scope until a second
-implementation actually exists.
+It supports **Claude Code and Codex**, with Grok via Cursor CLI next, one agent
+live per workspace, and **one forge** (GitHub). A workspace can hand its work
+from one agent to another — when one runs out of quota, say — which is
+sequential, not orchestration. This is a design decision, not a limitation to be worked around.
+Any abstraction that exists to support a further implementation is out of scope
+until one actually exists.
 
 ---
 
@@ -60,7 +62,7 @@ Four entities. Everything in the system is one of these.
 |---|---|---|---|
 | **Workspace** | One task. A directory, a title, a tmux session, and an agent. Either **active** or **retired**. | Immutable slug (directory name) | Until deleted |
 | **Worktree** | A git worktree belonging to a workspace, living inside its directory. | `<repo>/<branch>` path under the workspace root | Until removed |
-| **Agent session** | A Claude Code process in the workspace session's `claude` window. | tmux session + window name | Until the process exits |
+| **Agent session** | The workspace's agent — Claude Code or Codex — in its session's `claude` window (the name predates Codex). | tmux session + window name | Until the process exits |
 | **Pull request** | A GitHub PR whose head branch matches one of the workspace's worktrees, or that the agent registered. | `owner/repo#number` | Owned by GitHub |
 
 One workspace has one agent session, N worktrees, and N pull requests. A
@@ -68,7 +70,7 @@ worktree belongs to exactly one workspace. A pull request is associated with a
 workspace by branch, not by ownership.
 
 **Retire is soft, delete is hard.** Retiring kills a workspace's processes but
-keeps its directory, worktrees, and Claude conversation, so restoring resumes
+keeps its directory, worktrees, and agent conversation, so restoring resumes
 the agent. Deleting removes the worktrees through git (so no source repository
 keeps stale metadata), then the session, directory, and record, behind a confirm
 that names dirty worktrees. Retire/restore is the one lifecycle state that
@@ -77,7 +79,7 @@ shipped; it is not an undo of delete.
 **The slug is immutable.** Git worktree metadata stores absolute paths, so
 renaming the directory after a worktree exists would break every repository the
 workspace touched. The slug is an adjective-noun handle (`spry-otter`) assigned
-the instant the workspace is created; Claude's title arrives later, lives in
+the instant the workspace is created; the agent's title arrives later, lives in
 state, and may change freely.
 
 **The directory is the record of its worktrees.** A `.git` *file* (not
@@ -85,7 +87,8 @@ directory) marks one. Nothing else tracks them.
 
 ```
 ~/ateliers/<slug>/          workspace root — the agent's cwd
-  CLAUDE.md                 symlink to the central guide
+  CLAUDE.md, AGENTS.md      symlinks to the central guide (each agent reads one)
+  .atelier/handoff/         what one agent handed the other, when swapped
   <repo>/<branch>/          a git worktree, created by the agent
     .git                    file — marks a worktree
 ```
@@ -110,7 +113,7 @@ when they land.
 
 **NFR-P2 — Workspace creation never makes you wait.** Enter closes the popup
 and hands the work to a detached builder. It reserves the handle, lays out the
-directory, and launches the agent before asking Claude for a title, so the one
+directory, and launches the agent before asking it for a title, so the one
 slow call is off everyone's path.
 
 **NFR-P3 — Views render instantly from local state.** The overlay runs fresh
@@ -122,8 +125,8 @@ overlay's screens is a state change in one process: no spawn, no clear-screen,
 no visible reconstruction.
 
 **NFR-P5 — Zero cost when idle.** With no interaction and no agent activity,
-atelier uses no CPU: no timer, no tick, no polling loop. An open pull request
-view is the one exception (§5), and it stops when the view closes.
+atelier uses no CPU except for visible information that has no push source:
+an open pull request view and account allowances in the status line (§5).
 
 ### Reliability
 
@@ -188,7 +191,7 @@ or complete an action, it says why and what to do. Beyond the splash's
 dependency check, there is no diagnostic subsystem.
 
 **NFR-O2 — Platforms:** macOS and Linux. Requires tmux 3.3+, git, the GitHub
-CLI, and Claude Code on `PATH`.
+CLI, and Claude Code or Codex — whichever new workspaces start with — on `PATH`.
 
 ---
 
@@ -201,7 +204,7 @@ architectural risk.
 
 | Surface | Hosts | Lifetime | Why |
 |---|---|---|---|
-| **Status line** | Attention badge, current workspace title and agent status, create spinner | Visible everywhere | When you need to know which session wants you, you are looking at an agent pane, not a picker. The signal must be ambient, and a background create has to report back somewhere. |
+| **Status line** | Attention badge, workspace title and agent status, create spinner, both agents' usage spent | Visible everywhere | When you need to know which session wants you or which harness has quota, you are looking at an agent pane, not a picker. The signal must be ambient, and a background create has to report back somewhere. |
 | **Home splash** | Keymap, version, dependency check | Persistent | Attaching lands on a real screen, not a bare shell, and `M-h` returns here from anywhere. |
 | **Overlay (popup)** | spaces · trash · new · pull requests · worktrees · confirm | Seconds | Peek and jump: an overlay is one transition, a window would be two. It runs fresh each open and captures the invoking client at once, so it never acts on a stale one. |
 | **Window** | The agent, shells, a PR's diff and checks | Hours | Survives detach, keeps scrollback and copy mode, and shows in tmux's own session list. |
@@ -243,19 +246,28 @@ Agent status is the one case where derivation genuinely fails: a running agent
 looks the same whether it is thinking or waiting for you. That state is semantic
 and must be pushed out by the agent's own lifecycle events.
 
-**Hooks live in the user's global Claude settings**, guarded so they do nothing
-without the workspace environment. That is more reliable than injecting
-settings at launch — it also captures an agent started by hand inside a
-workspace — and atelier doesn't have to own the launch command. Every write to
-Claude's config honours `$CLAUDE_CONFIG_DIR`, or it lands in a file Claude never
-reads.
+**Hooks live in each agent's global config** — Claude's settings, Codex's
+`hooks.json` — guarded so they do nothing without the workspace environment, or
+for an agent other than the one the workspace runs (Claude can start Codex on
+the side). That is more reliable than injecting settings at launch — it also
+captures an agent started by hand inside a workspace — and atelier doesn't have
+to own the launch command. Every write to Claude's config honours
+`$CLAUDE_CONFIG_DIR`, and every write to Codex's honours `$CODEX_HOME`, or it
+lands in a file the agent never reads. Codex runs a hook only once the user has
+trusted it, so its status starts after a one-time review.
+
+**Handoffs never depend on hooks.** Which conversation an agent had in a
+workspace is read off its own transcripts on disk (NFR-R2) — the newest
+interactive one in the workspace's directory, no older than the workspace — so
+a swap works for workspaces older than the feature and before any hook is
+trusted.
 
 ### 4.3 Interfaces
 
 | Interface | Purpose | Consumers |
 |---|---|---|
 | **UI** | Everything the user sees and does | The user |
-| **CLI** | `hook`, `open`, `create`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, Claude (MCP) |
+| **CLI** | `hook`, `usage`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, the agents (MCP) |
 | **MCP** | `create_worktree`, `create_pr`, `register_pr` | The agent |
 | **tmux fragment** | Bindings and options, generated and sourced into atelier's own server | atelier itself |
 
@@ -270,8 +282,10 @@ line calls nothing; it renders options the hooks push. Users run only
 Tripwires, not sentiments. Every one exists because its absence has a
 predictable failure mode. They are enforced in review.
 
-- **One agent, one forge, one renderer** — Claude Code, GitHub, Bubble Tea. A
-  second implementation means deleting the first.
+- **Few agents, one forge, one renderer** — Claude Code and Codex (Grok via
+  Cursor CLI next), GitHub, Bubble Tea. An agent joins only with launch, resume,
+  handoff, hooks, and usage all working; a second forge or renderer means
+  deleting the first.
 - **Extract an interface only when a second real implementation exists and is in
   production.** Never for a mock, never for a hypothetical.
 - **All UI is Bubble Tea**, in `internal/ui`. No second UI technology, no
@@ -280,10 +294,15 @@ predictable failure mode. They are enforced in review.
   process (NFR-P4).
 - **State lives in one JSON file, never in tmux**, and it is a cache and an
   index. Don't store what can be derived (NFR-R2).
-- **Nothing polls, and there is no daemon.** If something needs to know when a
-  thing changed, an event tells it. The one exception: GitHub can't push to
-  atelier, so an open pull request view re-queries once a minute. The popup is
-  the process, so closing it ends the poll.
+- **Prefer events, and there is no daemon.** GitHub can't push to atelier, so
+  an open pull request view re-queries once a minute. Agent account allowances
+  are fetched when an agent's turn ends (its hook), at most once a minute each,
+  and by the asynchronous tmux status job once a reading is stale: a minute for
+  Codex, whose check is cheap, and 15 minutes for Claude, whose check boots its
+  CLI (about 4s of CPU) and whose sessions report their own status line. Neither fetch blocks rendering or agent
+  startup. Current Claude Code has a non-interactive native `/usage` command;
+  session status-line payloads are a fallback for versions without it. Cached
+  and expired observations are marked explicitly.
 - **No plugin system, ever.**
 - **Delete dead code** rather than keeping it around.
 - **A feature ships only after it has been wanted three separate times.** Open
@@ -304,7 +323,7 @@ Deferred deliberately. Each needs the three-times rule to return.
 - Workspace rename, tagging, or grouping
 - Any summary or recap of what an agent did
 - Repository indexing, caching, or search
-- Multi-agent or multi-forge support
+- Concurrent agents in one workspace, or multi-forge support
 - Recovery of **deleted** workspaces (retire/restore covers deactivated ones)
 
 What is wanted next is in the README's [Roadmap](README.md#roadmap).
@@ -346,3 +365,16 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
    worktrees; it does not refuse.
 9. **Distribution.** A Homebrew cask that strips the quarantine attribute on
    install, so the un-notarized binary runs without a Gatekeeper prompt.
+10. **Swapping agents is a handoff, not a shared session.** Claude Code and
+    Codex can't continue each other's conversations, so `M-x` hands over the
+    outgoing one's, exported to a file. The swap replaces the agent with the
+    handoff in the same window: stopping the outgoing agent first is what makes
+    its transcript final before it is read, and the window keeps the session
+    alive (killing a session's last window would detach whoever is in it).
+    Nothing waits on a model: an earlier summary step cost every swap a model
+    call, and the incoming agent reads the export itself. It resumes its own
+    earlier conversation in the workspace, so swapping back and forth never
+    piles up new ones. Choosing the current harness in the confirmation instead
+    deliberately starts a fresh conversation seeded by the export. Codex runs with its sandbox
+    and approval prompts off: a worktree's git data lives in its source
+    repository, outside the workspace, so the sandbox would stop every commit.

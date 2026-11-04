@@ -77,7 +77,8 @@ type Model struct {
 	sel    int
 
 	// new screen
-	intent textarea.Model
+	intent   textarea.Model
+	newAgent agent.Kind // the agent the new space starts with (Tab toggles)
 
 	// prs / worktrees / confirm screens
 	focusWS      *core.Workspace // set transiently when confirming a delete
@@ -89,6 +90,8 @@ type Model struct {
 	prPollGen    int             // identifies the live PR poll chain
 	spin         spinner.Model   // the one activity indicator, shared by the views
 	confirm      string          // the confirmation prompt
+	confirmSwap  bool            // the confirm is for a swap of focusWS, not a delete
+	swapTo       agent.Kind      // the agent the swap hands focusWS to (Tab toggles)
 	prPending    map[string]bool // PRs (repo#num) with a state change in flight
 
 	err  string
@@ -108,6 +111,15 @@ func Run(outer, start string) error {
 		m.screen = scrPRs
 	case "worktrees":
 		m.screen = scrWorktrees
+	case "swap":
+		// M-x: straight onto the swap confirm for the space it was pressed in.
+		if m.curWS == nil {
+			_ = tmux.Notify(outer, "no space here  ·  open a space to swap its agent")
+			return nil
+		}
+		m.askSwap(m.curWS)
+		// Nothing to go back to: cancelling closes the popup (see updateConfirm).
+		m.returnScreen = scrConfirm
 	}
 	// The PR and worktree views are scoped to the current space. Opened off a
 	// space (the home splash), there is nothing to show — toast a hint and close
@@ -146,11 +158,13 @@ func newModel(outer string) Model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(cAccent)
 
+	cfg := core.LoadConfig()
 	m := Model{
 		outer:     outer,
-		cfg:       core.LoadConfig(),
+		cfg:       cfg,
 		filter:    fi,
 		intent:    ta,
+		newAgent:  agent.Of(cfg.Agent),
 		spin:      sp,
 		wt:        map[string][]core.Worktree{},
 		wtCount:   map[string]int{},
@@ -383,9 +397,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		return m, nil
 	case tea.KeyMsg:
+		switch msg.String() {
+		case "alt+s", "alt+t", "alt+n", "alt+p", "alt+w", "alt+h":
+			m.clearConfirmation()
+		}
 		// Global keys work from every screen: C-c closes; M-s/M-p/M-w/M-t/M-n jump
 		// to a view; M-h goes home; M-d retires the selection in Spaces and deletes
-		// it (with confirm) in Trash.
+		// it (with confirm) in Trash; M-x swaps the selection's agent in Spaces.
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -451,6 +469,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if msg.String() == "alt+x" {
+			// M-x swaps an agent only from a Spaces row. Everywhere else it is
+			// swallowed, or a text field would take it as an "x".
+			if w := m.contextWorkspace(); w != nil && m.screen == scrActive && !w.Retired {
+				m.askSwap(w)
+				m.returnScreen = scrActive
+			}
+			return m, nil
+		}
 		switch m.screen {
 		case scrActive:
 			return m.updateActive(msg)
@@ -472,6 +499,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return ""
+	}
+	if m.screen == scrConfirm && m.confirmSwap {
+		// Opened by M-x, the popup is sized to the dialog and is all of it;
+		// from a Spaces row, the dialog sits in the middle of the overlay.
+		if m.returnScreen == scrConfirm {
+			return m.swapDialog(m.w, m.h)
+		}
+		inner := lipgloss.Place(m.w-4, m.h-2, lipgloss.Center, lipgloss.Center,
+			m.swapDialog(min(m.w-4, swapDialogW), min(m.h-2, swapDialogH)))
+		return frameStyle.Width(m.w - 2).Height(m.h - 2).Render(inner)
 	}
 	var body string
 	switch m.screen {
@@ -509,11 +546,11 @@ func (m Model) View() string {
 func (m Model) screenFooter() string {
 	switch m.screen {
 	case scrActive:
-		return m.footer("open", "M-d delete")
+		return m.footer("open", "M-x swap agent", "M-d delete")
 	case scrTrash:
 		return m.footer("restore", "M-d delete")
 	case scrNew:
-		return hintStyle.Render("↵ start (background)  ·  ⌥↵ start & open  ·  ^j newline  ·  esc close")
+		return hintStyle.Render("↵ start (background)  ·  ⌥↵ start & open  ·  tab switch agent  ·  ^j newline  ·  esc close")
 	case scrPRs:
 		return m.footer("diff", "M-e checks", "M-b browser", "M-o open", "M-c close", "M-y copy")
 	case scrWorktrees:
@@ -553,11 +590,12 @@ func (m Model) goHome() (tea.Model, tea.Cmd) {
 
 // switchTo moves the outer client to a session and closes the overlay. It
 // revives a dead agent session first (a tmux-server restart leaves the record
-// but not the session), and selects the agent window so it lands on Claude.
+// but not the session), and selects the agent window so it lands on the agent.
 func (m Model) switchTo(session string) (tea.Model, tea.Cmd) {
 	if ws := m.bySession(session); ws != nil {
-		_ = agent.EnsureClaude(session, ws.Root(), ws.Slug)
+		_ = agent.EnsureAgent(*ws)
 		_ = tmux.SetTitle(session, ws.Title) // keep the status line correct (survives revive)
+		_ = tmux.SetAgentName(session, agent.Of(ws.Agent).Label())
 		// Entering a blocked workspace acknowledges it: clear the attention so the
 		// badge is "used up" the moment you land (the agent re-flags via its next
 		// Notification if it still needs you).
@@ -569,7 +607,7 @@ func (m Model) switchTo(session string) (tea.Model, tea.Cmd) {
 		_ = tmux.SetStatusMarker(session, agent.StatusMarker(agent.Status(session, true)))
 		agent.RefreshAttention()
 	}
-	if tmux.SelectWindow(session, agent.ClaudeWindow) != nil {
+	if tmux.SelectWindow(session, agent.Window) != nil {
 		_ = tmux.SelectFirstWindow(session) // fallback if the agent window isn't named
 	}
 	_ = tmux.SwitchClient(m.outer, session)
@@ -593,13 +631,21 @@ func (m Model) beginCreate(intent string, switchIn bool) (tea.Model, tea.Cmd) {
 	if intent == "" {
 		return m, nil
 	}
-	args := []string{"create", intent, "--outer", m.outer}
+	args := []string{"create", intent, "--outer", m.outer, "--agent", string(m.newAgent)}
 	if switchIn {
 		args = append(args, "--switch")
 	}
 	spawnDetached(args...)
 	// No toast here — the detached builder fires one once the workspace is named.
 	return m, tea.Quit
+}
+
+// askSwap puts up the confirm for handing w to its other agent.
+func (m *Model) askSwap(w *core.Workspace) {
+	m.focusWS = w
+	m.swapTo = agent.Of(w.Agent).Other()
+	m.confirmSwap = true
+	m.screen = scrConfirm
 }
 
 // deactivate retires a workspace: kill its session, mark it retired (kept on
@@ -642,7 +688,7 @@ func (m Model) fallbackSession(exclude string) string {
 	return "home"
 }
 
-// reactivate restores a retired workspace and switches into it (resuming Claude).
+// reactivate restores a retired workspace and switches into it (resuming its agent).
 func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
 	setRetired(w.Slug, false)
 	return m.switchTo(w.Session)

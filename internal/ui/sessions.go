@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/git"
 )
@@ -110,9 +111,10 @@ func (m Model) renderRow(r row, selected bool) string {
 	} else {
 		g = statusGlyph(m.status[r.ws.Session])
 	}
-	// Right block: PR/worktree counts (collapsed) then age, right-aligned so the
-	// stats form a clean column down the edge (like the PR view).
-	right := dimStyle.Render(ageCell(r.ws.Created))
+	// Right block: PR/worktree counts (collapsed), age, then the agent's icon,
+	// right-aligned so the stats form a clean column down the edge (like the PR
+	// view) and the agent stays out of the way of the title.
+	right := dimStyle.Render(ageCell(r.ws.Created)) + " " + agentGlyph(agent.Of(r.ws.Agent))
 	if c := m.spaceCounts(r.ws); c != "" {
 		right = c + " " + right
 	}

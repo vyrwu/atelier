@@ -205,7 +205,7 @@ const gitNetTimeout = 2 * time.Minute
 
 // runGitFor runs git in dir, cut off after d when d is set. It never asks for
 // credentials on a terminal: the terminal here is the agent's, and a username
-// prompt printed into Claude's UI hangs the tool call for good. With no
+// prompt printed into the agent's UI hangs the tool call for good. With no
 // credential to use, git fails and says so instead.
 func runGitFor(d time.Duration, dir string, args ...string) (string, error) {
 	ctx := context.Background()

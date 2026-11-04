@@ -221,6 +221,30 @@ func TestRetiredIsZeroValue(t *testing.T) {
 	}
 }
 
+// Agent is the zero value too: state written before there was a choice of agent
+// loads as Claude (empty), and a Claude space is written without the field.
+func TestAgentIsZeroValue(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	path := StatePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"version": 1, "workspaces": [{"slug": "legacy", "session": "legacy"}]}`
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := Load().Find("legacy"); w == nil || w.Agent != "" || !w.SwappedAt.IsZero() {
+		t.Fatalf("legacy workspace = %+v, want no agent and never swapped", w)
+	}
+	if err := Update(func(s *State) {}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), `"agent"`) {
+		t.Errorf("a Claude space was written with an agent field:\n%s", data)
+	}
+}
+
 func slugsOf(ws []Workspace) []string {
 	out := make([]string, len(ws))
 	for i, w := range ws {

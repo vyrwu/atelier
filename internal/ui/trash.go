@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/vyrwu/atelier/internal/agent"
 )
 
 // updateTrash drives the M-t Trash list of retired spaces. Enter restores the
@@ -75,7 +77,12 @@ func (m Model) renderTrashRow(r row, selected bool) string {
 		when = age(r.ws.RetiredAt)
 	}
 	when = trashTimeStyle.Render(padAge(when))
-	right := m.spaceCounts(r.ws) // right-aligned stats column (collapsed), like Spaces
+	// Right-aligned stats column (collapsed), then the agent's icon — restoring
+	// resumes that agent — like Spaces.
+	right := agentGlyph(agent.Of(r.ws.Agent))
+	if c := m.spaceCounts(r.ws); c != "" {
+		right = c + " " + right
+	}
 	w := m.rowWidth()
 	// Budget the name to match the Spaces view (the 2 is the when/name gap).
 	maxName := entryWidth(w - visibleWidth(bar) - visibleWidth(when) - 2 - visibleWidth(right) - 4)
@@ -90,12 +97,6 @@ func (m Model) renderTrashRow(r row, selected bool) string {
 		name = textStyle.Render(name)
 	}
 	left := fmt.Sprintf("%s%s  %s", bar, when, name)
-	if right == "" {
-		if selected {
-			return highlightRow(left, w)
-		}
-		return left
-	}
 	pad := w - visibleWidth(left) - visibleWidth(right)
 	if pad < 2 {
 		pad = 2

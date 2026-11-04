@@ -7,7 +7,7 @@ below before writing code; they are enforced in review.
 ## Setting up
 
 You need Go (the version in `go.mod`), tmux 3.3+, git, the GitHub CLI, and
-Claude Code.
+Claude Code and/or Codex.
 
 ```sh
 git clone https://github.com/vyrwu/atelier && cd atelier
@@ -37,9 +37,10 @@ surface.
 ## Tests
 
 Tests cover the headless core: the state file, paths and config, agent status,
-the Claude hook merge, worktree derivation, the PR query and its parsing, and
-the list rendering. Code that shells out to tmux, `gh`, or Claude
-stays untested rather than growing an abstraction to be mocked.
+the hook merges, finding and exporting agent conversations, worktree
+derivation, the PR query and its parsing, and the list rendering. Code that
+shells out to tmux, `gh`, or an agent stays untested rather than growing an
+abstraction to be mocked.
 
 Add a test for the behaviour a change pins, especially a bug fix, and check that
 it fails without the fix.
@@ -68,12 +69,12 @@ Give it the same format.
 
 | Path | |
 |---|---|
-| `cmd/atelier` | the one binary: `up`, `open`, `home`, `create`, `win`, `hook`, `mcp`, `install`, `version` |
+| `cmd/atelier` | the one binary: `up`, `open`, `home`, `create`, `swap`, `handoff`, `win`, `hook`, `usage`, `mcp`, `install`, `version` |
 | `internal/core` | domain types, the state file, config, paths |
 | `internal/tmux` | the tmux wrapper (dedicated socket) |
 | `internal/git` | worktree derivation and git queries |
 | `internal/forge` | GitHub: the PR query and PR state changes |
-| `internal/agent` | Claude Code: launch and resume, status, hooks, project setup |
+| `internal/agent` | Claude Code and Codex: launch and resume, handoff export, status, hooks, project setup |
 | `internal/mcp` | the stdio MCP server agents use: `create_worktree`, `create_pr`, `register_pr` |
 | `internal/ui` | the overlay and the splash |
 
