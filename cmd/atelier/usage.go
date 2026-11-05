@@ -71,9 +71,16 @@ func syncUsageCapture() {
 	}
 }
 
-// usageJob pins the paths onto the tmux job, including the dev instance's cache
-// and socket. A long-lived tmux server need not have inherited today's env.
-func usageJob() string {
+// usageJob is the quota status job.
+func usageJob() string { return statusJob("usage") }
+
+// pollJob is the PR status job, for the session tmux is drawing.
+func pollJob() string { return statusJob("poll '#{session_name}'") }
+
+// statusJob pins the paths onto a tmux status job running atelier with args,
+// including the dev instance's cache and socket. A long-lived tmux server need
+// not have inherited today's env.
+func statusJob(args string) string {
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 	// A removed override must also disappear from the old server's environment.
 	cmd := "env -u XDG_CACHE_HOME -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u PATH ATELIER_SOCKET=" + quote(core.LoadConfig().Socket)
@@ -82,7 +89,7 @@ func usageJob() string {
 			cmd += " " + key + "=" + quote(value)
 		}
 	}
-	cmd += " " + quote(self()) + " usage"
+	cmd += " " + quote(self()) + " " + args
 	// The result is embedded in a double-quoted tmux config value.
 	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(cmd)
 }

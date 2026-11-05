@@ -65,6 +65,8 @@ func run(cmd string, args []string) error {
 		return hook(arg(args, 0))
 	case "usage": // tmux quota status job, or native Claude status-line input
 		return usage(args)
+	case "poll": // atelier poll <session> — tmux's PR status job; prints nothing
+		return poll(args)
 	case "mcp":
 		return mcp.Serve()
 	case "install":
@@ -151,7 +153,7 @@ func insideOwnServer() bool {
 // hook records agent status and, when the status actually changes, pushes the
 // new marker to the workspace's status line (event-driven, never polled). PR
 // status is not refreshed here: the agent only registers PRs (via the MCP
-// tools); the UI re-queries their status on demand when the PR view opens.
+// tools); their status comes from the poll status job.
 func hook(status string) error {
 	session := os.Getenv("ATELIER_SESSION")
 	// Read the prior status before recording, so we redraw only on a transition
@@ -327,11 +329,12 @@ set -g status-style "bg=colour236,fg=colour252"
 set -g status-left " #[fg=colour110,bold]atelier#[nobold] #[fg=colour252]#{@atelier_status}%[4]s#[fg=colour245] · #{?#{==:#{window_name},claude},#{?#{@atelier_agent},#{@atelier_agent},Agent},Command Line}#[fg=colour252] "
 # While a background action runs, an activity spinner (@atelier_spin) takes the
 # attention slot; otherwise the attention badge (@atelier_attention, pushed by
-# the hooks — event-driven, no polling) shows.
-set -g status-right "#{?#{@atelier_spin},#{@atelier_spin},#{@atelier_attention}}  #(%[3]s)  %%H:%%M "
+# the hooks — event-driven, no polling) shows. The poll job prints nothing: it
+# keeps the PR cache fresh for the session being drawn (atelier poll).
+set -g status-right "#{?#{@atelier_spin},#{@atelier_spin},#{@atelier_attention}}  #(%[3]s)#(%[5]s)  %%H:%%M "
 set -g status-left-length 80
 set -g status-right-length 160
-set -g status-interval 15
+set -g status-interval 5
 # Toast (display-message) look: subtle raised gray with soft-green italic text.
 set -g message-style "bg=colour238,fg=colour151,italics"
 set -g window-status-format ""
@@ -372,7 +375,7 @@ bind -n M-c run-shell "%[1]s win '#{session_name}' shell"
 bind -n M-h set-option -gF @atelier_outer "#{client_name}" \; run-shell "%[1]s home --switch"
 # M-q detaches atelier — back to the shell that spawned it.
 bind -n M-q detach-client
-`, self(), rgbSetting()+syncSetting(), usageJob(), title)
+`, self(), rgbSetting()+syncSetting(), usageJob(), title, pollJob())
 }
 
 func execTmux(args ...string) error {
