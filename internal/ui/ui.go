@@ -317,7 +317,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
 	case cacheTickMsg:
+		// The cache can reorder the list; the cursor stays on its PR.
+		flat := m.flatPRs()
+		var held string
+		if m.prSel >= 0 && m.prSel < len(flat) {
+			held = prKey(flat[m.prSel].Repo, flat[m.prSel].Number)
+		}
 		m.applyCache(core.Load())
+		for i, pr := range m.flatPRs() {
+			if prKey(pr.Repo, pr.Number) == held {
+				m.prSel = i
+			}
+		}
 		return m, cacheTickCmd()
 	case wtFreshMsg:
 		m.wtLoading = false
@@ -343,15 +354,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		_ = core.Update(func(s *core.State) {
-			if w := s.Find(msg.slug); w != nil {
-				for j := range w.PRs {
-					if w.PRs[j].Repo == msg.pr.Repo && w.PRs[j].Number == msg.pr.Number {
-						w.PRs[j] = msg.pr
-					}
-				}
-			}
-		})
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {

@@ -379,10 +379,10 @@ func TestMergeDropsForkPRsFoundByBranch(t *testing.T) {
 	}
 }
 
-// A merged PR is terminal, so a branch whose cached PRs have all merged is not
-// looked up again. A branch with anything else on it still is — a reused branch
-// can carry a live PR behind a merged one — and so is one with no PR yet, which
-// is how a new PR is found.
+// A merged PR is terminal, so a branch whose cached PRs have all merged is
+// settled: it is asked only for open PRs, which finds a new PR on a reused branch
+// without fetching the merged one again. A branch with anything else on it is
+// asked in full, and so is one with no PR yet.
 func TestPlanSkipsSettledBranches(t *testing.T) {
 	existing := []core.PR{
 		{Repo: "O/R", Number: 1, Head: "done", State: core.PRMerged},
@@ -400,6 +400,7 @@ func TestPlanSkipsSettledBranches(t *testing.T) {
 	}
 	l := plan(existing, branches)
 	want := []branchTarget{
+		{repo: "o/r", branch: "done", openOnly: true},
 		{repo: "o/r", branch: "fresh"},
 		{repo: "o/r", branch: "live"},
 		{repo: "o/r", branch: "reused"},
@@ -413,18 +414,55 @@ func TestPlanSkipsSettledBranches(t *testing.T) {
 	}
 }
 
-// A merged PR whose branch was skipped is kept as it was: it was not asked
-// about, so its absence from the answer says nothing. One whose worktree is gone
-// is not kept — that is how a finished branch leaves the view.
+// A merged PR on a settled branch is kept as it was: the branch was asked only
+// for open PRs, so its absence from the answer says nothing. A new open PR on
+// that branch joins it. One whose worktree is gone is not kept — that is how a
+// finished branch leaves the view.
 func TestMergeKeepsSettledMergedPRs(t *testing.T) {
 	existing := []core.PR{
 		{Repo: "o/r", Number: 1, Head: "done", State: core.PRMerged, Title: "kept"},
 		{Repo: "o/r", Number: 2, Head: "removed", State: core.PRMerged},
 	}
 	l := plan(existing, []branchTarget{{repo: "o/r", branch: "done"}})
-	got := merge(existing, map[string]*aliasNode{}, l)
-	if len(got) != 1 || got[0].Number != 1 || got[0].Title != "kept" {
-		t.Errorf("got %+v, want only the settled #1, unchanged", got)
+	reopened := prNode{Number: 3, State: "OPEN", HeadRefName: "done"}
+	reopened.Repository.NameWithOwner = "o/r"
+	got := map[int]core.PR{}
+	for _, pr := range merge(existing, map[string]*aliasNode{"b0": {PullRequests: &struct {
+		Nodes []prNode `json:"nodes"`
+	}{Nodes: []prNode{reopened}}}}, l) {
+		got[pr.Number] = pr
+	}
+	if len(got) != 2 || got[1].Title != "kept" || got[3].State != core.PROpen {
+		t.Errorf("got %+v, want the settled #1 unchanged and the new #3", got)
+	}
+}
+
+// A settled branch's lookup asks for open PRs only, so a merged PR is never
+// fetched again.
+func TestBuildQueryAsksSettledBranchesForOpenPRs(t *testing.T) {
+	q := buildQuery([]lookups{{branches: []branchTarget{
+		{repo: "o/r", branch: "done", openOnly: true},
+		{repo: "o/r", branch: "live"},
+	}}})
+	if !strings.Contains(q, `headRefName: "done", states: OPEN,`) {
+		t.Errorf("settled branch not limited to open PRs:\n%s", q)
+	}
+	if strings.Count(q, "states:") != 1 {
+		t.Errorf("a live branch was limited too:\n%s", q)
+	}
+}
+
+// A space with nothing left to ask about is still reconciled: a PR whose
+// worktree is gone leaves, as it would after a query.
+func TestMergeAllReconcilesSpacesWithNothingToAsk(t *testing.T) {
+	spaces := []Space{{PRs: []core.PR{
+		{Repo: "o/r", Number: 1, Head: "removed", State: core.PROpen},
+		{Repo: "o/r", Number: 2, State: core.PRMerged, Registered: true},
+	}}}
+	ls := []lookups{plan(spaces[0].PRs, nil)}
+	got := mergeAll(spaces, ls, nil)
+	if len(got) != 1 || len(got[0]) != 1 || got[0][0].Number != 2 {
+		t.Errorf("got %+v, want only the registered #2", got)
 	}
 }
 
@@ -455,5 +493,17 @@ func TestKeepRegisteredKeepsARegistrationMadeMeanwhile(t *testing.T) {
 	}
 	if len(got) != 2 || !nums[1] || !nums[5] {
 		t.Errorf("got %+v, want the sweep's #1 plus the registered #5", got)
+	}
+}
+
+// A PR found by branch that the agent registers mid-sweep is in the sweep's
+// result unregistered. The registration on disk wins.
+func TestKeepRegisteredCarriesARegistrationMadeMeanwhile(t *testing.T) {
+	got := KeepRegistered(
+		[]core.PR{{Repo: "o/r", Number: 5, Title: "fresh"}},
+		[]core.PR{{Repo: "O/R", Number: 5, Registered: true}},
+	)
+	if len(got) != 1 || !got[0].Registered || got[0].Title != "fresh" {
+		t.Errorf("got %+v, want the sweep's #5, registered", got)
 	}
 }

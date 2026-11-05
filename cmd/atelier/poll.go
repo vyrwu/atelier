@@ -1,7 +1,6 @@
 package main
 
 import (
-	"path/filepath"
 	"time"
 
 	"github.com/vyrwu/atelier/internal/core"
@@ -21,12 +20,13 @@ const (
 
 // poll is tmux's status job for PR state (`atelier poll <session>`): it sweeps
 // GitHub for every space whose cache is due, in one query, and prints nothing.
-// tmux runs it per attached client on every status redraw, so a lock lets one
-// sweep run at a time, and the state is read under it so a sweep that just
-// landed is seen. Detached, nothing runs.
+// tmux runs it per attached client on every status redraw, so sweeps take turns
+// under core.LockPRs, and the state is read under it: a client waiting on
+// another's sweep sees what it wrote and sweeps only its own focused space.
+// Detached, nothing runs.
 func poll(args []string) error {
-	unlock, ok, err := core.TryLockFile(filepath.Join(core.CacheDir(), "poll.lock"))
-	if err != nil || !ok {
+	unlock, err := core.LockPRs()
+	if err != nil {
 		return err
 	}
 	defer unlock()

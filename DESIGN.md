@@ -268,7 +268,7 @@ trusted.
 | Interface | Purpose | Consumers |
 |---|---|---|
 | **UI** | Everything the user sees and does | The user |
-| **CLI** | `hook`, `usage`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, the agents (MCP) |
+| **CLI** | `hook`, `usage`, `poll`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, the agents (MCP) |
 | **MCP** | `create_worktree`, `create_pr`, `register_pr` | The agent |
 | **tmux fragment** | Bindings and options, generated and sourced into atelier's own server | atelier itself |
 

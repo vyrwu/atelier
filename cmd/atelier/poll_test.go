@@ -66,3 +66,18 @@ func TestFragmentRunsThePollJob(t *testing.T) {
 		t.Error("status-interval is not 5s — the focused space would poll slower")
 	}
 }
+
+// The poll job reads the state file and the workspace roots. A server started
+// under other paths must not have it sweep — and write — someone else's state.
+func TestStatusJobPinsStatePaths(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", "/s")
+	t.Setenv("XDG_CONFIG_HOME", "/c")
+	t.Setenv("ATELIER_ROOT", "/r")
+	job := pollJob()
+	for _, want := range []string{"-u XDG_STATE_HOME", "-u XDG_CONFIG_HOME", "-u ATELIER_ROOT",
+		"XDG_STATE_HOME='/s'", "XDG_CONFIG_HOME='/c'", "ATELIER_ROOT='/r'"} {
+		if !strings.Contains(job, want) {
+			t.Errorf("poll job missing %q: %s", want, job)
+		}
+	}
+}

@@ -92,10 +92,12 @@ type gqlResponse struct {
 	} `json:"errors"`
 }
 
-// branchTarget is "the PRs whose head is this branch in this repo".
+// branchTarget is "the PRs whose head is this branch in this repo" — only the
+// open ones when openOnly, for a settled branch.
 type branchTarget struct {
-	repo   string // owner/repo
-	branch string
+	repo     string // owner/repo
+	branch   string
+	openOnly bool
 }
 
 // numberTarget is "this exact PR" — how registered PRs are refreshed, since
@@ -112,9 +114,9 @@ type Space struct {
 	Worktrees []core.Worktree
 }
 
-// lookups is what one space asks GitHub: a lookup per worktree branch that
-// isn't settled, and one per registered PR that isn't merged. settled holds the
-// branches skipped because every PR cached on them has merged.
+// lookups is what one space asks GitHub: a lookup per worktree branch, and one
+// per registered PR that isn't merged. settled holds the branches whose cached
+// PRs have all merged; those are asked only for open PRs.
 type lookups struct {
 	branches []branchTarget
 	numbers  []numberTarget
@@ -128,35 +130,42 @@ type lookups struct {
 // itself failed, are kept from the cache so a tracked PR never vanishes on a
 // blip.
 func RefreshAll(spaces []Space) [][]core.PR {
-	out := make([][]core.PR, len(spaces))
 	ls := make([]lookups, len(spaces))
 	asks := false
 	for i, sp := range spaces {
-		out[i] = sp.PRs
 		ls[i] = plan(sp.PRs, branchTargets(sp.Worktrees))
 		asks = asks || len(ls[i].branches) > 0 || len(ls[i].numbers) > 0
 	}
-	if !asks {
-		return out
-	}
-
-	data, ok := runQuery(buildQuery(ls))
-	if !ok {
-		return out // offline, no gh, or an unparsable answer — keep what we had
-	}
-	bySpace := splitBySpace(data)
-	for i, sp := range spaces {
-		if len(ls[i].branches) > 0 || len(ls[i].numbers) > 0 {
-			out[i] = merge(sp.PRs, bySpace[i], ls[i])
+	var data map[string]*aliasNode
+	if asks {
+		var ok bool
+		if data, ok = runQuery(buildQuery(ls)); !ok {
+			// Offline, no gh, or an unparsable answer — keep what we had.
+			out := make([][]core.PR, len(spaces))
+			for i, sp := range spaces {
+				out[i] = sp.PRs
+			}
+			return out
 		}
+	}
+	return mergeAll(spaces, ls, data)
+}
+
+// mergeAll folds one query's answer into every space's cache. A space that
+// asked nothing is still merged, so a PR whose worktree is gone leaves it.
+func mergeAll(spaces []Space, ls []lookups, data map[string]*aliasNode) [][]core.PR {
+	bySpace := splitBySpace(data)
+	out := make([][]core.PR, len(spaces))
+	for i, sp := range spaces {
+		out[i] = merge(sp.PRs, bySpace[i], ls[i])
 	}
 	return out
 }
 
 // plan is the lookups for a space with these cached PRs and worktree branches.
 // A merged PR can't change, so a branch whose cached PRs have all merged is
-// settled and skipped; a branch with no PR yet is still asked about, since that
-// is how a new PR is found.
+// settled and asked only for open PRs — which still finds a new PR on it. A
+// branch with no PR yet is asked in full, since that is how a new PR is found.
 func plan(existing []core.PR, branches []branchTarget) lookups {
 	merged, live := map[string]bool{}, map[string]bool{}
 	for _, pr := range existing {
@@ -172,7 +181,7 @@ func plan(existing []core.PR, branches []branchTarget) lookups {
 		k := settledKey(b.repo, b.branch)
 		if merged[k] && !live[k] {
 			l.settled[k] = true
-			continue
+			b.openOnly = true
 		}
 		l.branches = append(l.branches, b)
 	}
@@ -184,16 +193,27 @@ func settledKey(repo, branch string) string {
 	return strings.ToLower(repo) + "\x00" + branch
 }
 
-// KeepRegistered adds to a sweep's result any registered PR in onDisk that the
-// result doesn't have — one the agent registered while the query was running.
+// KeepRegistered carries into a sweep's result every registration in onDisk —
+// one the agent made while the query was running: a PR the result lacks is
+// added, and one it has is marked registered.
 func KeepRegistered(refreshed, onDisk []core.PR) []core.PR {
-	have := map[string]bool{}
-	for _, pr := range refreshed {
-		have[key(pr.Repo, pr.Number)] = true
-	}
-	out := refreshed
+	registered := map[string]core.PR{}
 	for _, pr := range onDisk {
-		if pr.Registered && !have[key(pr.Repo, pr.Number)] {
+		if pr.Registered {
+			registered[key(pr.Repo, pr.Number)] = pr
+		}
+	}
+	out := make([]core.PR, 0, len(refreshed)+len(registered))
+	for _, pr := range refreshed {
+		k := key(pr.Repo, pr.Number)
+		if _, ok := registered[k]; ok {
+			pr.Registered = true
+			delete(registered, k)
+		}
+		out = append(out, pr)
+	}
+	for _, pr := range onDisk {
+		if _, ok := registered[key(pr.Repo, pr.Number)]; ok {
 			out = append(out, pr)
 		}
 	}
@@ -330,8 +350,12 @@ func buildQuery(ls []lookups) string {
 	for k, l := range ls {
 		for i, t := range l.branches {
 			owner, name := splitRepo(t.repo)
-			fmt.Fprintf(&b, "  s%db%d: repository(owner: %s, name: %s) { pullRequests(headRefName: %s, first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ...pr } } }\n",
-				k, i, gqlString(owner), gqlString(name), gqlString(t.branch), prsPerBranch)
+			states := ""
+			if t.openOnly {
+				states = " states: OPEN,"
+			}
+			fmt.Fprintf(&b, "  s%db%d: repository(owner: %s, name: %s) { pullRequests(headRefName: %s,%s first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ...pr } } }\n",
+				k, i, gqlString(owner), gqlString(name), gqlString(t.branch), states, prsPerBranch)
 		}
 		for i, t := range l.numbers {
 			owner, name := splitRepo(t.repo)

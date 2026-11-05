@@ -63,12 +63,35 @@ func (m Model) applyCache(st *core.State) {
 	}
 }
 
-// setPRStateCmd applies a state change on GitHub, then re-queries the PR.
+// setPRStateCmd applies a state change on GitHub, re-queries the PR, and saves
+// it to the cache.
 func setPRStateCmd(slug string, pr core.PR, target core.PRState) tea.Cmd {
 	return func() tea.Msg {
 		fresh, err := forge.SetPRState(pr, target)
+		if err == nil {
+			err = savePR(slug, fresh)
+		}
 		return prMutatedMsg{slug: slug, repo: pr.Repo, number: pr.Number, pr: fresh, err: err}
 	}
+}
+
+// savePR writes one re-queried PR into a space's cache, under the sweep lock so
+// a sweep that read the PR before the change can't land after it.
+func savePR(slug string, pr core.PR) error {
+	unlock, err := core.LockPRs()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return core.Update(func(s *core.State) {
+		if w := s.Find(slug); w != nil {
+			for j := range w.PRs {
+				if w.PRs[j].Repo == pr.Repo && w.PRs[j].Number == pr.Number {
+					w.PRs[j] = pr
+				}
+			}
+		}
+	})
 }
 
 // prGroup is a repo section in the PR view.

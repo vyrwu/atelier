@@ -142,3 +142,45 @@ func TestCacheTickAppliesTheCache(t *testing.T) {
 		t.Error("#3, new in the cache, not shown")
 	}
 }
+
+// The cache can reorder the list under the cursor — a new PR, a state change.
+// The selection follows the PR, not the row, so M-c never lands on a neighbour.
+func TestCacheTickKeepsTheSelection(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	old := time.Now().Add(-time.Hour)
+	if err := core.Update(func(s *core.State) {
+		s.Workspaces = append(s.Workspaces, core.Workspace{Slug: "s", Session: "s", PRs: []core.PR{
+			{Repo: "o/r", Number: 7, State: core.PROpen, CreatedAt: old},
+			{Repo: "o/r", Number: 9, State: core.PROpen, CreatedAt: time.Now()}, // new, sorts first
+		}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := Model{screen: scrPRs, all: []core.Workspace{{Slug: "s", Session: "s", PRs: []core.PR{
+		{Repo: "o/r", Number: 7, State: core.PROpen, CreatedAt: old},
+	}}}, prPending: map[string]bool{}, filter: textinput.New(), wt: map[string][]core.Worktree{}}
+	m.curWS = &m.all[0]
+
+	next, _ := m.Update(cacheTickMsg{})
+	got := next.(Model)
+	if flat := got.flatPRs(); got.prSel >= len(flat) || flat[got.prSel].Number != 7 {
+		t.Errorf("selection moved off #7: prSel=%d over %+v", got.prSel, flat)
+	}
+}
+
+// A state change's result is saved to the cache, so the next tick shows it.
+func TestSavePRWritesTheCache(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	if err := core.Update(func(s *core.State) {
+		s.Workspaces = append(s.Workspaces, core.Workspace{Slug: "s", PRs: []core.PR{{Repo: "o/r", Number: 1, State: core.PROpen}}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := savePR("s", core.PR{Repo: "o/r", Number: 1, State: core.PRClosed}); err != nil {
+		t.Fatal(err)
+	}
+	if got := core.Load().Find("s").PRs[0].State; got != core.PRClosed {
+		t.Errorf("state on disk = %q, want closed", got)
+	}
+}

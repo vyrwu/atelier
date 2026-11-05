@@ -83,8 +83,13 @@ func pollJob() string { return statusJob("poll '#{session_name}'") }
 func statusJob(args string) string {
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 	// A removed override must also disappear from the old server's environment.
-	cmd := "env -u XDG_CACHE_HOME -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u PATH ATELIER_SOCKET=" + quote(core.LoadConfig().Socket)
-	for _, key := range []string{"XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH"} {
+	keys := []string{"XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "ATELIER_ROOT", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH"}
+	cmd := "env"
+	for _, key := range keys {
+		cmd += " -u " + key
+	}
+	cmd += " ATELIER_SOCKET=" + quote(core.LoadConfig().Socket)
+	for _, key := range keys {
 		if value, ok := os.LookupEnv(key); ok {
 			cmd += " " + key + "=" + quote(value)
 		}
