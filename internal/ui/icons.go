@@ -19,6 +19,7 @@ const (
 	iconPRDraft        = "" // nf-oct-git_pull_request_draft (U+F4DD)
 	iconPRMerged       = "" // nf-oct-git_merge (U+F419)
 	iconPRClosed       = "" // nf-oct-git_pull_request_closed (U+F4DC)
+	iconPRQueued       = "" // nf-oct-git_merge_queue (U+F4DB)
 	iconWorktree       = "" // nf-oct-git_branch (U+F418)
 	iconTrash          = "" // nf-oct-trash (U+F48E)
 	iconComment        = "" // nf-oct-comment (U+F41F)
@@ -100,6 +101,15 @@ func prStateColor(s core.PRState) lipgloss.Color {
 	default: // closed
 		return cClosed
 	}
+}
+
+// prGlyph is a PR row's coloured Octicon: its state, or — while it waits in the
+// merge queue — the queue's own, in GitHub's amber.
+func prGlyph(pr core.PR) string {
+	if pr.Queued {
+		return lipgloss.NewStyle().Foreground(cPending).Render(iconPRQueued)
+	}
+	return prStateGlyph(pr.State)
 }
 
 // prStateGlyph is the coloured PR-state Octicon.

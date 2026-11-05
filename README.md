@@ -48,8 +48,8 @@ requests your agents open come to you, with their diff and CI one key away.
   when one runs out of quota. Swapping back resumes where it left off.
 - **See every agent's usage.** The status line shows how much of each
   subscription's limits you've spent.
-- **Review in the terminal.** Pull requests with CI and review status, local
-  diffs, and CI logs.
+- **Review in the terminal.** Pull requests with CI, review, and merge-queue
+  status, local diffs, and CI logs.
 - **Worktrees that are never stale.** Agents branch from the freshly fetched
   default branch.
 - **Retire and restore.** Clear a finished space; restoring resumes its

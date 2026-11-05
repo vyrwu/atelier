@@ -502,7 +502,7 @@ func (m Model) renderPRRow(e prEntry, selected bool) string {
 	if e.gutter != "" {
 		gutter = dimStyle.Render(e.gutter) + " "
 	}
-	state := prStateGlyph(pr.State)
+	state := prGlyph(pr)
 	num := dimStyle.Render(fmt.Sprintf("#%d", pr.Number))
 
 	right := m.prTrailer(pr)
