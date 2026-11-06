@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0](https://github.com/vyrwu/atelier/compare/v1.1.0...v1.2.0) (2026-11-06)
+
+
+### Features
+
+* Poll PR status from a tmux status job ([#110](https://github.com/vyrwu/atelier/issues/110)) ([eca0fe2](https://github.com/vyrwu/atelier/commit/eca0fe298c41a253c21d50a6a20af6896255dad1))
+* **ui:** Mark merge-queued PRs in M-p ([#109](https://github.com/vyrwu/atelier/issues/109)) ([2472f89](https://github.com/vyrwu/atelier/commit/2472f89eb764a95b1525a319bd8d0ab54014a98f))
+
 ## [1.1.0](https://github.com/vyrwu/atelier/compare/v1.0.1...v1.1.0) (2026-11-04)
 
 
