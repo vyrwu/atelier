@@ -102,7 +102,9 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - PR rows name their base; stacked PRs (one's base is another's head) render as
   a contiguous run, base first, joined by a gutter line — derived per render,
   never stored. Rows are ordered open · draft · merged · closed, newest first; a
-  stack takes its most active member's state.
+  stack takes its most active member's state. A PR in its base's merge queue
+  (`isInMergeQueue`) swaps its state icon for the amber merge-queue Octicon; it
+  still sorts as open.
 - The generated tmux fragment advertises 24-bit colour (`terminal-features[100]
   "*:RGB"`) when `$COLORTERM` says the launching terminal has it.
   WezTerm also gets synchronized redraws (`sync`) for complete popup frames.

@@ -30,6 +30,20 @@ func TestRowEntryBudgetsAgree(t *testing.T) {
 	}
 }
 
+// A PR in the merge queue trades its state icon for the queue's own, so it reads
+// as on its way in rather than merely open.
+func TestQueuedPRRowShowsQueueIcon(t *testing.T) {
+	m := Model{w: 120}
+	queued := m.renderPRRow(prEntry{pr: core.PR{Repo: "o/r", Number: 1, Title: "t", State: core.PROpen, Queued: true}}, false)
+	if !strings.Contains(queued, iconPRQueued) || strings.Contains(queued, iconPROpen) {
+		t.Errorf("queued row should carry the queue icon, not the open one: %q", queued)
+	}
+	open := m.renderPRRow(prEntry{pr: core.PR{Repo: "o/r", Number: 1, Title: "t", State: core.PROpen}}, false)
+	if strings.Contains(open, iconPRQueued) || !strings.Contains(open, iconPROpen) {
+		t.Errorf("unqueued row should carry the open icon: %q", open)
+	}
+}
+
 // A narrow terminal must still leave a readable entry rather than collapsing it
 // to nothing or overflowing the row.
 func TestRowEntryBudgetsNarrow(t *testing.T) {

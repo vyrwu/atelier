@@ -48,6 +48,7 @@ type prNode struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
 	ReviewDecision string `json:"reviewDecision"`
+	IsInMergeQueue bool   `json:"isInMergeQueue"`
 	Comments       struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"comments"`
@@ -66,7 +67,7 @@ type prNode struct {
 const prFields = `fragment pr on PullRequest {
   number title url state isDraft createdAt headRefName baseRefName headRefOid isCrossRepository
   repository { nameWithOwner }
-  reviewDecision
+  reviewDecision isInMergeQueue
   comments { totalCount }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 }`
@@ -328,6 +329,7 @@ func (n prNode) toPR(repoHint string) core.PR {
 		State:     classify(n.State, n.IsDraft),
 		CI:        classifyRollup(n.rollupState()),
 		Review:    classifyReview(n.ReviewDecision),
+		Queued:    n.IsInMergeQueue,
 		Comments:  n.Comments.TotalCount,
 		CreatedAt: n.CreatedAt,
 	}

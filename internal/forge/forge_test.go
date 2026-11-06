@@ -118,6 +118,7 @@ func TestBuildQuery(t *testing.T) {
 		"fragment pr on PullRequest",
 		"statusCheckRollup { state }", // the aggregate, not every check run
 		"comments { totalCount }",     // a count, not the bodies
+		"isInMergeQueue",
 	} {
 		if !strings.Contains(q, want) {
 			t.Errorf("query missing %q:\n%s", want, q)
@@ -222,6 +223,24 @@ func TestPRNodeToPR(t *testing.T) {
 	}
 	if pr.CreatedAt.IsZero() {
 		t.Error("createdAt lost")
+	}
+}
+
+// A PR sitting in its base branch's merge queue is marked queued; one that
+// isn't (or a GitHub that doesn't say) is not.
+func TestPRNodeInMergeQueue(t *testing.T) {
+	for body, want := range map[string]bool{
+		`{"number": 1, "state": "OPEN", "isInMergeQueue": true}`:  true,
+		`{"number": 1, "state": "OPEN", "isInMergeQueue": false}`: false,
+		`{"number": 1, "state": "OPEN"}`:                          false,
+	} {
+		var n prNode
+		if err := json.Unmarshal([]byte(body), &n); err != nil {
+			t.Fatal(err)
+		}
+		if got := n.toPR("o/r").Queued; got != want {
+			t.Errorf("%s: queued = %v, want %v", body, got, want)
+		}
 	}
 }
 

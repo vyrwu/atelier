@@ -55,9 +55,11 @@ type PR struct {
 	Base string `json:"base,omitempty"`
 	// HeadOID is the commit the PR's head branch points at on GitHub — compared
 	// against a local worktree's HEAD to tell whether a local diff is current.
-	HeadOID    string    `json:"head_oid,omitempty"`
-	CI         CIState   `json:"ci"`
-	Review     Review    `json:"review"`
+	HeadOID string  `json:"head_oid,omitempty"`
+	CI      CIState `json:"ci"`
+	Review  Review  `json:"review"`
+	// Queued marks a PR waiting in its base branch's merge queue.
+	Queued     bool      `json:"queued,omitempty"`
 	Comments   int       `json:"comments,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitempty"`
 	Registered bool      `json:"registered,omitempty"`
