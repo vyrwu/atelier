@@ -85,9 +85,7 @@ type Model struct {
 	returnScreen screen          // where confirm returns to
 	prSel        int
 	wtSel        int
-	prLoading    bool            // a PR sweep is in flight — the rows are the previous one
 	wtLoading    bool            // worktree freshness is being computed
-	prPollGen    int             // identifies the live PR poll chain
 	spin         spinner.Model   // the one activity indicator, shared by the views
 	confirm      string          // the confirmation prompt
 	confirmSwap  bool            // the confirm is for a swap of focusWS, not a delete
@@ -132,10 +130,6 @@ func Run(outer, start string) error {
 		_ = tmux.Notify(outer, "no space here  ·  open a space to see its "+what+"  ·  M-n to create")
 		return nil
 	}
-	// Opening straight onto the PR view queries GitHub at once (see Init), so the
-	// header says so from the first frame. Set here, not in newModel: the start
-	// screen is chosen above, after the model is built.
-	m.prLoading = m.queriesOnOpen()
 	// Opening straight onto worktrees starts their sweep in Init, so the header
 	// shows it from the first frame — when there is a sweep to show.
 	m.wtLoading = m.screen == scrWorktrees && m.freshnessCmd() != nil
@@ -294,31 +288,19 @@ func (m Model) rowWidth() int {
 	return m.w - 6
 }
 
-// queriesOnOpen reports whether opening the overlay fires a PR query — the one
-// predicate behind both the query (Init) and the "checking github…" marker (Run),
-// so the header can never claim a query that wasn't made, or stay silent during
-// one that was.
-func (m Model) queriesOnOpen() bool { return m.screen == scrPRs && m.curWS != nil }
-
 func (m Model) Init() tea.Cmd {
-	// Opening straight onto the PR view always re-queries GitHub; the view renders
-	// the last sweep (marked as such) and replaces it when this one lands. The
-	// worktree view likewise draws its branches at once and fills in how far each
-	// has drifted when that lands.
-	switch {
-	case m.queriesOnOpen():
-		// Run already opened the chain; schedule the generation the model holds,
-		// or the first tick arrives stale and the poll dies silently.
-		return tea.Batch(textarea.Blink, m.spin.Tick, m.refreshCurrentCmd(), prPollCmd(m.prPollGen))
-	case m.screen == scrWorktrees:
-		return tea.Batch(textarea.Blink, m.spin.Tick, m.freshnessCmd())
+	// PRs render from the cache, which the overlay re-reads every second. The
+	// worktree view draws its branches at once and fills in how far each has
+	// drifted when that lands.
+	if m.screen == scrWorktrees {
+		return tea.Batch(textarea.Blink, cacheTickCmd(), m.spin.Tick, m.freshnessCmd())
 	}
-	return textarea.Blink
+	return tea.Batch(textarea.Blink, cacheTickCmd())
 }
 
 // loading reports whether anything the current view is waiting on is still in
 // flight — what keeps the spinner ticking, and what stops it.
-func (m Model) loading() bool { return m.prLoading || m.wtLoading }
+func (m Model) loading() bool { return m.wtLoading }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -334,45 +316,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
-	case prPollMsg:
-		// A tick from a retired chain, or one that arrived after you left the
-		// view, dies here rather than re-arming.
-		if msg.gen != m.prPollGen || m.screen != scrPRs || m.curWS == nil {
-			return m, nil
+	case cacheTickMsg:
+		// The cache can reorder the list; the cursor stays on its PR.
+		flat := m.flatPRs()
+		var held string
+		if m.prSel >= 0 && m.prSel < len(flat) {
+			held = prKey(flat[m.prSel].Repo, flat[m.prSel].Number)
 		}
-		m.prLoading = true
-		return m, tea.Batch(m.spin.Tick, m.refreshCurrentCmd(), prPollCmd(msg.gen))
+		m.applyCache(core.Load())
+		for i, pr := range m.flatPRs() {
+			if prKey(pr.Repo, pr.Number) == held {
+				m.prSel = i
+			}
+		}
+		return m, cacheTickCmd()
 	case wtFreshMsg:
 		m.wtLoading = false
 		m.applyFreshness(msg)
 		return m, nil
-	case prsRefreshedMsg:
-		m.prLoading = false
-		// Merged into what is on disk now rather than written over it: a PR
-		// registered after this query began is not in its result, and must not
-		// be erased by it.
-		prs := msg.prs
-		_ = core.Update(func(s *core.State) {
-			if w := s.Find(msg.slug); w != nil {
-				w.PRs = keepRegistered(msg.prs, w.PRs)
-				w.PRsRefreshed = time.Now()
-				prs = w.PRs
-			}
-		})
-		for i := range m.all {
-			if m.all[i].Slug == msg.slug {
-				m.all[i].PRs = prs
-			}
-		}
-		return m, nil
 	case prMutatedMsg:
 		delete(m.prPending, prKey(msg.repo, msg.number))
 		if msg.err != nil {
-			// The command failed (or raced a stale state) — surface it and pull
-			// ground truth so the optimistic flip can't leave the row wrong.
+			// The command failed (or raced a stale state) — surface it; the next
+			// cache tick puts the row back to what GitHub last said.
 			m.err = msg.err.Error()
-			m.prLoading = true
-			return m, tea.Batch(m.spin.Tick, m.refreshCurrentCmd())
+			return m, nil
 		}
 		m.err = ""
 		// Reconcile to the re-queried ground-truth PR (match by repo+number).
@@ -386,15 +354,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		_ = core.Update(func(s *core.State) {
-			if w := s.Find(msg.slug); w != nil {
-				for j := range w.PRs {
-					if w.PRs[j].Repo == msg.pr.Repo && w.PRs[j].Number == msg.pr.Number {
-						w.PRs[j] = msg.pr
-					}
-				}
-			}
-		})
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -426,12 +385,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = scrPRs
 			m.filter.SetValue("")
 			m.filter.Focus()
-			m.prLoading = true
-			// Re-pressing M-p re-queries, and restarts the poll from now. The
-			// chain is opened before the return so the model that goes back
-			// carries the generation its tick will quote.
-			poll := m.startPRPoll()
-			return m, tea.Batch(m.spin.Tick, m.refreshCurrentCmd(), poll)
+			return m, nil
 		case "alt+w":
 			m.wtSel = 0
 			m.screen = scrWorktrees

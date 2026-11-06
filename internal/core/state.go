@@ -153,6 +153,11 @@ func RemoveWorkspace(slug string) error {
 // lock takes the state file's exclusive lock (see LockFile).
 func lock() (func(), error) { return LockFile(StatePath() + ".lock") }
 
+// LockPRs serialises writes of swept PR state: a sweep holds it from reading
+// the cache to writing its result, so a PR state change saved meanwhile waits
+// and lands after it rather than being overwritten by the older answer.
+func LockPRs() (func(), error) { return LockFile(filepath.Join(CacheDir(), "prs.lock")) }
+
 // LockFile takes an exclusive advisory lock on the file at path, creating it if
 // need be, and returns the unlock. Blocks until acquired. It only serialises
 // processes that take the same lock — atelier's own.

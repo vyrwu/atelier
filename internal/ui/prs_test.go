@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -12,90 +11,6 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 )
 
-// EXPERIMENT: no cache window. A sweep that landed a moment ago must not stop
-// the next open from querying — the PR view is meant to be relied on while you
-// work, so what it shows is what GitHub just said.
-func TestRefreshIsNeverCacheGated(t *testing.T) {
-	ws := &core.Workspace{Slug: "s", Session: "s", PRsRefreshed: time.Now()}
-	m := Model{curWS: ws, wt: map[string][]core.Worktree{}}
-
-	if m.refreshCurrentCmd() == nil {
-		t.Error("a refresh seconds after the last one was skipped — the cache window is back")
-	}
-	ws.PRsRefreshed = time.Now().Add(-time.Hour)
-	if m.refreshCurrentCmd() == nil {
-		t.Error("no refresh issued at all")
-	}
-}
-
-// Off a space there is nothing to query.
-func TestRefreshNeedsASpace(t *testing.T) {
-	m := Model{wt: map[string][]core.Worktree{}}
-	if m.refreshCurrentCmd() != nil {
-		t.Error("issued a query with no current space")
-	}
-}
-
-// While the query is out, the rows are the previous sweep. The header says so,
-// so a second-old cache can't pass for ground truth.
-func TestPRViewMarksAnInFlightQuery(t *testing.T) {
-	ws := &core.Workspace{Slug: "s", Session: "s", Title: "a space", PRs: []core.PR{
-		{Repo: "o/r", Number: 1, Title: "a pr", State: core.PROpen, CI: core.CIPending},
-	}}
-	m := Model{w: 120, h: 40, screen: scrPRs, curWS: ws, filter: textinput.New(), wt: map[string][]core.Worktree{}}
-
-	m.prLoading = true
-	if out := ansiRe.ReplaceAllString(m.viewPRs(), ""); !strings.Contains(out, "checking github") {
-		t.Errorf("in-flight query not surfaced:\n%s", out)
-	}
-	m.prLoading = false
-	if out := ansiRe.ReplaceAllString(m.viewPRs(), ""); strings.Contains(out, "checking github") {
-		t.Errorf("marker outlived the query:\n%s", out)
-	}
-}
-
-// The marker clears when the sweep lands, whatever else the message carries.
-func TestPRsRefreshedClearsTheMarker(t *testing.T) {
-	ws := core.Workspace{Slug: "s", Session: "s"}
-	m := Model{all: []core.Workspace{ws}, prLoading: true, wt: map[string][]core.Worktree{}, filter: textinput.New()}
-	m.curWS = &m.all[0]
-
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	next, _ := m.Update(prsRefreshedMsg{slug: "s", prs: []core.PR{{Repo: "o/r", Number: 2}}})
-	if next.(Model).prLoading {
-		t.Error("marker still set after the sweep landed")
-	}
-	if got := next.(Model).all[0].PRs; len(got) != 1 || got[0].Number != 2 {
-		t.Errorf("sweep not applied: %+v", got)
-	}
-}
-
-// The marker and the query come off one predicate. They were two conditions
-// once, evaluated at different points in startup, and the header stayed silent
-// through every query it was supposed to announce.
-func TestQueryAndMarkerAgree(t *testing.T) {
-	ws := &core.Workspace{Slug: "s", Session: "s"}
-	cases := []struct {
-		name  string
-		model Model
-		want  bool
-	}{
-		{"pr view in a space", Model{screen: scrPRs, curWS: ws}, true},
-		{"pr view off a space", Model{screen: scrPRs}, false},
-		{"spaces view", Model{screen: scrActive, curWS: ws}, false},
-	}
-	for _, c := range cases {
-		c.model.wt = map[string][]core.Worktree{}
-		if got := c.model.queriesOnOpen(); got != c.want {
-			t.Errorf("%s: queriesOnOpen = %v, want %v", c.name, got, c.want)
-		}
-		// Whenever it says yes, there is a command to run.
-		if c.want && c.model.refreshCurrentCmd() == nil {
-			t.Errorf("%s: claims a query but issues none", c.name)
-		}
-	}
-}
-
 // The spinner ticks only while something is in flight. A view that keeps
 // ticking on idle burns a redraw every 100ms in a popup that is usually just
 // sitting there.
@@ -104,11 +19,7 @@ func TestSpinnerStopsWhenNothingIsLoading(t *testing.T) {
 	if _, cmd := m.Update(spinner.TickMsg{}); cmd != nil {
 		t.Error("idle view kept the spinner ticking")
 	}
-	m.prLoading = true
-	if _, cmd := m.Update(spinner.TickMsg{}); cmd == nil {
-		t.Error("spinner stopped while a PR query was in flight")
-	}
-	m.prLoading, m.wtLoading = false, true
+	m.wtLoading = true
 	if _, cmd := m.Update(spinner.TickMsg{}); cmd == nil {
 		t.Error("spinner stopped while freshness was in flight")
 	}
@@ -172,67 +83,6 @@ func TestOverlayHandlesGoHome(t *testing.T) {
 	}
 }
 
-// An open PR view re-queries on its own every minute. The tick carries the
-// generation of the chain that scheduled it, so re-entering the view can't
-// leave two chains ticking — and a tick from a retired chain dies.
-func TestPRPollRearmsOnlyTheLiveChain(t *testing.T) {
-	ws := &core.Workspace{Slug: "s", Session: "s"}
-	m := Model{screen: scrPRs, curWS: ws, filter: textinput.New(), wt: map[string][]core.Worktree{}, prPollGen: 3}
-
-	next, cmd := m.Update(prPollMsg{gen: 3})
-	if cmd == nil {
-		t.Error("live tick did not re-arm the poll")
-	}
-	if !next.(Model).prLoading {
-		t.Error("live tick did not mark the query in flight")
-	}
-	if _, cmd := m.Update(prPollMsg{gen: 2}); cmd != nil {
-		t.Error("a retired chain kept ticking")
-	}
-}
-
-// Leaving the PR view ends the poll: the popup is the process, and a tick that
-// lands on another screen must not re-arm.
-func TestPRPollStopsOffTheView(t *testing.T) {
-	ws := &core.Workspace{Slug: "s", Session: "s"}
-	m := Model{screen: scrActive, curWS: ws, filter: textinput.New(), wt: map[string][]core.Worktree{}, prPollGen: 1}
-	if _, cmd := m.Update(prPollMsg{gen: 1}); cmd != nil {
-		t.Error("poll kept ticking after leaving the PR view")
-	}
-
-	m.screen, m.curWS = scrPRs, nil // on the view, but off a space
-	if _, cmd := m.Update(prPollMsg{gen: 1}); cmd != nil {
-		t.Error("poll ticked with no space to query")
-	}
-}
-
-// Re-pressing M-p restarts the chain, and the model it returns carries the
-// generation that chain's tick will quote — evaluation order in the return
-// statement is not something to rely on.
-func TestMPRestartsThePollChain(t *testing.T) {
-	ws := &core.Workspace{Slug: "s", Session: "s"}
-	m := Model{screen: scrActive, curWS: ws, filter: textinput.New(), wt: map[string][]core.Worktree{}, prPollGen: 1}
-
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true})
-	got := next.(Model)
-	if got.prPollGen != 2 {
-		t.Fatalf("generation = %d, want the chain advanced to 2", got.prPollGen)
-	}
-	// The tick that chain scheduled must be accepted by the returned model.
-	if _, cmd := got.Update(prPollMsg{gen: got.prPollGen}); cmd == nil {
-		t.Error("the restarted chain's own tick was treated as stale")
-	}
-}
-
-// The poll interval is a minute. It has been temporarily shortened to watch the
-// chain fire during development, and a binary built in that state polls GitHub
-// every couple of seconds from every open PR view — pin it.
-func TestPRPollIntervalIsAMinute(t *testing.T) {
-	if prPollInterval != time.Minute {
-		t.Fatalf("prPollInterval = %v, want 1m — a shortened interval must not ship", prPollInterval)
-	}
-}
-
 // The worktree spinner rises only when a sweep will run. With no worktrees no
 // result ever arrives to lower it, and "checking branches…" spun forever.
 func TestWorktreeSpinnerOnlyWhenASweepRuns(t *testing.T) {
@@ -254,33 +104,83 @@ func TestWorktreeSpinnerOnlyWhenASweepRuns(t *testing.T) {
 
 // A PR the agent registers while a refresh is in flight is not in that
 // refresh's result. Landing it must not erase the registration from disk.
-func TestRefreshKeepsARegistrationMadeMeanwhile(t *testing.T) {
+// The overlay never queries GitHub: the status job keeps the cache fresh, and
+// the overlay re-reads it every second. A PR with a state change in flight
+// keeps its optimistic state until that change lands.
+func TestCacheTickAppliesTheCache(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if err := core.Update(func(s *core.State) {
 		s.Workspaces = append(s.Workspaces, core.Workspace{Slug: "s", Session: "s", PRs: []core.PR{
-			{Repo: "o/r", Number: 1},
-			{Repo: "o/r", Number: 5, Registered: true}, // registered after the query began
+			{Repo: "o/r", Number: 1, State: core.PROpen, CI: core.CIPass},
+			{Repo: "o/r", Number: 2, State: core.PROpen},
+			{Repo: "o/r", Number: 3, State: core.PROpen},
 		}})
 	}); err != nil {
 		t.Fatal(err)
 	}
-	m := Model{all: core.Load().Workspaces, filter: textinput.New(), wt: map[string][]core.Worktree{}}
+	m := Model{all: []core.Workspace{{Slug: "s", Session: "s", PRs: []core.PR{
+		{Repo: "o/r", Number: 1, State: core.PROpen, CI: core.CIPending},
+		{Repo: "o/r", Number: 2, State: core.PRClosed}, // M-c in flight
+	}}}, prPending: map[string]bool{prKey("o/r", 2): true}, filter: textinput.New(), wt: map[string][]core.Worktree{}}
 	m.curWS = &m.all[0]
 
-	next, _ := m.Update(prsRefreshedMsg{slug: "s", prs: []core.PR{{Repo: "o/r", Number: 1, Title: "fresh"}}})
+	next, cmd := m.Update(cacheTickMsg{})
+	if cmd == nil {
+		t.Error("the tick did not re-arm")
+	}
+	got := map[int]core.PR{}
+	for _, pr := range next.(Model).curWS.PRs {
+		got[pr.Number] = pr
+	}
+	if got[1].CI != core.CIPass {
+		t.Errorf("#1 not refreshed from the cache: %+v", got[1])
+	}
+	if got[2].State != core.PRClosed {
+		t.Errorf("#2 lost its in-flight state: %+v", got[2])
+	}
+	if _, ok := got[3]; !ok {
+		t.Error("#3, new in the cache, not shown")
+	}
+}
 
-	onDisk := map[int]bool{}
-	for _, pr := range core.Load().Find("s").PRs {
-		onDisk[pr.Number] = true
+// The cache can reorder the list under the cursor — a new PR, a state change.
+// The selection follows the PR, not the row, so M-c never lands on a neighbour.
+func TestCacheTickKeepsTheSelection(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	old := time.Now().Add(-time.Hour)
+	if err := core.Update(func(s *core.State) {
+		s.Workspaces = append(s.Workspaces, core.Workspace{Slug: "s", Session: "s", PRs: []core.PR{
+			{Repo: "o/r", Number: 7, State: core.PROpen, CreatedAt: old},
+			{Repo: "o/r", Number: 9, State: core.PROpen, CreatedAt: time.Now()}, // new, sorts first
+		}})
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if !onDisk[5] {
-		t.Error("the registration made during the refresh was erased from disk")
+	m := Model{screen: scrPRs, all: []core.Workspace{{Slug: "s", Session: "s", PRs: []core.PR{
+		{Repo: "o/r", Number: 7, State: core.PROpen, CreatedAt: old},
+	}}}, prPending: map[string]bool{}, filter: textinput.New(), wt: map[string][]core.Worktree{}}
+	m.curWS = &m.all[0]
+
+	next, _ := m.Update(cacheTickMsg{})
+	got := next.(Model)
+	if flat := got.flatPRs(); got.prSel >= len(flat) || flat[got.prSel].Number != 7 {
+		t.Errorf("selection moved off #7: prSel=%d over %+v", got.prSel, flat)
 	}
-	inView := map[int]bool{}
-	for _, pr := range next.(Model).all[0].PRs {
-		inView[pr.Number] = true
+}
+
+// A state change's result is saved to the cache, so the next tick shows it.
+func TestSavePRWritesTheCache(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	if err := core.Update(func(s *core.State) {
+		s.Workspaces = append(s.Workspaces, core.Workspace{Slug: "s", PRs: []core.PR{{Repo: "o/r", Number: 1, State: core.PROpen}}})
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if !inView[1] || !inView[5] {
-		t.Errorf("view has %v, want both PRs", inView)
+	if err := savePR("s", core.PR{Repo: "o/r", Number: 1, State: core.PRClosed}); err != nil {
+		t.Fatal(err)
+	}
+	if got := core.Load().Find("s").PRs[0].State; got != core.PRClosed {
+		t.Errorf("state on disk = %q, want closed", got)
 	}
 }

@@ -102,19 +102,23 @@ func TestPRTransitionStep(t *testing.T) {
 // The query is what makes a refresh one round trip instead of one listing per
 // repo: an alias per branch and per registered PR, all in a single document.
 func TestBuildQuery(t *testing.T) {
-	q := buildQuery(
-		[]branchTarget{
-			{repo: "owner/repo", branch: "feat/x"},
-			{repo: "other/thing", branch: "main"},
+	q := buildQuery([]lookups{
+		{
+			branches: []branchTarget{
+				{repo: "owner/repo", branch: "feat/x"},
+				{repo: "other/thing", branch: "main"},
+			},
+			numbers: []numberTarget{{repo: "owner/repo", number: 100}},
 		},
-		[]numberTarget{{repo: "owner/repo", number: 100}},
-	)
+		{branches: []branchTarget{{repo: "a/b", branch: "y"}}},
+	})
 
 	for _, want := range []string{
-		`b0: repository(owner: "owner", name: "repo")`,
+		`s0b0: repository(owner: "owner", name: "repo")`,
 		`headRefName: "feat/x"`,
-		`b1: repository(owner: "other", name: "thing")`,
-		`n0: repository(owner: "owner", name: "repo") { pullRequest(number: 100)`,
+		`s0b1: repository(owner: "other", name: "thing")`,
+		`s0n0: repository(owner: "owner", name: "repo") { pullRequest(number: 100)`,
+		`s1b0: repository(owner: "a", name: "b")`, // every space, one round trip
 		"fragment pr on PullRequest",
 		"statusCheckRollup { state }", // the aggregate, not every check run
 		"comments { totalCount }",     // a count, not the bodies
@@ -128,7 +132,7 @@ func TestBuildQuery(t *testing.T) {
 
 // A branch name is user data that lands inside a GraphQL string literal.
 func TestBuildQueryEscapes(t *testing.T) {
-	q := buildQuery([]branchTarget{{repo: "o/r", branch: `we"ird\name`}}, nil)
+	q := buildQuery([]lookups{{branches: []branchTarget{{repo: "o/r", branch: `we"ird\name`}}}})
 	if !strings.Contains(q, `headRefName: "we\"ird\\name"`) {
 		t.Errorf("branch not escaped into the literal:\n%s", q)
 	}
@@ -169,8 +173,10 @@ func TestNumberTargetsCoverRegisteredPRs(t *testing.T) {
 		{Repo: "", Number: 3, Registered: true},    // unusable
 		{Repo: "o/r", Number: 0, Registered: true}, // unusable
 		{Repo: "a/b", Number: 9, Registered: true},
+		{Repo: "a/b", Number: 8, Registered: true, State: core.PRMerged}, // terminal — never re-asked
+		{Repo: "a/b", Number: 7, Registered: true, State: core.PRClosed}, // can be reopened
 	})
-	want := []numberTarget{{repo: "a/b", number: 9}, {repo: "o/r", number: 1}}
+	want := []numberTarget{{repo: "a/b", number: 7}, {repo: "a/b", number: 9}, {repo: "o/r", number: 1}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("numberTargets = %+v, want %+v", got, want)
 	}
@@ -316,7 +322,7 @@ func TestMergeKeepsAFailedReposPRs(t *testing.T) {
 	}
 
 	got := map[int]core.PR{}
-	for _, pr := range merge(existing, data, branches, nil) {
+	for _, pr := range merge(existing, data, lookups{branches: branches}) {
 		got[pr.Number] = pr
 	}
 	if got[1].Title != "new title" {
@@ -337,7 +343,7 @@ func TestMergeMatchesRepoCaseInsensitively(t *testing.T) {
 	numbers := []numberTarget{{repo: "O/Repo", number: 5}}
 	fresh := prNode{Number: 5, Title: "new"}
 	fresh.Repository.NameWithOwner = "o/repo"
-	got := merge(existing, map[string]*aliasNode{"n0": {PullRequest: &fresh}}, nil, numbers)
+	got := merge(existing, map[string]*aliasNode{"n0": {PullRequest: &fresh}}, lookups{numbers: numbers})
 	if len(got) != 1 {
 		t.Fatalf("got %d PRs, want one: %+v", len(got), got)
 	}
@@ -365,10 +371,139 @@ func TestMergeDropsForkPRsFoundByBranch(t *testing.T) {
 	}
 	got := map[int]bool{}
 	for _, pr := range merge([]core.PR{{Repo: "o/r", Number: 3, Registered: true}}, data,
-		[]branchTarget{{repo: "o/r", branch: "fix-typo"}}, []numberTarget{{repo: "o/r", number: 3}}) {
+		lookups{branches: []branchTarget{{repo: "o/r", branch: "fix-typo"}}, numbers: []numberTarget{{repo: "o/r", number: 3}}}) {
 		got[pr.Number] = true
 	}
 	if !got[1] || got[2] || !got[3] {
 		t.Errorf("got %v, want own #1 and registered #3, not the fork's #2", got)
+	}
+}
+
+// A merged PR is terminal, so a branch whose cached PRs have all merged is
+// settled: it is asked only for open PRs, which finds a new PR on a reused branch
+// without fetching the merged one again. A branch with anything else on it is
+// asked in full, and so is one with no PR yet.
+func TestPlanSkipsSettledBranches(t *testing.T) {
+	existing := []core.PR{
+		{Repo: "O/R", Number: 1, Head: "done", State: core.PRMerged},
+		{Repo: "o/r", Number: 2, Head: "live", State: core.PROpen},
+		{Repo: "o/r", Number: 3, Head: "reused", State: core.PRMerged},
+		{Repo: "o/r", Number: 4, Head: "reused", State: core.PRDraft},
+		{Repo: "o/r", Number: 5, Head: "shut", State: core.PRClosed},
+	}
+	branches := []branchTarget{
+		{repo: "o/r", branch: "done"},
+		{repo: "o/r", branch: "fresh"},
+		{repo: "o/r", branch: "live"},
+		{repo: "o/r", branch: "reused"},
+		{repo: "o/r", branch: "shut"},
+	}
+	l := plan(existing, branches)
+	want := []branchTarget{
+		{repo: "o/r", branch: "done", openOnly: true},
+		{repo: "o/r", branch: "fresh"},
+		{repo: "o/r", branch: "live"},
+		{repo: "o/r", branch: "reused"},
+		{repo: "o/r", branch: "shut"},
+	}
+	if !reflect.DeepEqual(l.branches, want) {
+		t.Errorf("branches = %+v, want %+v", l.branches, want)
+	}
+	if !l.settled[settledKey("o/r", "done")] || len(l.settled) != 1 {
+		t.Errorf("settled = %v, want only o/r done", l.settled)
+	}
+}
+
+// A merged PR on a settled branch is kept as it was: the branch was asked only
+// for open PRs, so its absence from the answer says nothing. A new open PR on
+// that branch joins it. One whose worktree is gone is not kept — that is how a
+// finished branch leaves the view.
+func TestMergeKeepsSettledMergedPRs(t *testing.T) {
+	existing := []core.PR{
+		{Repo: "o/r", Number: 1, Head: "done", State: core.PRMerged, Title: "kept"},
+		{Repo: "o/r", Number: 2, Head: "removed", State: core.PRMerged},
+	}
+	l := plan(existing, []branchTarget{{repo: "o/r", branch: "done"}})
+	reopened := prNode{Number: 3, State: "OPEN", HeadRefName: "done"}
+	reopened.Repository.NameWithOwner = "o/r"
+	got := map[int]core.PR{}
+	for _, pr := range merge(existing, map[string]*aliasNode{"b0": {PullRequests: &struct {
+		Nodes []prNode `json:"nodes"`
+	}{Nodes: []prNode{reopened}}}}, l) {
+		got[pr.Number] = pr
+	}
+	if len(got) != 2 || got[1].Title != "kept" || got[3].State != core.PROpen {
+		t.Errorf("got %+v, want the settled #1 unchanged and the new #3", got)
+	}
+}
+
+// A settled branch's lookup asks for open PRs only, so a merged PR is never
+// fetched again.
+func TestBuildQueryAsksSettledBranchesForOpenPRs(t *testing.T) {
+	q := buildQuery([]lookups{{branches: []branchTarget{
+		{repo: "o/r", branch: "done", openOnly: true},
+		{repo: "o/r", branch: "live"},
+	}}})
+	if !strings.Contains(q, `headRefName: "done", states: OPEN,`) {
+		t.Errorf("settled branch not limited to open PRs:\n%s", q)
+	}
+	if strings.Count(q, "states:") != 1 {
+		t.Errorf("a live branch was limited too:\n%s", q)
+	}
+}
+
+// A space with nothing left to ask about is still reconciled: a PR whose
+// worktree is gone leaves, as it would after a query.
+func TestMergeAllReconcilesSpacesWithNothingToAsk(t *testing.T) {
+	spaces := []Space{{PRs: []core.PR{
+		{Repo: "o/r", Number: 1, Head: "removed", State: core.PROpen},
+		{Repo: "o/r", Number: 2, State: core.PRMerged, Registered: true},
+	}}}
+	ls := []lookups{plan(spaces[0].PRs, nil)}
+	got := mergeAll(spaces, ls, nil)
+	if len(got) != 1 || len(got[0]) != 1 || got[0][0].Number != 2 {
+		t.Errorf("got %+v, want only the registered #2", got)
+	}
+}
+
+// One query answers every due space; its aliases carry the space's index, and
+// the answer is split back so each space merges only what it asked for.
+func TestSplitBySpace(t *testing.T) {
+	a, b := &aliasNode{}, &aliasNode{}
+	got := splitBySpace(map[string]*aliasNode{"s0b0": a, "s1n0": b, "s1b2": nil, "junk": a})
+	want := map[int]map[string]*aliasNode{
+		0: {"b0": a},
+		1: {"n0": b, "b2": nil},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitBySpace = %v, want %v", got, want)
+	}
+}
+
+// A PR the agent registers while a sweep is in flight is not in that sweep's
+// result. Landing the sweep must not erase the registration.
+func TestKeepRegisteredKeepsARegistrationMadeMeanwhile(t *testing.T) {
+	got := KeepRegistered(
+		[]core.PR{{Repo: "o/r", Number: 1, Title: "fresh"}},
+		[]core.PR{{Repo: "o/r", Number: 1}, {Repo: "o/r", Number: 5, Registered: true}, {Repo: "o/r", Number: 6}},
+	)
+	nums := map[int]bool{}
+	for _, pr := range got {
+		nums[pr.Number] = true
+	}
+	if len(got) != 2 || !nums[1] || !nums[5] {
+		t.Errorf("got %+v, want the sweep's #1 plus the registered #5", got)
+	}
+}
+
+// A PR found by branch that the agent registers mid-sweep is in the sweep's
+// result unregistered. The registration on disk wins.
+func TestKeepRegisteredCarriesARegistrationMadeMeanwhile(t *testing.T) {
+	got := KeepRegistered(
+		[]core.PR{{Repo: "o/r", Number: 5, Title: "fresh"}},
+		[]core.PR{{Repo: "O/R", Number: 5, Registered: true}},
+	)
+	if len(got) != 1 || !got[0].Registered || got[0].Title != "fresh" {
+		t.Errorf("got %+v, want the sweep's #5, registered", got)
 	}
 }

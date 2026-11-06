@@ -13,28 +13,6 @@ import (
 	"github.com/vyrwu/atelier/internal/forge"
 )
 
-// prsRefreshedMsg carries a fresh PR sweep for one workspace back into the model.
-type prsRefreshedMsg struct {
-	slug string
-	prs  []core.PR
-}
-
-// keepRegistered adds to a refresh result any registered PR on disk that the
-// result doesn't have — one the agent registered while the query was running.
-func keepRegistered(refreshed, onDisk []core.PR) []core.PR {
-	have := map[string]bool{}
-	for _, pr := range refreshed {
-		have[prKey(pr.Repo, pr.Number)] = true
-	}
-	out := refreshed
-	for _, pr := range onDisk {
-		if pr.Registered && !have[prKey(pr.Repo, pr.Number)] {
-			out = append(out, pr)
-		}
-	}
-	return out
-}
-
 // prMutatedMsg carries the result of an M-o/M-c state change back into the
 // model so the row re-renders in place.
 type prMutatedMsg struct {
@@ -50,60 +28,70 @@ func prKey(repo string, number int) string {
 	return strings.ToLower(repo) + "#" + strconv.Itoa(number)
 }
 
-// refreshPRsCmd derives PRs from GitHub off the hot path (NFR-P1): the view
-// renders the cache immediately; this updates it when it lands.
-//
-// The cached PRs are read from disk when the query runs, not taken from when the
-// overlay opened: the agent registers PRs through the MCP server while the view
-// sits open and polls, and a snapshot from the open would leave those out.
-func refreshPRsCmd(slug string, wts []core.Worktree) tea.Cmd {
-	return func() tea.Msg {
-		var existing []core.PR
-		if w := core.Load().Find(slug); w != nil {
-			existing = w.PRs
+// cacheTickInterval is how often the open overlay re-reads the PR cache. The
+// overlay never queries GitHub itself: tmux's status job (atelier poll) keeps
+// the cache fresh, and reading it is a local file.
+const cacheTickInterval = time.Second
+
+// cacheTickMsg is one tick of that re-read.
+type cacheTickMsg struct{}
+
+func cacheTickCmd() tea.Cmd {
+	return tea.Tick(cacheTickInterval, func(time.Time) tea.Msg { return cacheTickMsg{} })
+}
+
+// applyCache takes every space's PRs from st — except a PR with a state change
+// in flight, which keeps its optimistic state until that change lands.
+func (m Model) applyCache(st *core.State) {
+	for i := range m.all {
+		w := st.Find(m.all[i].Slug)
+		if w == nil {
+			continue
 		}
-		return prsRefreshedMsg{slug: slug, prs: forge.Refresh(existing, wts)}
+		cur := map[string]core.PR{}
+		for _, pr := range m.all[i].PRs {
+			cur[prKey(pr.Repo, pr.Number)] = pr
+		}
+		prs := append([]core.PR(nil), w.PRs...)
+		for j, pr := range prs {
+			k := prKey(pr.Repo, pr.Number)
+			if old, ok := cur[k]; ok && m.prPending[k] {
+				prs[j] = old
+			}
+		}
+		m.all[i].PRs = prs
 	}
 }
 
-// prPollInterval is how often an open PR view re-queries GitHub on its own.
-// Nothing else in atelier polls (status is pushed by the agents' hooks), and this
-// only runs while you are looking at the view: the popup is the process, so
-// closing it ends the poll.
-const prPollInterval = time.Minute
-
-// prPollMsg is one tick of that poll. gen identifies the chain that scheduled
-// it, so re-entering the view can't leave two chains ticking at once.
-type prPollMsg struct{ gen int }
-
-// prPollCmd schedules the next tick of chain gen.
-func prPollCmd(gen int) tea.Cmd {
-	return tea.Tick(prPollInterval, func(time.Time) tea.Msg { return prPollMsg{gen: gen} })
-}
-
-// startPRPoll begins a fresh poll chain, retiring any previous one.
-func (m *Model) startPRPoll() tea.Cmd {
-	m.prPollGen++
-	return prPollCmd(m.prPollGen)
-}
-
-// refreshCurrentCmd refreshes the current space's PRs (the PR view is
-// space-scoped). EXPERIMENT: there is no cache window — every open queries
-// GitHub, so what the view shows is what GitHub says, and the cache on disk is
-// only what fills the screen for the second the query is in flight.
-func (m Model) refreshCurrentCmd() tea.Cmd {
-	if m.curWS == nil {
-		return nil
-	}
-	return refreshPRsCmd(m.curWS.Slug, m.wt[m.curWS.Slug])
-}
-
-// setPRStateCmd applies a state change on GitHub, then re-queries the PR.
+// setPRStateCmd applies a state change on GitHub, re-queries the PR, and saves
+// it to the cache.
 func setPRStateCmd(slug string, pr core.PR, target core.PRState) tea.Cmd {
 	return func() tea.Msg {
 		fresh, err := forge.SetPRState(pr, target)
+		if err == nil {
+			err = savePR(slug, fresh)
+		}
 		return prMutatedMsg{slug: slug, repo: pr.Repo, number: pr.Number, pr: fresh, err: err}
 	}
+}
+
+// savePR writes one re-queried PR into a space's cache, under the sweep lock so
+// a sweep that read the PR before the change can't land after it.
+func savePR(slug string, pr core.PR) error {
+	unlock, err := core.LockPRs()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return core.Update(func(s *core.State) {
+		if w := s.Find(slug); w != nil {
+			for j := range w.PRs {
+				if w.PRs[j].Repo == pr.Repo && w.PRs[j].Number == pr.Number {
+					w.PRs[j] = pr
+				}
+			}
+		}
+	})
 }
 
 // prGroup is a repo section in the PR view.
@@ -426,11 +414,6 @@ func (m Model) viewPRs() string {
 	b.WriteString(titleStyle.Render("Pull requests"))
 	if m.curWS != nil {
 		b.WriteString("  " + dimStyle.Render(m.curWS.Title))
-	}
-	// While the query is out, the rows on screen are the last sweep — say so,
-	// rather than letting a second-old cache pass for ground truth.
-	if m.prLoading {
-		b.WriteString("  " + m.spin.View() + " " + faintStyle.Render("checking github…"))
 	}
 	b.WriteString("\n")
 	b.WriteString(m.filter.View())

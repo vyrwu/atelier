@@ -71,18 +71,30 @@ func syncUsageCapture() {
 	}
 }
 
-// usageJob pins the paths onto the tmux job, including the dev instance's cache
-// and socket. A long-lived tmux server need not have inherited today's env.
-func usageJob() string {
+// usageJob is the quota status job.
+func usageJob() string { return statusJob("usage") }
+
+// pollJob is the PR status job, for the session tmux is drawing.
+func pollJob() string { return statusJob("poll '#{session_name}'") }
+
+// statusJob pins the paths onto a tmux status job running atelier with args,
+// including the dev instance's cache and socket. A long-lived tmux server need
+// not have inherited today's env.
+func statusJob(args string) string {
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 	// A removed override must also disappear from the old server's environment.
-	cmd := "env -u XDG_CACHE_HOME -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u PATH ATELIER_SOCKET=" + quote(core.LoadConfig().Socket)
-	for _, key := range []string{"XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH"} {
+	keys := []string{"XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "ATELIER_ROOT", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH"}
+	cmd := "env"
+	for _, key := range keys {
+		cmd += " -u " + key
+	}
+	cmd += " ATELIER_SOCKET=" + quote(core.LoadConfig().Socket)
+	for _, key := range keys {
 		if value, ok := os.LookupEnv(key); ok {
 			cmd += " " + key + "=" + quote(value)
 		}
 	}
-	cmd += " " + quote(self()) + " usage"
+	cmd += " " + quote(self()) + " " + args
 	// The result is embedded in a double-quoted tmux config value.
 	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(cmd)
 }

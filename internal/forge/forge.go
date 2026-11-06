@@ -1,9 +1,10 @@
 // Package forge derives pull-request state from GitHub through `gh`. One
-// GraphQL query per refresh asks for exactly the PRs a workspace tracks — its
-// worktree branches, plus every registered PR by number — and exactly the
-// fields the view draws. GitHub is ground truth; the result fills a cache.
-// Registered PRs are preserved when the query can't reach them, so a tracked PR
-// never silently vanishes.
+// GraphQL query per sweep asks for exactly the PRs the due workspaces track —
+// their worktree branches, plus every registered PR by number — and exactly the
+// fields the view draws. Merged PRs are terminal and never asked about again.
+// GitHub is ground truth; the result fills a cache. Registered PRs are
+// preserved when the query can't reach them, so a tracked PR never silently
+// vanishes.
 //
 // It is a query, not a listing: `gh pr list --json statusCheckRollup,comments`
 // pulls the repo's 50 most recent PRs with every check run and every comment
@@ -91,10 +92,12 @@ type gqlResponse struct {
 	} `json:"errors"`
 }
 
-// branchTarget is "the PRs whose head is this branch in this repo".
+// branchTarget is "the PRs whose head is this branch in this repo" — only the
+// open ones when openOnly, for a settled branch.
 type branchTarget struct {
-	repo   string // owner/repo
-	branch string
+	repo     string // owner/repo
+	branch   string
+	openOnly bool
 }
 
 // numberTarget is "this exact PR" — how registered PRs are refreshed, since
@@ -104,32 +107,126 @@ type numberTarget struct {
 	number int
 }
 
-// Refresh queries GitHub for the pull requests a workspace tracks and returns
-// them as core.PRs: one PR per worktree branch, plus every registered PR by
-// number. All of it is one GraphQL request — no per-repo listing, no
-// most-recent-50 window to fall out of. PRs of a repo whose lookup failed, and
-// everything at all if the query itself failed, are kept from existing so a
-// tracked PR never vanishes on a blip.
-func Refresh(existing []core.PR, worktrees []core.Worktree) []core.PR {
-	branches := branchTargets(worktrees)
-	numbers := numberTargets(existing)
-	if len(branches) == 0 && len(numbers) == 0 {
-		return existing
-	}
-
-	data, ok := runQuery(buildQuery(branches, numbers))
-	if !ok {
-		return existing // offline, no gh, or an unparsable answer — keep what we had
-	}
-
-	return merge(existing, data, branches, numbers)
+// Space is one workspace's share of a sweep: the PRs it has cached and the
+// worktrees it has on disk.
+type Space struct {
+	PRs       []core.PR
+	Worktrees []core.Worktree
 }
 
-// merge folds a query's answer into the cache. A lookup that came back null
-// failed on its own — repo renamed, SSO-restricted, briefly unreachable — while
-// the rest of the query succeeded, so every cached PR of that repo is kept as it
-// was rather than read as "no longer exists". Registered PRs are always kept.
-func merge(existing []core.PR, data map[string]*aliasNode, branches []branchTarget, numbers []numberTarget) []core.PR {
+// lookups is what one space asks GitHub: a lookup per worktree branch, and one
+// per registered PR that isn't merged. settled holds the branches whose cached
+// PRs have all merged; those are asked only for open PRs.
+type lookups struct {
+	branches []branchTarget
+	numbers  []numberTarget
+	settled  map[string]bool
+}
+
+// RefreshAll queries GitHub for the pull requests each space tracks and returns
+// them as core.PRs, one list per space in order. Every space goes into one
+// GraphQL request — no per-repo listing, no most-recent-50 window to fall out
+// of. PRs of a repo whose lookup failed, and everything at all if the query
+// itself failed, are kept from the cache so a tracked PR never vanishes on a
+// blip.
+func RefreshAll(spaces []Space) [][]core.PR {
+	ls := make([]lookups, len(spaces))
+	asks := false
+	for i, sp := range spaces {
+		ls[i] = plan(sp.PRs, branchTargets(sp.Worktrees))
+		asks = asks || len(ls[i].branches) > 0 || len(ls[i].numbers) > 0
+	}
+	var data map[string]*aliasNode
+	if asks {
+		var ok bool
+		if data, ok = runQuery(buildQuery(ls)); !ok {
+			// Offline, no gh, or an unparsable answer — keep what we had.
+			out := make([][]core.PR, len(spaces))
+			for i, sp := range spaces {
+				out[i] = sp.PRs
+			}
+			return out
+		}
+	}
+	return mergeAll(spaces, ls, data)
+}
+
+// mergeAll folds one query's answer into every space's cache. A space that
+// asked nothing is still merged, so a PR whose worktree is gone leaves it.
+func mergeAll(spaces []Space, ls []lookups, data map[string]*aliasNode) [][]core.PR {
+	bySpace := splitBySpace(data)
+	out := make([][]core.PR, len(spaces))
+	for i, sp := range spaces {
+		out[i] = merge(sp.PRs, bySpace[i], ls[i])
+	}
+	return out
+}
+
+// plan is the lookups for a space with these cached PRs and worktree branches.
+// A merged PR can't change, so a branch whose cached PRs have all merged is
+// settled and asked only for open PRs — which still finds a new PR on it. A
+// branch with no PR yet is asked in full, since that is how a new PR is found.
+func plan(existing []core.PR, branches []branchTarget) lookups {
+	merged, live := map[string]bool{}, map[string]bool{}
+	for _, pr := range existing {
+		k := settledKey(pr.Repo, pr.Head)
+		if pr.State == core.PRMerged {
+			merged[k] = true
+		} else {
+			live[k] = true
+		}
+	}
+	l := lookups{numbers: numberTargets(existing), settled: map[string]bool{}}
+	for _, b := range branches {
+		k := settledKey(b.repo, b.branch)
+		if merged[k] && !live[k] {
+			l.settled[k] = true
+			b.openOnly = true
+		}
+		l.branches = append(l.branches, b)
+	}
+	return l
+}
+
+// settledKey identifies a branch in a repo, case-folding the repo as key does.
+func settledKey(repo, branch string) string {
+	return strings.ToLower(repo) + "\x00" + branch
+}
+
+// KeepRegistered carries into a sweep's result every registration in onDisk —
+// one the agent made while the query was running: a PR the result lacks is
+// added, and one it has is marked registered.
+func KeepRegistered(refreshed, onDisk []core.PR) []core.PR {
+	registered := map[string]core.PR{}
+	for _, pr := range onDisk {
+		if pr.Registered {
+			registered[key(pr.Repo, pr.Number)] = pr
+		}
+	}
+	out := make([]core.PR, 0, len(refreshed)+len(registered))
+	for _, pr := range refreshed {
+		k := key(pr.Repo, pr.Number)
+		if _, ok := registered[k]; ok {
+			pr.Registered = true
+			delete(registered, k)
+		}
+		out = append(out, pr)
+	}
+	for _, pr := range onDisk {
+		if _, ok := registered[key(pr.Repo, pr.Number)]; ok {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+// merge folds a query's answer into one space's cache. A lookup that came back
+// null failed on its own — repo renamed, SSO-restricted, briefly unreachable —
+// while the rest of the query succeeded, so every cached PR of that repo is kept
+// as it was rather than read as "no longer exists". Registered PRs are always
+// kept, and so are the PRs of a settled branch, which were not asked about.
+func merge(existing []core.PR, data map[string]*aliasNode, l lookups) []core.PR {
+	branches, numbers := l.branches, l.numbers
 	// Registered-ness lives in the cache, not on GitHub: carry it across so a PR
 	// found by branch this time is still tracked when the branch is gone.
 	registered := map[string]bool{}
@@ -175,7 +272,7 @@ func merge(existing []core.PR, data map[string]*aliasNode, branches []branchTarg
 
 	for _, pr := range existing {
 		k := key(pr.Repo, pr.Number)
-		keep := pr.Registered || failed[strings.ToLower(pr.Repo)]
+		keep := pr.Registered || failed[strings.ToLower(pr.Repo)] || l.settled[settledKey(pr.Repo, pr.Head)]
 		if seen[k] || !keep {
 			continue
 		}
@@ -217,15 +314,15 @@ func branchTargets(worktrees []core.Worktree) []branchTarget {
 	return out
 }
 
-// numberTargets is one lookup per registered PR. These are addressed by number
-// because a registered PR need not have a worktree — or a branch — any more,
-// which is exactly the case that used to freeze at whatever status it was
-// registered with.
+// numberTargets is one lookup per registered PR that hasn't merged. These are
+// addressed by number because a registered PR need not have a worktree — or a
+// branch — any more, which is exactly the case that used to freeze at whatever
+// status it was registered with.
 func numberTargets(existing []core.PR) []numberTarget {
 	var out []numberTarget
 	seen := map[string]bool{}
 	for _, pr := range existing {
-		if !pr.Registered || pr.Repo == "" || pr.Number == 0 {
+		if !pr.Registered || pr.State == core.PRMerged || pr.Repo == "" || pr.Number == 0 {
 			continue
 		}
 		k := key(pr.Repo, pr.Number)
@@ -244,21 +341,27 @@ func numberTargets(existing []core.PR) []numberTarget {
 	return out
 }
 
-// buildQuery renders one query with an alias per lookup: b<i> for branches,
-// n<i> for numbers. Aliases are what let a whole workspace — several repos,
-// several branches — resolve in a single round trip.
-func buildQuery(branches []branchTarget, numbers []numberTarget) string {
+// buildQuery renders one query with an alias per lookup: s<k>b<i> for space k's
+// branches, s<k>n<i> for its numbers. Aliases are what let every due space —
+// several repos, several branches — resolve in a single round trip.
+func buildQuery(ls []lookups) string {
 	var b strings.Builder
 	b.WriteString("query {\n")
-	for i, t := range branches {
-		owner, name := splitRepo(t.repo)
-		fmt.Fprintf(&b, "  b%d: repository(owner: %s, name: %s) { pullRequests(headRefName: %s, first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ...pr } } }\n",
-			i, gqlString(owner), gqlString(name), gqlString(t.branch), prsPerBranch)
-	}
-	for i, t := range numbers {
-		owner, name := splitRepo(t.repo)
-		fmt.Fprintf(&b, "  n%d: repository(owner: %s, name: %s) { pullRequest(number: %d) { ...pr } }\n",
-			i, gqlString(owner), gqlString(name), t.number)
+	for k, l := range ls {
+		for i, t := range l.branches {
+			owner, name := splitRepo(t.repo)
+			states := ""
+			if t.openOnly {
+				states = " states: OPEN,"
+			}
+			fmt.Fprintf(&b, "  s%db%d: repository(owner: %s, name: %s) { pullRequests(headRefName: %s,%s first: %d, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ...pr } } }\n",
+				k, i, gqlString(owner), gqlString(name), gqlString(t.branch), states, prsPerBranch)
+		}
+		for i, t := range l.numbers {
+			owner, name := splitRepo(t.repo)
+			fmt.Fprintf(&b, "  s%dn%d: repository(owner: %s, name: %s) { pullRequest(number: %d) { ...pr } }\n",
+				k, i, gqlString(owner), gqlString(name), t.number)
+		}
 	}
 	b.WriteString("}\n")
 	b.WriteString(prFields)
@@ -268,6 +371,28 @@ func buildQuery(branches []branchTarget, numbers []numberTarget) string {
 // prsPerBranch bounds how many PRs one branch can contribute. A branch normally
 // has one, but a reused branch can carry a closed PR or two behind the live one.
 const prsPerBranch = 5
+
+// splitBySpace splits a query's answer by the space each alias was asked for,
+// stripping the s<k> prefix so each space sees its own b<i>/n<i> aliases.
+func splitBySpace(data map[string]*aliasNode) map[int]map[string]*aliasNode {
+	out := map[int]map[string]*aliasNode{}
+	for alias, node := range data {
+		rest, ok := strings.CutPrefix(alias, "s")
+		if !ok {
+			continue
+		}
+		end := strings.IndexAny(rest, "bn")
+		k, err := strconv.Atoi(rest[:max(end, 0)])
+		if end <= 0 || err != nil {
+			continue
+		}
+		if out[k] == nil {
+			out[k] = map[string]*aliasNode{}
+		}
+		out[k][rest[end:]] = node
+	}
+	return out
+}
 
 // aliasRepo maps an alias back to the repo it was asked about — the fallback for
 // a PR whose node somehow carries no repository.
@@ -486,12 +611,11 @@ func ghPR(repo string, number int, verb string, extra ...string) error {
 // viewPR re-queries a single PR by number, through the same query as a refresh
 // so a re-rendered row carries exactly the fields a refreshed one does.
 func viewPR(repo string, number int) (core.PR, error) {
-	t := []numberTarget{{repo: repo, number: number}}
-	data, ok := runQuery(buildQuery(nil, t))
+	data, ok := runQuery(buildQuery([]lookups{{numbers: []numberTarget{{repo: repo, number: number}}}}))
 	if !ok {
 		return core.PR{}, fmt.Errorf("query %s#%d", repo, number)
 	}
-	node := data["n0"]
+	node := data["s0n0"]
 	if node == nil || node.PullRequest == nil {
 		return core.PR{}, fmt.Errorf("%s#%d not found", repo, number)
 	}

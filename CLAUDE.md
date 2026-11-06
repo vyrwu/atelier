@@ -21,7 +21,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
 - `internal/ui` — the Bubble Tea overlay + the home splash (the only UI)
 - `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
-  `handoff` / `win` / `hook` / `usage` / `mcp` / `install` / `version`
+  `handoff` / `win` / `hook` / `usage` / `poll` / `mcp` / `install` / `version`
 
 ## Model & bindings
 
@@ -95,10 +95,16 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   run only once the user trusts them). Entering
   a blocked space sets it idle, so the badge clears until the agent asks again.
   The hooks never refresh PRs. PR status
-  is one GraphQL query for the whole space (worktree branches + registered PRs by
-  number) on opening `M-p` and once a minute while it stays open; the view shows
-  the last sweep, marked `checking github…`, until the query lands. Worktree
-  freshness is computed the same way, off the path that builds the model.
+  is kept by tmux's status job `atelier poll '#{session_name}'` (status-interval
+  5): one GraphQL query (worktree branches + registered PRs by number) for every
+  due space — the focused one after 5s, the rest after a minute — stamped in
+  `PRsRefreshed`. Sweeps take turns under `core.LockPRs`, reading state under
+  it, and an `M-o`/`M-c` result is saved under it too, so an older answer never
+  lands over a newer one. Merged PRs are never re-fetched: a branch whose
+  cached PRs have all merged is settled and asked only for open PRs. The
+  status jobs pin the state, config, cache, and root paths. The overlay never
+  queries GitHub; it re-reads the cache every second, keeping the cursor on its
+  PR. Worktree freshness is computed off the path that builds the model.
 - PR rows name their base; stacked PRs (one's base is another's head) render as
   a contiguous run, base first, joined by a gutter line — derived per render,
   never stored. Rows are ordered open · draft · merged · closed, newest first; a

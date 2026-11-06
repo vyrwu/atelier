@@ -126,7 +126,8 @@ no visible reconstruction.
 
 **NFR-P5 — Zero cost when idle.** With no interaction and no agent activity,
 atelier uses no CPU except for visible information that has no push source:
-an open pull request view and account allowances in the status line (§5).
+pull request status for an attached client and account allowances in the
+status line (§5).
 
 ### Reliability
 
@@ -267,7 +268,7 @@ trusted.
 | Interface | Purpose | Consumers |
 |---|---|---|
 | **UI** | Everything the user sees and does | The user |
-| **CLI** | `hook`, `usage`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, the agents (MCP) |
+| **CLI** | `hook`, `usage`, `poll`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, the agents (MCP) |
 | **MCP** | `create_worktree`, `create_pr`, `register_pr` | The agent |
 | **tmux fragment** | Bindings and options, generated and sourced into atelier's own server | atelier itself |
 
@@ -295,7 +296,9 @@ predictable failure mode. They are enforced in review.
 - **State lives in one JSON file, never in tmux**, and it is a cache and an
   index. Don't store what can be derived (NFR-R2).
 - **Prefer events, and there is no daemon.** GitHub can't push to atelier, so
-  an open pull request view re-queries once a minute. Agent account allowances
+  a status job polls it while a client is attached: the space in view every
+  5 seconds, every other space once a minute, merged PRs never. The overlay
+  only reads that cache. Agent account allowances
   are fetched when an agent's turn ends (its hook), at most once a minute each,
   and by the asynchronous tmux status job once a reading is stale: a minute for
   Codex, whose check is cheap, and 15 minutes for Claude, whose check boots its
