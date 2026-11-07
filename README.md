@@ -53,7 +53,7 @@ requests your agents open come to you, with their diff and CI one key away.
 - **Worktrees that are never stale.** Agents branch from the freshly fetched
   default branch.
 - **Retire and restore.** Clear a finished space; restoring resumes its
-  conversation.
+  conversation. Purge the ones you're done with by age.
 
 ## Install
 
@@ -114,6 +114,30 @@ In the overlays, type to filter, `Up`/`Down` to move, `Esc` to close.
 
 In a PR's diff window, `M-e` opens its checks; in its checks window, `M-d` goes
 back to the diff.
+
+## Cleaning up
+
+Spaces you retire wait in the Trash until you delete them. To clear out old
+ones from a shell:
+
+```sh
+atelier ls --older-than 2w           # spaces untouched for two weeks, stalest first
+atelier purge --older-than 30d       # delete Trash untouched for 30 days (asks first)
+atelier purge --older-than 30d --all # active spaces too
+atelier gc                           # sweep up what deleted spaces left behind
+```
+
+A space's age is from when it was last touched: made, swapped, retired, or
+last worked in by its agent. `purge` keeps any space whose worktrees hold
+uncommitted changes or commits that aren't on a remote or in a pull request,
+unless you pass `--force`, and never deletes the space it runs in. `--dry-run`
+shows what it would delete; `--yes` skips the question.
+
+`gc` deletes no work. It drops records whose directory is gone, puts space
+directories with no record in the Trash, stops sessions still running for a
+space in the Trash, removes stale cache files and Claude's entries for deleted
+spaces, and prunes source repositories' records of deleted worktrees.
+`atelier gc --dry-run` reports without changing anything.
 
 ## Configuration
 

@@ -5,6 +5,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -193,6 +194,78 @@ func IsDirty(path string) bool {
 	return len(strings.TrimSpace(string(out))) > 0
 }
 
+// Unsaved says what in the worktree at path exists nowhere else: uncommitted
+// changes, or commits no remote-tracking ref contains, unless HEAD is one of
+// published — a pull request's head, which GitHub keeps after its branch is
+// deleted. It fails closed: a worktree git can't read reports as unsaved. Empty
+// means nothing would be lost.
+func Unsaved(path string, published []string) string {
+	out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output()
+	if err != nil {
+		return "unreadable"
+	}
+	if len(strings.TrimSpace(string(out))) > 0 {
+		return "uncommitted changes"
+	}
+	out, err = exec.Command("git", "-C", path, "rev-list", "--count", "HEAD", "--not", "--remotes").Output()
+	if err != nil {
+		return "unreadable"
+	}
+	n := strings.TrimSpace(string(out))
+	if n == "0" {
+		return ""
+	}
+	head := HeadOID(path)
+	for _, oid := range published {
+		if head != "" && oid == head {
+			return ""
+		}
+	}
+	return n + " unpushed commit(s)"
+}
+
+// SourceGitDir is the git directory of the repository the worktree at path
+// belongs to, read off its `.git` file ("gitdir: <repo>/.git/worktrees/<name>")
+// without running git — the file outlives a source repo that has since moved.
+// "" if path isn't a linked worktree.
+func SourceGitDir(path string) string {
+	data, err := os.ReadFile(filepath.Join(path, ".git"))
+	if err != nil {
+		return ""
+	}
+	dir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: ")
+	if !ok {
+		return ""
+	}
+	if !filepath.IsAbs(dir) { // worktree.useRelativePaths
+		dir = filepath.Join(path, dir)
+	}
+	if filepath.Base(filepath.Dir(dir)) != "worktrees" {
+		return ""
+	}
+	return filepath.Dir(filepath.Dir(dir))
+}
+
+// PruneWorktrees drops gitDir's records of worktrees whose directories are gone
+// and returns what it pruned; with dry set it only reports.
+func PruneWorktrees(gitDir string, dry bool) ([]string, error) {
+	args := []string{"--git-dir", gitDir, "worktree", "prune", "--verbose"}
+	if dry {
+		args = append(args, "--dry-run")
+	}
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git worktree prune in %s: %w (%s)", gitDir, err, strings.TrimSpace(string(out)))
+	}
+	var pruned []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l != "" {
+			pruned = append(pruned, l)
+		}
+	}
+	return pruned, nil
+}
+
 // RemoveWorktree removes the git worktree at path via `git worktree remove
 // --force`. If that fails (e.g. corrupt bookkeeping), it falls back to deleting
 // the directory outright and pruning stale worktree entries best-effort.
@@ -219,12 +292,16 @@ func RemoveWorktree(path string) error {
 // CountWorktrees counts the worktrees under workspaceRoot without resolving any
 // branch names. Worktrees() spends a `git rev-parse` per worktree purely to fill
 // in Branch, which the space lists never show — they show how many there are.
-func CountWorktrees(workspaceRoot string) int {
+func CountWorktrees(workspaceRoot string) int { return len(WorktreeDirs(workspaceRoot)) }
+
+// WorktreeDirs is the path of every worktree under workspaceRoot, found the way
+// Worktrees finds them but without running git.
+func WorktreeDirs(workspaceRoot string) []string {
 	root, err := filepath.Abs(workspaceRoot)
 	if err != nil {
-		return 0
+		return nil
 	}
-	n := 0
+	var dirs []string
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			// One unreadable directory skips itself, not the rest of the space.
@@ -239,8 +316,8 @@ func CountWorktrees(workspaceRoot string) int {
 		if !isWorktreeDir(path) {
 			return nil
 		}
-		n++
+		dirs = append(dirs, path)
 		return filepath.SkipDir
 	})
-	return n
+	return dirs
 }

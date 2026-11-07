@@ -347,3 +347,70 @@ func TestPrepareProjectConcurrently(t *testing.T) {
 		t.Errorf("%d of %d spaces registered — updates were lost", got, n)
 	}
 }
+
+// PruneProjects edits a file Claude owns: it may drop only entries for
+// directories under the root that are gone, keep everything else byte-for-byte
+// in meaning, and leave the file alone when the root itself is missing.
+func TestPruneProjects(t *testing.T) {
+	cfgDir, root := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	live := filepath.Join(root, "live")
+	if err := os.Mkdir(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gone, goneWT := filepath.Join(root, "gone"), filepath.Join(root, "gone", "repo", "branch")
+	outside := filepath.Join(t.TempDir(), "missing-elsewhere")
+	sibling := root + "-other/x" // shares the root's prefix, isn't under it
+	cfg := map[string]any{
+		"theme": "dark",
+		"projects": map[string]any{
+			live: map[string]any{"hasTrustDialogAccepted": true}, gone: map[string]any{}, goneWT: map[string]any{},
+			outside: map[string]any{}, sibling: map[string]any{},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	path := filepath.Join(cfgDir, ".claude.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := PruneProjects(root, true)
+	if err != nil || strings.Join(got, ",") != gone+","+goneWT {
+		t.Fatalf("dry run = %v, %v; want [%s %s]", got, err, gone, goneWT)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(data) {
+		t.Fatal("a dry run rewrote the file")
+	}
+
+	if _, err := PruneProjects(root, false); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	var out map[string]any
+	if err := json.Unmarshal(after, &out); err != nil {
+		t.Fatal(err)
+	}
+	projects := out["projects"].(map[string]any)
+	for _, k := range []string{live, outside, sibling} {
+		if _, ok := projects[k]; !ok {
+			t.Errorf("%s was dropped", k)
+		}
+	}
+	for _, k := range []string{gone, goneWT} {
+		if _, ok := projects[k]; ok {
+			t.Errorf("%s was kept", k)
+		}
+	}
+	if out["theme"] != "dark" {
+		t.Error("other settings were lost")
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600 kept", fi.Mode().Perm())
+	}
+
+	// An unmounted root makes every space look deleted: touch nothing.
+	if got, _ := PruneProjects(filepath.Join(root, "not-mounted"), false); len(got) != 0 {
+		t.Errorf("missing root pruned %v", got)
+	}
+}

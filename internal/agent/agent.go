@@ -146,6 +146,25 @@ func SetStatus(session string, st core.AgentStatus) error {
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 
+// LastEvent is when session's agent last reported anything — the status file's
+// mtime, which every hook rewrites — or zero if it never has.
+func LastEvent(session string) time.Time {
+	fi, err := os.Stat(statusFile(session))
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
+}
+
+// ClearStatus drops session's status file, for a space that no longer exists.
+func ClearStatus(session string) error {
+	err := os.Remove(statusFile(session))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 // workingStaleAfter bounds how long a "working" status survives without a fresh
 // signal. Real turns keep it fresh via PreToolUse/PostToolUse; a status still
 // "working" past this had its turn die without a Stop hook (crash, kill, hang),

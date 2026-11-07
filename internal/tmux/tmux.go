@@ -311,6 +311,18 @@ func EnsureShell(session, cwd string) error {
 	return NewWindow(session, cwd, "shell")
 }
 
+// MoveClients points every client attached to session at to, so killing
+// session doesn't detach them from atelier.
+func MoveClients(session, to string) {
+	out, err := Run("list-clients", "-t", "="+session, "-F", "#{client_name}")
+	if err != nil {
+		return
+	}
+	for _, c := range strings.Fields(string(out)) {
+		_ = SwitchClient(c, to)
+	}
+}
+
 // KillSession destroys the named session.
 func KillSession(name string) error {
 	_, err := Run("kill-session", "-t", "="+name)

@@ -24,6 +24,7 @@ import (
 
 	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
+	"github.com/vyrwu/atelier/internal/gc"
 	"github.com/vyrwu/atelier/internal/git"
 	"github.com/vyrwu/atelier/internal/tmux"
 )
@@ -661,19 +662,13 @@ func setRetired(slug string, retired bool) {
 	})
 }
 
-// deleteWorkspace removes worktrees, the session, the directory, and the state
-// entry, then refreshes the list in place.
+// deleteWorkspace deletes w for good (gc.Delete), then refreshes the list in
+// place.
 func (m *Model) deleteWorkspace(w core.Workspace) {
 	m.moveOuterOff(w.Session)
-	// Derived for this space, not read from the model — removing the directory
-	// without removing the worktrees would leave the source repos registering
-	// checkouts that no longer exist.
-	for _, t := range git.Worktrees(w.Root()) {
-		_ = git.RemoveWorktree(t.Path)
+	if err := gc.Delete(w); err != nil {
+		m.err = "delete " + w.Slug + ": " + err.Error()
 	}
-	_ = tmux.KillSession(w.Session)
-	_ = os.RemoveAll(w.Root())
-	_ = core.RemoveWorkspace(w.Slug)
 	agent.RefreshAttention() // a deleted session may have been blocked
 	m.load()
 }
