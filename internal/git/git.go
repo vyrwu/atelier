@@ -197,8 +197,9 @@ func IsDirty(path string) bool {
 // Unsaved says what in the worktree at path exists nowhere else: uncommitted
 // changes, or commits no remote-tracking ref contains, unless HEAD is one of
 // published — a pull request's head, which GitHub keeps after its branch is
-// deleted. It fails closed: a worktree git can't read reports as unsaved. Empty
-// means nothing would be lost.
+// deleted. Initialized submodules are checked too: publishing a superproject
+// does not publish their commits. It fails closed when git can't read the work.
+// Empty means nothing would be lost.
 func Unsaved(path string, published []string) string {
 	out, err := exec.Command("git", "-C", path, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none").Output()
 	if err != nil {
@@ -213,15 +214,42 @@ func Unsaved(path string, published []string) string {
 	}
 	n := strings.TrimSpace(string(out))
 	if n == "0" {
-		return ""
+		return unsavedSubmodules(path)
 	}
 	head := HeadOID(path)
 	for _, oid := range published {
 		if head != "" && oid == head {
-			return ""
+			return unsavedSubmodules(path)
 		}
 	}
 	return n + " unpushed commit(s)"
+}
+
+func unsavedSubmodules(path string) string {
+	// Read gitlinks from the index with NUL delimiters so paths containing
+	// spaces, tabs, or newlines remain intact. Uninitialized modules hold no
+	// checkout to remove, so only follow ones with their own .git entry.
+	out, err := exec.Command("git", "-C", path, "ls-files", "--stage", "-z").Output()
+	if err != nil {
+		return "unreadable submodules"
+	}
+	for _, entry := range strings.Split(string(out), "\x00") {
+		if !strings.HasPrefix(entry, "160000 ") {
+			continue
+		}
+		_, name, ok := strings.Cut(entry, "\t")
+		if !ok {
+			return "unreadable submodules"
+		}
+		module := filepath.Join(path, name)
+		if _, err := os.Lstat(filepath.Join(module, ".git")); os.IsNotExist(err) {
+			continue
+		}
+		if why := Unsaved(module, nil); why != "" {
+			return "submodule " + name + ": " + why
+		}
+	}
+	return ""
 }
 
 // SourceGitDir is the git directory of the repository the worktree at path

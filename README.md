@@ -129,7 +129,8 @@ atelier gc                           # sweep up what deleted spaces left behind
 
 A space's age is from when it was last touched: made, swapped, retired, restored, or
 last worked in by its agent. `purge` keeps any space whose worktrees hold
-uncommitted changes or commits that aren't on a remote or in a pull request,
+uncommitted changes or commits that aren't on a remote or in a pull request
+(including unpublished commits in initialized submodules),
 unless you pass `--force`, and never deletes the space it runs in. `--dry-run`
 shows what it would delete; `--yes` skips the question.
 
