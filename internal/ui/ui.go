@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"sort"
@@ -608,7 +609,9 @@ func (m *Model) askSwap(w *core.Workspace) {
 func (m *Model) deactivate(w core.Workspace) {
 	m.moveOuterOff(w.Session)
 	_ = tmux.KillSession(w.Session)
-	setRetired(w.Slug, true)
+	if err := setRetired(w.Slug, true); err != nil {
+		m.err = err.Error()
+	}
 	agent.RefreshAttention() // a killed session may have been blocked
 	name := w.Title
 	if name == "" {
@@ -645,21 +648,35 @@ func (m Model) fallbackSession(exclude string) string {
 
 // reactivate restores a retired workspace and switches into it (resuming its agent).
 func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
-	setRetired(w.Slug, false)
+	if err := setRetired(w.Slug, false); err != nil {
+		m.err = err.Error()
+		m.load()
+		return m, nil
+	}
 	return m.switchTo(w.Session)
 }
 
-func setRetired(slug string, retired bool) {
-	_ = core.Update(func(s *core.State) {
+func setRetired(slug string, retired bool) error {
+	found := false
+	err := core.Update(func(s *core.State) {
 		if w := s.Find(slug); w != nil {
+			found = true
 			w.Retired = retired
 			if retired {
 				w.RetiredAt = time.Now()
 			} else {
 				w.RetiredAt = time.Time{}
+				_ = agent.SetStatus(w.Session, core.StatusIdle)
 			}
 		}
 	})
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("space %q no longer exists", slug)
+	}
+	return nil
 }
 
 // deleteWorkspace deletes w for good (gc.Delete), then refreshes the list in

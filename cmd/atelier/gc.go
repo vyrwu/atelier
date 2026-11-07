@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -181,7 +182,7 @@ func purge(args []string) error {
 }
 
 // currentSpace is the space this command runs in, if any — its agent's
-// environment names it; a shell in the space is in its session.
+// environment names it; a shell is in its session or under its directory.
 func currentSpace() string {
 	if s := os.Getenv("ATELIER_SLUG"); s != "" {
 		return s
@@ -189,6 +190,27 @@ func currentSpace() string {
 	if pane := os.Getenv("TMUX_PANE"); pane != "" && insideOwnServer() {
 		if out, err := tmux.Run("display-message", "-t", pane, "-p", "#{session_name}"); err == nil {
 			return strings.TrimSpace(string(out))
+		}
+	}
+	// A regular terminal can cd into a space without any atelier environment.
+	// Resolve both paths, since the configured root may be a symlink.
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	cwd, err = filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return ""
+	}
+	root, err := filepath.EvalSymlinks(core.AteliersRoot())
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(root, cwd)
+	if err == nil {
+		slug, _, _ := strings.Cut(rel, string(filepath.Separator))
+		if slug != "." && slug != ".." {
+			return slug
 		}
 	}
 	return ""

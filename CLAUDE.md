@@ -69,12 +69,15 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   Both deletes go through `gc.Delete`. `atelier purge` deletes by idle age
   (`gc.LastActive`: created/swapped/retired/last hook), Trash only unless
   `--all`, skipping unsaved worktrees unless `--force` and the caller's own
-  space; it re-reads each space before deleting. `atelier gc` drops records
+  space; its final re-read, safety checks, and deletion hold the state lock
+  shared with restoration. Restoring also refreshes the status timestamp.
+  `atelier gc` drops records
   whose directory is gone (10-minute grace for a space being made), adopts
   record-less space dirs into the Trash, kills sessions of retired spaces, and
   removes orphaned cache files, Claude project entries, and git worktree
   records; it refuses to run on an unreadable state and skips directory checks
-  when the root is missing.
+  when the root is missing. Swap lock files are retained to preserve locking
+  across concurrent openers.
 - Overlays: `M-s` spaces · `M-p` PRs · `M-w` worktrees · `M-t` trash · `M-n` new
   (background). `M-h` switches to the home splash (a session switch, not an
   overlay); the keymap, version, and dependency doctor live there — there is no

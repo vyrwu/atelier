@@ -116,7 +116,7 @@ func TestParseAge(t *testing.T) {
 			t.Errorf("ParseAge(%q) = %v, %v; want %v", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"", "d", "1.5d", "-1d", "-3h", "30", "thirty days"} {
+	for _, in := range []string{"", "d", "1.5d", "-1d", "-3h", "30", "thirty days", "106752d", "213504d", "15251w", "-106752d", "9223372036854775807w"} {
 		if _, err := ParseAge(in); err == nil {
 			t.Errorf("ParseAge(%q) accepted", in)
 		}
@@ -188,6 +188,8 @@ func TestUnsaved(t *testing.T) {
 	if u := Unsaved(w); len(u) != 0 {
 		t.Fatalf("fresh worktree: %v", u)
 	}
+	// User display preferences must not hide work from a destructive operation.
+	run(t, wt, "config", "status.showUntrackedFiles", "no")
 	if err := os.WriteFile(filepath.Join(wt, "new.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +275,62 @@ func TestPurge(t *testing.T) {
 	}
 }
 
+// A restore owns the state lock while updating the record. Purge must wait
+// before it reads or removes anything, then see the restored record.
+func TestPurgeWaitsForRestore(t *testing.T) {
+	root := sandbox(t)
+	w := core.Workspace{Slug: "restoring", Session: "restoring", Created: time.Now().Add(-time.Hour), Retired: true}
+	put(t, w)
+	if err := os.Mkdir(filepath.Join(root, w.Slug), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := core.LockFile(core.StatePath() + ".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	type result struct {
+		skipped string
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		skipped, err := (Policy{}).Purge(w.Slug, time.Now())
+		done <- result{skipped, err}
+	}()
+	// Give the competing purge an opportunity to reach its destructive step.
+	select {
+	case r := <-done:
+		t.Fatalf("purge finished while restoration held the state lock: %+v", r)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, err := os.Stat(w.Root()); err != nil {
+		t.Error("purge removed the space while restoration held the state lock")
+	}
+	w.Retired = false
+	data, _ := json.Marshal(core.State{Version: 1, Workspaces: []core.Workspace{w}})
+	if err := os.WriteFile(core.StatePath(), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	unlock = nil
+	select {
+	case r := <-done:
+		if r.err != nil || r.skipped != "changed since listed" {
+			t.Errorf("purge after restore: %+v", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("purge did not finish after restoration unlocked state")
+	}
+	if s := core.Load(); s.Find(w.Slug) == nil {
+		t.Fatal("purge dropped the restored record")
+	}
+}
+
 // A slug becomes a path under the root; the state file is hand-editable, so a
 // bad one must never let a delete reach the root or above it.
 func TestDeleteRefusesBadSlugs(t *testing.T) {
@@ -288,6 +346,55 @@ func TestDeleteRefusesBadSlugs(t *testing.T) {
 	}
 	if _, err := os.Stat(keep); err != nil {
 		t.Fatal("a refused delete removed something")
+	}
+}
+
+// Session names also form cache paths. A hand-edited record must not turn
+// status cleanup into a delete outside the agent cache directory.
+func TestDeleteRefusesBadSessions(t *testing.T) {
+	root := sandbox(t)
+	sentinel := filepath.Join(core.CacheDir(), "sentinel")
+	touch(t, sentinel, time.Now())
+	// Ensure agents exists so the pre-fix ../sentinel path can be resolved.
+	if err := os.MkdirAll(filepath.Join(core.CacheDir(), "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "keep")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []string{"../sentinel", "", ".", "..", "a/b"} {
+		if err := Delete(core.Workspace{Slug: "keep", Session: session}); err == nil {
+			t.Errorf("Delete with session %q went ahead", session)
+		}
+	}
+	for _, path := range []string{dir, sentinel} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("a refused delete removed %s", path)
+		}
+	}
+}
+
+func TestSweepPreservesSwapLocks(t *testing.T) {
+	sandbox(t)
+	path := filepath.Join(core.CacheDir(), "locks", "swap-gone.lock")
+	unused := filepath.Join(core.CacheDir(), "locks", "swap-unused.lock")
+	touch(t, unused, time.Now().Add(-24*time.Hour))
+	unlock, err := core.LockFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(unlock)
+	for _, dry := range []bool{true, false} {
+		r, err := Sweep(dry, time.Now())
+		if err != nil || r.Cache != 0 {
+			t.Errorf("busy lock (dry=%v): report %+v, error %v; want no removal reported", dry, r, err)
+		}
+		for _, lock := range []string{path, unused} {
+			if _, err := os.Stat(lock); err != nil {
+				t.Errorf("removed lock file %s", lock)
+			}
+		}
 	}
 }
 
@@ -323,8 +430,11 @@ func TestSweep(t *testing.T) {
 
 	cache := core.CacheDir()
 	touch(t, filepath.Join(cache, "agents", "kept"), now)
+	touch(t, filepath.Join(cache, "agents", "orphan"), now)
+	touch(t, filepath.Join(cache, "agents", "vanished"), old)
 	touch(t, filepath.Join(cache, "agents", "long-deleted"), old)
 	touch(t, filepath.Join(cache, "locks", "swap-kept.lock"), now)
+	touch(t, filepath.Join(cache, "locks", "swap-vanished.lock"), old)
 	touch(t, filepath.Join(cache, "locks", "swap-long-deleted.lock"), old)
 	touch(t, filepath.Join(cache, "locks", "settings.json.lock"), old) // not a space's
 	touch(t, filepath.Join(cache, "worktrees", "fresh"), now)
@@ -371,12 +481,12 @@ func TestSweep(t *testing.T) {
 	if a == nil || !a.Retired || !a.Created.Equal(orphanAt) || !a.RetiredAt.Equal(orphanAt) || a.Session != "orphan" {
 		t.Fatalf("adopted = %+v; want in the Trash, aged from its directory's mtime", a)
 	}
-	for _, f := range []string{"agents/kept", "locks/swap-kept.lock", "locks/settings.json.lock", "worktrees/fresh"} {
+	for _, f := range []string{"agents/kept", "agents/orphan", "locks/swap-kept.lock", "locks/swap-vanished.lock", "locks/swap-long-deleted.lock", "locks/settings.json.lock", "worktrees/fresh"} {
 		if _, err := os.Stat(filepath.Join(cache, f)); err != nil {
 			t.Errorf("%s was removed", f)
 		}
 	}
-	for _, f := range []string{"agents/long-deleted", "locks/swap-long-deleted.lock", "worktrees/stale"} {
+	for _, f := range []string{"agents/long-deleted", "agents/vanished", "worktrees/stale"} {
 		if _, err := os.Stat(filepath.Join(cache, f)); !os.IsNotExist(err) {
 			t.Errorf("%s was kept", f)
 		}

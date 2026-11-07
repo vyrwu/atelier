@@ -82,13 +82,17 @@ deletes spaces untouched for longer than an age — the Trash, or every space
 with `--all` — the same way the Trash does, but keeps any holding work that
 exists nowhere else (uncommitted, or neither on a remote nor a pull request's
 head) unless forced, and re-reads each space before deleting it, since the
-list it confirmed may be stale. Untouched is derived, not stored: the latest of
-created, swapped, retired, and the agent's last hook event (its status file's
-mtime). `atelier gc` reconciles state with disk (NFR-R2): a record whose
+list it confirmed may be stale. The state lock covers that final read, the
+safety checks, and deletion, serializing them with restoration. Untouched is
+derived, not stored: the latest of created, swapped, retired, and the agent's
+status file's mtime (updated by hooks and restoration). `atelier gc` reconciles
+state with disk (NFR-R2): a record whose
 directory is gone is dropped; a space directory with no record — one atelier
 made, linking the central guide — is put in the Trash rather than deleted;
-leftovers keyed by deleted spaces (status files, swap locks, Claude project
-entries, source repositories' worktree records) are removed. It judges nothing
+leftovers keyed by deleted spaces (status files, Claude project entries, source
+repositories' worktree records) are removed. Swap lock files stay in place:
+unlinking one can leave waiting openers and new openers locking different
+inodes at the same path. It judges nothing
 by its directory when the root itself is missing, and nothing at all when the
 state file can't be read.
 

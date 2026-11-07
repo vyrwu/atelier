@@ -200,7 +200,7 @@ func IsDirty(path string) bool {
 // deleted. It fails closed: a worktree git can't read reports as unsaved. Empty
 // means nothing would be lost.
 func Unsaved(path string, published []string) string {
-	out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output()
+	out, err := exec.Command("git", "-C", path, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none").Output()
 	if err != nil {
 		return "unreadable"
 	}

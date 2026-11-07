@@ -6,6 +6,7 @@ package gc
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,12 +40,16 @@ func ParseAge(s string) (time.Duration, error) {
 }
 
 func days(n string, per int) (time.Duration, error) {
-	v, err := strconv.Atoi(n)
-	return time.Duration(v*per) * 24 * time.Hour, err
+	v, err := strconv.ParseInt(n, 10, 64)
+	unit := int64(per) * int64(24*time.Hour)
+	if err != nil || v < 0 || v > math.MaxInt64/unit {
+		return 0, strconv.ErrRange
+	}
+	return time.Duration(v * unit), nil
 }
 
-// LastActive is when w was last touched: made, swapped, retired, or its agent's
-// latest hook event — whichever came last.
+// LastActive is when w was last touched: made, swapped, retired, restored, or
+// its agent's latest hook event — whichever came last.
 func LastActive(w core.Workspace) time.Time {
 	t := w.Created
 	for _, u := range []time.Time{w.SwappedAt, w.RetiredAt, agent.LastEvent(w.Session)} {
@@ -78,8 +83,24 @@ func Unsaved(w core.Workspace) []string {
 // and its record. The record goes last, so a space that fails to delete stays
 // listed and can be deleted again.
 func Delete(w core.Workspace) error {
+	var deleteErr error
+	err := core.Update(func(s *core.State) {
+		if current := s.Find(w.Slug); current != nil {
+			w = *current
+		}
+		deleteErr = deleteWorkspace(s, w)
+	})
+	return errors.Join(deleteErr, err)
+}
+
+// deleteWorkspace runs with the state lock held, which also serializes Trash
+// restoration. Drop the record only after all files are removed successfully.
+func deleteWorkspace(s *core.State, w core.Workspace) error {
 	if !isSlug(w.Slug) {
 		return fmt.Errorf("refusing to delete %q: not a space's directory name", w.Slug)
+	}
+	if !isSlug(w.Session) {
+		return fmt.Errorf("refusing to delete %q: invalid session name %q", w.Slug, w.Session)
 	}
 	tmux.MoveClients(w.Session, tmux.HomeSession)
 	_ = tmux.KillSession(w.Session)
@@ -90,7 +111,14 @@ func Delete(w core.Workspace) error {
 		return err
 	}
 	_ = agent.ClearStatus(w.Session)
-	return core.RemoveWorkspace(w.Slug)
+	kept := s.Workspaces[:0]
+	for _, entry := range s.Workspaces {
+		if entry.Slug != w.Slug {
+			kept = append(kept, entry)
+		}
+	}
+	s.Workspaces = kept
+	return nil
 }
 
 // isSlug guards every path built from a slug: the state file is hand-editable
@@ -146,23 +174,27 @@ func (p Policy) selects(w core.Workspace, now time.Time) bool {
 
 // Purge deletes the space slug if p still selects it. Its record and worktrees
 // are read again first, since either may have changed since the plan was shown:
-// the space restored, or work added. skipped says why it was left, if it was.
+// the space restored, or work added. The state lock spans the final checks and
+// deletion, so restoration cannot interleave. skipped says why it was left.
 func (p Policy) Purge(slug string, now time.Time) (skipped string, err error) {
-	s, err := core.Read()
-	if err != nil {
-		return "", err
-	}
-	w := s.Find(slug)
-	switch {
-	case w == nil:
-		return "already gone", nil
-	case !p.selects(*w, now):
-		return "changed since listed", nil
-	}
-	if u := Unsaved(*w); len(u) > 0 && !p.Force {
-		return "unsaved work: " + strings.Join(u, ", "), nil
-	}
-	return "", Delete(*w)
+	var deleteErr error
+	err = core.Update(func(s *core.State) {
+		w := s.Find(slug)
+		switch {
+		case w == nil:
+			skipped = "already gone"
+			return
+		case !p.selects(*w, now):
+			skipped = "changed since listed"
+			return
+		}
+		if u := Unsaved(*w); len(u) > 0 && !p.Force {
+			skipped = "unsaved work: " + strings.Join(u, ", ")
+			return
+		}
+		deleteErr = deleteWorkspace(s, *w)
+	})
+	return skipped, errors.Join(deleteErr, err)
 }
 
 // Report is what a sweep found — or, dry, would have.
@@ -204,11 +236,12 @@ func Sweep(dry bool, now time.Time) (Report, error) {
 	if dry {
 		if st, err = core.Read(); err == nil {
 			r.Records, r.Adopted, r.Sessions = triage(st, root, rootOK, live, now)
+			apply(st, root, r, live, true)
 		}
 	} else {
 		err = core.Update(func(s *core.State) {
 			r.Records, r.Adopted, r.Sessions = triage(s, root, rootOK, live, now)
-			apply(s, root, r, live)
+			apply(s, root, r, live, false)
 			st = s
 		})
 	}
@@ -252,8 +285,9 @@ func triage(s *core.State, root string, rootOK bool, live map[string]bool, now t
 	return records, adopted, sessions
 }
 
-// apply carries out a triage on s, under the state lock.
-func apply(s *core.State, root string, r Report, live map[string]bool) {
+// apply carries out a triage on s, under the state lock. A dry run changes
+// only its in-memory copy, so cache checks see the same projected state.
+func apply(s *core.State, root string, r Report, live map[string]bool, dry bool) {
 	drop := map[string]bool{}
 	for _, slug := range r.Records {
 		drop[slug] = true
@@ -266,6 +300,9 @@ func apply(s *core.State, root string, r Report, live map[string]bool) {
 	}
 	s.Workspaces = kept
 	for _, slug := range r.Sessions {
+		if dry {
+			continue
+		}
 		w := s.Find(slug)
 		tmux.MoveClients(w.Session, tmux.HomeSession)
 		_ = tmux.KillSession(w.Session)
@@ -300,11 +337,12 @@ func isSpaceDir(dir string) bool {
 // the overlay recomputes it after five minutes.
 const freshnessTTL = 24 * time.Hour
 
-// cacheFiles lists the cache files that belong to one space: agent status, swap
-// locks, and worktree freshness.
+// cacheFiles lists agent status and worktree freshness files. Never unlink
+// advisory lock files: a waiting opener can still hold the old inode while a
+// new opener creates and locks a different one at the same path.
 func cacheFiles() []string {
 	var files []string
-	for _, pat := range []string{"agents/*", "locks/swap-*.lock", "worktrees/*"} {
+	for _, pat := range []string{"agents/*", "worktrees/*"} {
 		m, _ := filepath.Glob(filepath.Join(core.CacheDir(), pat))
 		files = append(files, m...)
 	}
@@ -328,37 +366,32 @@ func sweepCache(files []string, s *core.State, now time.Time, dry bool) (int, er
 			if known[name] {
 				continue
 			}
-		case "locks":
-			if known[strings.TrimSuffix(strings.TrimPrefix(name, "swap-"), ".lock")] {
-				continue
-			}
 		case "worktrees":
 			if fi, err := os.Stat(f); err != nil || now.Sub(fi.ModTime()) < freshnessTTL {
 				continue
 			}
 		}
-		n++
-		if !dry {
-			errs = append(errs, removeCache(f))
+		removed, err := removeCache(f, dry)
+		errs = append(errs, err)
+		if removed {
+			n++
 		}
 	}
 	return n, errors.Join(errs...)
 }
 
-// removeCache removes a cache file; a lock only while holding it, so a swap
-// that holds it isn't left locking a file no one else can find.
-func removeCache(f string) error {
-	if strings.HasSuffix(f, ".lock") {
-		unlock, ok, err := core.TryLockFile(f)
-		if err != nil || !ok {
-			return err
-		}
-		defer unlock()
+// removeCache reports only successful (or, dry, possible) removals.
+func removeCache(f string, dry bool) (bool, error) {
+	var err error
+	if dry {
+		_, err = os.Lstat(f)
+	} else {
+		err = os.Remove(f)
 	}
-	if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-		return err
+	if os.IsNotExist(err) {
+		return false, nil
 	}
-	return nil
+	return err == nil, err
 }
 
 // pruneWorktrees has every source repository a space's worktree belongs to drop
