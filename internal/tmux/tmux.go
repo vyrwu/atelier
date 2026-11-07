@@ -5,9 +5,11 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -58,9 +60,19 @@ func HasSession(name string) bool {
 // socket. Best-effort: it returns an empty slice on any error (e.g. no
 // server running yet).
 func ListSessions() []string {
+	names, _ := ReadSessions()
+	return names
+}
+
+// ReadSessions distinguishes an absent server from a failed query. Destructive
+// callers must not interpret a timeout or a missing tmux binary as no sessions.
+func ReadSessions() ([]string, error) {
 	out, err := Run("list-sessions", "-F", "#{session_name}")
+	if err != nil && !serverAbsent(string(out)) {
+		return nil, err
+	}
 	if err != nil {
-		return []string{}
+		return nil, nil
 	}
 	var names []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -68,7 +80,29 @@ func ListSessions() []string {
 			names = append(names, line)
 		}
 	}
-	return names
+	return names, nil
+}
+
+func serverAbsent(out string) bool {
+	out = strings.TrimSpace(out)
+	return strings.HasPrefix(out, "no server running on ") ||
+		(strings.HasPrefix(out, "error connecting to ") &&
+			(strings.HasSuffix(out, "(No such file or directory)") || strings.HasSuffix(out, "(Connection refused)")))
+}
+
+// StopSession succeeds only after a successful kill or a query confirming
+// absence. In particular, failure to contact a running server is not success.
+func StopSession(name string) error {
+	if err := KillSession(name); err != nil {
+		names, queryErr := ReadSessions()
+		if queryErr != nil {
+			return errors.Join(err, queryErr)
+		}
+		if slices.Contains(names, name) {
+			return err
+		}
+	}
+	return nil
 }
 
 // NewSession creates a detached session named name, with working

@@ -658,20 +658,28 @@ func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
 
 func setRetired(slug string, retired bool) error {
 	found := false
+	var statusErr error
 	err := core.Update(func(s *core.State) {
 		if w := s.Find(slug); w != nil {
 			found = true
+			if !retired {
+				if statusErr = agent.SetStatus(w.Session, core.StatusIdle); statusErr != nil {
+					return
+				}
+			}
 			w.Retired = retired
 			if retired {
 				w.RetiredAt = time.Now()
 			} else {
 				w.RetiredAt = time.Time{}
-				_ = agent.SetStatus(w.Session, core.StatusIdle)
 			}
 		}
 	})
 	if err != nil {
 		return err
+	}
+	if statusErr != nil {
+		return statusErr
 	}
 	if !found {
 		return fmt.Errorf("space %q no longer exists", slug)

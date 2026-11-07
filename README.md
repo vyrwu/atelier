@@ -130,15 +130,21 @@ atelier gc                           # sweep up what deleted spaces left behind
 A space's age is from when it was last touched: made, swapped, retired, restored, or
 last worked in by its agent. `purge` keeps any space whose worktrees hold
 uncommitted changes or commits that aren't on a remote or in a pull request
-(including unpublished commits in initialized submodules),
-unless you pass `--force`, and never deletes the space it runs in. `--dry-run`
-shows what it would delete; `--yes` skips the question.
+(including unpublished commits in initialized submodules), unrecognized files outside verified
+worktrees, or an incomplete directory scan. It also keeps running sessions:
+retire those spaces first, or pass `--force` to stop them and discard unsaved work.
+The enclosing space and the space containing the current directory are always
+excluded. `--dry-run` shows what it would delete; `--yes` skips the question.
 
 `gc` deletes no work. It drops records whose directory is gone, puts space
-directories with no record in the Trash, stops sessions still running for a
-space in the Trash, removes stale cache files and Claude's entries for deleted
+directories with no record in the Trash (or active Spaces if their session is
+still running), recovers their agent from session metadata or conversations,
+stops sessions still running for a space in the Trash, removes stale cache
+files and Claude's entries for deleted
 spaces, and prunes source repositories' records of deleted worktrees.
 Swap lock files are retained so concurrent swaps keep sharing the same lock.
+Cleanup stops on an unknown session-query result, and a failed session stop
+keeps the workspace on disk.
 `atelier gc --dry-run` reports without changing anything.
 
 ## Configuration

@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,6 +53,11 @@ func days(n string, per int) (time.Duration, error) {
 // its agent's latest hook event — whichever came last.
 func LastActive(w core.Workspace) time.Time {
 	t := w.Created
+	if t.IsZero() {
+		if fi, err := os.Stat(w.Root()); err == nil {
+			t = fi.ModTime() // recovered spaces have no reliable creation cutoff
+		}
+	}
 	for _, u := range []time.Time{w.SwappedAt, w.RetiredAt, agent.LastEvent(w.Session)} {
 		if u.After(t) {
 			t = u
@@ -60,8 +66,9 @@ func LastActive(w core.Workspace) time.Time {
 	return t
 }
 
-// Unsaved lists w's worktrees holding work that exists nowhere else, as
-// "<repo>/<branch>: <what>".
+// Unsaved checks worktrees and unrecognized workspace files conservatively.
+// Atelier's own guides and agent metadata are excluded; an incomplete scan
+// never counts as proof that a workspace is clean.
 func Unsaved(w core.Workspace) []string {
 	var published []string
 	for _, p := range w.PRs {
@@ -70,10 +77,51 @@ func Unsaved(w core.Workspace) []string {
 		}
 	}
 	var out []string
-	for _, t := range git.Worktrees(w.Root()) {
-		if why := git.Unsaved(t.Path, published); why != "" {
-			out = append(out, t.Repo+"/"+t.Branch+": "+why)
+	root := w.Root()
+	if fi, err := os.Lstat(root); os.IsNotExist(err) {
+		return nil
+	} else if err != nil || !fi.IsDir() {
+		return []string{"unreadable workspace directory"}
+	}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if path == root {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		if filepath.Dir(path) == root {
+			switch d.Name() {
+			case ".atelier", ".claude", ".codex", "CLAUDE.md", "AGENTS.md":
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		if d.IsDir() {
+			fi, err := os.Lstat(filepath.Join(path, ".git"))
+			if os.IsNotExist(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			why := "unrecognized repository"
+			if fi.Mode().IsRegular() {
+				why = git.Unsaved(path, published)
+			}
+			if why != "" {
+				out = append(out, rel+": "+why)
+			}
+			return filepath.SkipDir
+		}
+		out = append(out, rel+": file outside a readable worktree")
+		return filepath.SkipAll
+	})
+	if err != nil {
+		out = append(out, "incomplete workspace scan: "+err.Error())
 	}
 	return out
 }
@@ -96,14 +144,16 @@ func Delete(w core.Workspace) error {
 // deleteWorkspace runs with the state lock held, which also serializes Trash
 // restoration. Drop the record only after all files are removed successfully.
 func deleteWorkspace(s *core.State, w core.Workspace) error {
-	if !isSlug(w.Slug) {
+	if !core.ValidSpaceName(w.Slug) {
 		return fmt.Errorf("refusing to delete %q: not a space's directory name", w.Slug)
 	}
-	if !isSlug(w.Session) {
+	if !core.ValidSpaceName(w.Session) {
 		return fmt.Errorf("refusing to delete %q: invalid session name %q", w.Slug, w.Session)
 	}
 	tmux.MoveClients(w.Session, tmux.HomeSession)
-	_ = tmux.KillSession(w.Session)
+	if err := tmux.StopSession(w.Session); err != nil {
+		return err
+	}
 	for _, t := range git.Worktrees(w.Root()) {
 		_ = git.RemoveWorktree(t.Path)
 	}
@@ -121,19 +171,12 @@ func deleteWorkspace(s *core.State, w core.Workspace) error {
 	return nil
 }
 
-// isSlug guards every path built from a slug: the state file is hand-editable
-// (NFR-S3), and an empty or dotted slug would put a space's root at, or above,
-// the root of all of them.
-func isSlug(s string) bool {
-	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, `/\`) && !strings.HasPrefix(s, ".")
-}
-
 // Policy picks the spaces a purge deletes.
 type Policy struct {
 	Age    time.Duration // untouched for at least this long
 	Active bool          // active spaces too, not only the Trash
 	Force  bool          // spaces holding unsaved work too
-	Keep   string        // a space never to touch: the one the caller runs in
+	Keep   []string      // the caller's enclosing and working-directory spaces
 }
 
 // Candidate is a space a policy selects, with any work deleting it would lose.
@@ -141,15 +184,20 @@ type Candidate struct {
 	core.Workspace
 	Idle    time.Duration
 	Unsaved []string
+	Running bool
 }
 
 // Plan is every space p selects in s, stalest first. Those holding unsaved
 // work are included, for the caller to show; Purge skips them unless p.Force.
-func (p Policy) Plan(s *core.State, now time.Time) []Candidate {
+func (p Policy) Plan(s *core.State, now time.Time) ([]Candidate, error) {
+	live, err := tmux.ReadSessions()
+	if err != nil {
+		return nil, err
+	}
 	var out []Candidate
 	for _, w := range s.Workspaces {
 		if p.selects(w, now) {
-			out = append(out, Candidate{Workspace: w, Idle: now.Sub(LastActive(w))})
+			out = append(out, Candidate{Workspace: w, Idle: now.Sub(LastActive(w)), Running: slices.Contains(live, w.Session)})
 		}
 	}
 	// A git status per worktree adds up over a Trash of hundreds; run a few at once.
@@ -165,11 +213,11 @@ func (p Policy) Plan(s *core.State, now time.Time) []Candidate {
 	}
 	wg.Wait()
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Idle > out[j].Idle })
-	return out
+	return out, nil
 }
 
 func (p Policy) selects(w core.Workspace, now time.Time) bool {
-	return w.Slug != p.Keep && (w.Retired || p.Active) && now.Sub(LastActive(w)) >= p.Age
+	return !slices.Contains(p.Keep, w.Slug) && (w.Retired || p.Active) && now.Sub(LastActive(w)) >= p.Age
 }
 
 // Purge deletes the space slug if p still selects it. Its record and worktrees
@@ -188,6 +236,15 @@ func (p Policy) Purge(slug string, now time.Time) (skipped string, err error) {
 			skipped = "changed since listed"
 			return
 		}
+		live, err := tmux.ReadSessions()
+		if err != nil {
+			deleteErr = err
+			return
+		}
+		if slices.Contains(live, w.Session) && !p.Force {
+			skipped = "session is running; retire the space first or use --force"
+			return
+		}
 		if u := Unsaved(*w); len(u) > 0 && !p.Force {
 			skipped = "unsaved work: " + strings.Join(u, ", ")
 			return
@@ -199,17 +256,18 @@ func (p Policy) Purge(slug string, now time.Time) (skipped string, err error) {
 
 // Report is what a sweep found — or, dry, would have.
 type Report struct {
-	Records   []string // records whose directory is gone, dropped
-	Adopted   []string // space directories with no record, put in the Trash
-	Sessions  []string // sessions still running for spaces in the Trash, stopped
-	Cache     int      // cache files for spaces that no longer exist, removed
-	Projects  []string // Claude project entries for deleted directories, dropped
-	Worktrees []string // source repositories' records of deleted worktrees, pruned
+	Records       []string // records whose directory is gone, dropped
+	Adopted       []string // space directories with no record, put in the Trash
+	ActiveAdopted []string // running spaces recovered without stopping their sessions
+	Sessions      []string // sessions still running for spaces in the Trash, stopped
+	Cache         int      // cache files for spaces that no longer exist, removed
+	Projects      []string // Claude project entries for deleted directories, dropped
+	Worktrees     []string // source repositories' records of deleted worktrees, pruned
 }
 
 // Empty reports whether the sweep found nothing.
 func (r Report) Empty() bool {
-	return len(r.Records)+len(r.Adopted)+len(r.Sessions)+r.Cache+len(r.Projects)+len(r.Worktrees) == 0
+	return len(r.Records)+len(r.Adopted)+len(r.ActiveAdopted)+len(r.Sessions)+r.Cache+len(r.Projects)+len(r.Worktrees) == 0
 }
 
 // grace covers a space being made: its record is written before its directory.
@@ -227,27 +285,32 @@ func Sweep(dry bool, now time.Time) (Report, error) {
 	root := core.AteliersRoot()
 	rootOK := isDir(root)
 	live := map[string]bool{}
-	for _, s := range tmux.ListSessions() {
+	sessions, err := tmux.ReadSessions()
+	if err != nil {
+		return r, err
+	}
+	for _, s := range sessions {
 		live[s] = true
 	}
 
 	var st *core.State
-	var err error
+	var applyErr error
 	if dry {
 		if st, err = core.Read(); err == nil {
 			r.Records, r.Adopted, r.Sessions = triage(st, root, rootOK, live, now)
-			apply(st, root, r, live, true)
+			applyErr = apply(st, root, &r, live, true)
 		}
 	} else {
 		err = core.Update(func(s *core.State) {
 			r.Records, r.Adopted, r.Sessions = triage(s, root, rootOK, live, now)
-			apply(s, root, r, live, false)
+			applyErr = apply(s, root, &r, live, false)
 			st = s
 		})
 	}
 	if err != nil {
 		return r, err // without a state to trust, everything else would read as garbage
 	}
+	errs = append(errs, applyErr)
 
 	r.Cache, err = sweepCache(cache, st, now, dry)
 	errs = append(errs, err)
@@ -278,7 +341,7 @@ func triage(s *core.State, root string, rootOK bool, live map[string]bool, now t
 	}
 	entries, _ := os.ReadDir(root)
 	for _, e := range entries {
-		if e.IsDir() && isSlug(e.Name()) && s.Find(e.Name()) == nil && isSpaceDir(filepath.Join(root, e.Name())) {
+		if e.IsDir() && core.ValidSpaceName(e.Name()) && s.Find(e.Name()) == nil && isSpaceDir(filepath.Join(root, e.Name())) {
 			adopted = append(adopted, e.Name())
 		}
 	}
@@ -287,7 +350,8 @@ func triage(s *core.State, root string, rootOK bool, live map[string]bool, now t
 
 // apply carries out a triage on s, under the state lock. A dry run changes
 // only its in-memory copy, so cache checks see the same projected state.
-func apply(s *core.State, root string, r Report, live map[string]bool, dry bool) {
+func apply(s *core.State, root string, r *Report, live map[string]bool, dry bool) error {
+	var errs []error
 	drop := map[string]bool{}
 	for _, slug := range r.Records {
 		drop[slug] = true
@@ -299,26 +363,49 @@ func apply(s *core.State, root string, r Report, live map[string]bool, dry bool)
 		}
 	}
 	s.Workspaces = kept
+	stopped := r.Sessions[:0]
 	for _, slug := range r.Sessions {
 		if dry {
+			stopped = append(stopped, slug)
 			continue
 		}
 		w := s.Find(slug)
 		tmux.MoveClients(w.Session, tmux.HomeSession)
-		_ = tmux.KillSession(w.Session)
+		if err := tmux.StopSession(w.Session); err != nil {
+			errs = append(errs, err)
+		} else {
+			stopped = append(stopped, slug)
+		}
 	}
+	r.Sessions = stopped
+	retired := r.Adopted[:0]
 	for _, slug := range r.Adopted {
-		// The directory's mtime is the best record left of when it was last
-		// touched, so an adopted space ages from then, not from now.
+		// Creation is unknown: using the directory's mtime as a transcript
+		// cutoff would exclude conversations older than the last root edit.
 		w := core.Workspace{Slug: slug, Session: slug, Title: slug}
-		if fi, err := os.Stat(filepath.Join(root, slug)); err == nil {
-			w.Created = fi.ModTime()
+		w.Agent = string(agent.RecentKind(w.Root(), agent.Of(core.LoadConfig().Agent)))
+		if live[slug] {
+			if out, err := tmux.Run("show-options", "-t", slug, "-qv", "@atelier_agent"); err == nil {
+				for _, k := range []agent.Kind{agent.Claude, agent.Codex} {
+					if strings.TrimSpace(string(out)) == k.Label() {
+						w.Agent = string(k)
+					}
+				}
+			}
 		}
 		if !live[slug] {
-			w.Retired, w.RetiredAt = true, w.Created
+			retired = append(retired, slug)
+			w.Retired = true
+			if fi, err := os.Stat(filepath.Join(root, slug)); err == nil {
+				w.RetiredAt = fi.ModTime()
+			}
+		} else {
+			r.ActiveAdopted = append(r.ActiveAdopted, slug)
 		}
 		s.Workspaces = append(s.Workspaces, w)
 	}
+	r.Adopted = retired
+	return errors.Join(errs...)
 }
 
 // isSpaceDir reports whether dir was made by atelier: it links the central
@@ -403,7 +490,7 @@ func pruneWorktrees(root string, dry bool) ([]string, error) {
 	var errs []error
 	entries, _ := os.ReadDir(root)
 	for _, e := range entries {
-		if !e.IsDir() || !isSlug(e.Name()) {
+		if !e.IsDir() || !core.ValidSpaceName(e.Name()) {
 			continue
 		}
 		for _, wt := range git.WorktreeDirs(filepath.Join(root, e.Name())) {

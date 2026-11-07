@@ -83,12 +83,19 @@ with `--all` — the same way the Trash does, but keeps any holding work that
 exists nowhere else (uncommitted, or neither on a remote nor a pull request's
 head) unless forced, and re-reads each space before deleting it, since the
 list it confirmed may be stale. The state lock covers that final read, the
-safety checks, and deletion, serializing them with restoration. Untouched is
+safety checks, and deletion, serializing them with restoration. Agent launch
+holds the same lock, and purge keeps running sessions unless explicitly forced.
+Incomplete directory scans and unrecognized files outside verified worktrees
+count as unsaved. Untouched is
 derived, not stored: the latest of created, swapped, retired, and the agent's
 status file's mtime (updated by hooks and restoration). `atelier gc` reconciles
 state with disk (NFR-R2): a record whose
 directory is gone is dropped; a space directory with no record — one atelier
-made, linking the central guide — is put in the Trash rather than deleted;
+made, linking the central guide — is recovered into Trash, or kept active when
+its session still runs. Its agent comes from live metadata or interactive
+transcripts. Creation remains unknown so recovery does not exclude an older
+conversation; idle age uses the directory's mtime. Session-query failures stop
+the sweep, and failed session stops retain the space and report an error;
 leftovers keyed by deleted spaces (status files, Claude project entries, source
 repositories' worktree records) are removed. Swap lock files stay in place:
 unlinking one can leave waiting openers and new openers locking different

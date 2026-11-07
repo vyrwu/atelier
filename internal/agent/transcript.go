@@ -31,6 +31,20 @@ func Transcript(k Kind, root string, since time.Time) string {
 	return path
 }
 
+// RecentKind recovers a missing workspace's agent from its newest interactive
+// transcript. A directory edit must not become a conversation cutoff.
+func RecentKind(root string, fallback Kind) Kind {
+	kind := fallback
+	var newest time.Time
+	for _, k := range []Kind{Claude, Codex} {
+		path := Transcript(k, root, time.Time{})
+		if fi, err := os.Stat(path); err == nil && fi.ModTime().After(newest) {
+			kind, newest = k, fi.ModTime()
+		}
+	}
+	return kind
+}
+
 func latestSession(k Kind, root string, since time.Time) (id, path string) {
 	if k == Codex {
 		return latestCodexSession(filepath.Join(codexHome(), "sessions"), root, since)

@@ -108,7 +108,7 @@ func purge(args []string) error {
 	if ok, err := flags("purge", args, func(fs *flag.FlagSet) {
 		fs.Var(&age, "older-than", "only spaces untouched for at least `AGE` (30d, 2w, 36h)")
 		fs.BoolVar(&p.Active, "all", false, "active spaces too, not only the Trash")
-		fs.BoolVar(&p.Force, "force", false, "spaces with uncommitted or unpushed work too")
+		fs.BoolVar(&p.Force, "force", false, "spaces with running sessions or unsaved work too")
 		fs.BoolVar(&dry, "dry-run", false, "list what would be deleted, delete nothing")
 		fs.BoolVar(&yes, "yes", false, "don't ask")
 		fs.BoolVar(&yes, "y", false, "don't ask")
@@ -119,22 +119,29 @@ func purge(args []string) error {
 		return fmt.Errorf("not a terminal: pass --yes to purge, or --dry-run to look")
 	}
 	p.Age = time.Duration(age)
-	p.Keep = currentSpace()
 	st, err := core.Read()
 	if err != nil {
 		return err
 	}
+	p.Keep = currentSpaces(st)
+	plan, err := p.Plan(st, time.Now())
+	if err != nil {
+		return err
+	}
 	var doomed, kept []gc.Candidate
-	for _, c := range p.Plan(st, time.Now()) {
-		if len(c.Unsaved) > 0 && !p.Force {
+	for _, c := range plan {
+		if (c.Running || len(c.Unsaved) > 0) && !p.Force {
 			kept = append(kept, c)
 		} else {
 			doomed = append(doomed, c)
 		}
 	}
 	if len(kept) > 0 {
-		fmt.Printf("Keeping %d with unsaved work (--force deletes them too):\n", len(kept))
+		fmt.Printf("Keeping %d with running sessions or unsaved work (--force deletes them too):\n", len(kept))
 		for _, c := range kept {
+			if c.Running {
+				c.Unsaved = append(c.Unsaved, "session is running; retire first")
+			}
 			fmt.Printf("  %s  %s\n", c.Slug, strings.Join(c.Unsaved, ", "))
 		}
 	}
@@ -181,17 +188,20 @@ func purge(args []string) error {
 	return nil
 }
 
-// currentSpace is the space this command runs in, if any — its agent's
-// environment names it; a shell is in its session or under its directory.
-func currentSpace() string {
-	if s := os.Getenv("ATELIER_SLUG"); s != "" {
-		return s
-	}
+// Protect the enclosing space and cwd independently: a shell in A can cd to B.
+func currentSpaces(st *core.State) []string {
+	spaces := []string{os.Getenv("ATELIER_SLUG"), cwdSpace()}
 	if pane := os.Getenv("TMUX_PANE"); pane != "" && insideOwnServer() {
 		if out, err := tmux.Run("display-message", "-t", pane, "-p", "#{session_name}"); err == nil {
-			return strings.TrimSpace(string(out))
+			if w := st.FindBySession(strings.TrimSpace(string(out))); w != nil {
+				spaces = append(spaces, w.Slug)
+			}
 		}
 	}
+	return spaces
+}
+
+func cwdSpace() string {
 	// A regular terminal can cd into a space without any atelier environment.
 	// Resolve both paths, since the configured root may be a symlink.
 	cwd, err := os.Getwd()
@@ -247,6 +257,7 @@ func collect(args []string) error {
 	}
 	say("Dropped records whose directory is gone", "Would drop records whose directory is gone", r.Records)
 	say("Put space directories with no record in the Trash", "Would put space directories with no record in the Trash", r.Adopted)
+	say("Recovered running spaces as active", "Would recover running spaces as active", r.ActiveAdopted)
 	say("Stopped sessions still running for a space in the Trash", "Would stop sessions still running for a space in the Trash", r.Sessions)
 	say("Dropped Claude project entries for deleted directories", "Would drop Claude project entries for deleted directories", r.Projects)
 	say("Pruned source repositories' records of deleted worktrees", "Would prune source repositories' records of deleted worktrees", r.Worktrees)

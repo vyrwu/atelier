@@ -27,6 +27,7 @@ func sandbox(t *testing.T) (root string) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(base, "claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(base, "codex"))
 	for k, v := range map[string]string{
 		"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
 		"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
@@ -162,7 +163,11 @@ func TestPlan(t *testing.T) {
 	}}
 	plan := func(p Policy) string {
 		var out []string
-		for _, c := range p.Plan(s, now) {
+		candidates, err := p.Plan(s, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range candidates {
 			out = append(out, c.Slug)
 		}
 		return strings.Join(out, " ")
@@ -170,7 +175,7 @@ func TestPlan(t *testing.T) {
 	if got, want := plan(Policy{Age: 30 * 24 * time.Hour}), "older-trash old-trash"; got != want {
 		t.Errorf("trash = %q, want %q", got, want)
 	}
-	if got, want := plan(Policy{Age: 30 * 24 * time.Hour, Active: true, Keep: "here"}), "older-trash old-active old-trash"; got != want {
+	if got, want := plan(Policy{Age: 30 * 24 * time.Hour, Active: true, Keep: []string{"here"}}), "older-trash old-active old-trash"; got != want {
 		t.Errorf("--all = %q, want %q", got, want)
 	}
 	if got, want := plan(Policy{}), "older-trash old-trash new-trash"; got != want {
@@ -232,7 +237,11 @@ func TestPurge(t *testing.T) {
 	}
 	touch(t, filepath.Join(core.CacheDir(), "agents", "gone"), old)
 	p := Policy{Age: 30 * 24 * time.Hour}
-	if got := len(p.Plan(core.Load(), time.Now())); got != 3 {
+	candidates, err := p.Plan(core.Load(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(candidates); got != 3 {
 		t.Fatalf("planned %d, want 3", got)
 	}
 	// Meanwhile: one is restored, one gets work.
@@ -478,7 +487,7 @@ func TestSweep(t *testing.T) {
 		t.Errorf("records = %s; want vanished dropped, being-made kept", got)
 	}
 	a := s.Find("orphan")
-	if a == nil || !a.Retired || !a.Created.Equal(orphanAt) || !a.RetiredAt.Equal(orphanAt) || a.Session != "orphan" {
+	if a == nil || !a.Retired || !a.Created.IsZero() || !a.RetiredAt.Equal(orphanAt) || a.Session != "orphan" {
 		t.Fatalf("adopted = %+v; want in the Trash, aged from its directory's mtime", a)
 	}
 	for _, f := range []string{"agents/kept", "agents/orphan", "locks/swap-kept.lock", "locks/swap-vanished.lock", "locks/swap-long-deleted.lock", "locks/settings.json.lock", "worktrees/fresh"} {
