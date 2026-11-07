@@ -281,7 +281,7 @@ func InstallClaudeUsage(root string) error {
 		return nil
 	}
 	path := filepath.Join(root, ".claude", "settings.local.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	unlock, err := lockConfig(path)
@@ -293,6 +293,7 @@ func InstallClaudeUsage(root string) error {
 	var previous []byte
 	localStatus := false
 	for _, p := range []string{settingsPath(), filepath.Join(root, ".claude", "settings.json"), path} {
+		// #nosec G304 -- Reads the owner's configured global and workspace-local Claude settings.
 		data, err := os.ReadFile(p)
 		if os.IsNotExist(err) {
 			continue

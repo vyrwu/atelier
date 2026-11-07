@@ -148,7 +148,15 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   conversations, worktree derivation, the PR query, and list rendering.
   Anything that shells out to tmux, `gh`, or an agent stays untested; don't add
   an abstraction to make it mockable.
-  Run `make test`, `go vet ./...`, and `golangci-lint run ./...` before
-  committing. Commits are Conventional Commits (release-please reads them).
+  Run `mise run ci` before committing (the pinned suite includes race tests,
+  vet, gosec, govulncheck, actionlint, zizmor and release checks). Run
+  `mise run snapshot` and `mise run signing-test` when changing packaging.
+  Keep `mise.lock` in sync with tool versions. Never execute project binaries,
+  Go tests, mise tasks or GoReleaser hooks in the signing job. Keys belong only
+  in their protected environments; see the guide before changing tag/App policy.
+  Keep every action SHA-pinned,
+  workflow tokens scoped, and scanner exceptions narrow with a reason beside
+  them. Release setup and the security control inventory are in
+  `docs/release-security.md`. Commits are Conventional Commits (release-please reads them).
 - Delete dead code rather than keep it. Elegance and fitness-for-purpose over
   completeness or feature count.

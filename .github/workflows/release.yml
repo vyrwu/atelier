@@ -1,41 +1,182 @@
 name: release
 
-# Triggered by release-please publishing a GitHub Release (via an App token,
-# so the event actually fires — see release-please.yml), or manually. Builds
-# and publishes the binaries + Homebrew cask with goreleaser.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v1.0.0). Defaults to latest."
-        required: false
+        description: Explicit stable tag to release (vX.Y.Z)
+        required: true
         type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  release:
+  validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Manual retries must run on the tag so provenance identifies its commit.
+    if: github.event_name == 'release' || github.ref == format('refs/tags/{0}', inputs.tag)
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      revision: ${{ steps.tag.outputs.revision }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           fetch-depth: 0
-          ref: ${{ inputs.tag || github.ref }}
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: true
-      - name: Verify build
-        run: make build
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser
-          version: v2.17.0
-          args: release --clean
+          persist-credentials: false
+      - name: Validate release tag
+        id: tag
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with write access to vyrwu/homebrew-tap (repo secret).
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          EVENT_SHA: ${{ github.sha }}
+        run: scripts/release-guard.sh "$RELEASE_TAG" "$EVENT_SHA"
+
+  ci:
+    needs: validate
+    # Local reusable workflow: test the exact tag commit before publishing it.
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository] -- shares the caller's workflow revision
+    with:
+      ref: ${{ needs.validate.outputs.revision }}
+
+  release:
+    needs: [validate, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.revision }}
+          fetch-depth: 0
+          persist-credentials: false
+      # Only explicit, reviewed configuration enters the keyed runner's tool
+      # setup. No checkout-local mise configs, shims, tasks or install hooks.
+      - name: Copy the locked tool configuration
+        run: |
+          mkdir "$RUNNER_TEMP/tools"
+          cp mise.toml mise.lock "$RUNNER_TEMP/tools/"
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        env:
+          MISE_TRUSTED_CONFIG_PATHS: ${{ runner.temp }}/tools
+          MISE_LOCKED: "1"
+        with:
+          version: '2026.11.4'
+          sha256: 0296d9cba9324106d4e0962bb94a2072902f3658813aeb3b09504947bb8ddc2b
+          working_directory: ${{ runner.temp }}/tools
+          cache: false
+          add_shims_to_path: false
+          install_args: go goreleaser
+      - name: Recheck tag after CI
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          REVISION: ${{ needs.validate.outputs.revision }}
+        run: scripts/release-guard.sh "$RELEASE_TAG" "$REVISION"
+      - name: Locate the release checksum manifest
+        id: artifacts
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: echo "checksums=dist/atelier_${RELEASE_TAG#v}_checksums.txt" >> "$GITHUB_OUTPUT"
+      # No Go program/tests, mise tasks or GoReleaser hooks execute in this job.
+      # GoReleaser only compiles, packages and signs using the pinned tools.
+      - name: Publish signed archives and Linux packages
+        run: packaging/signing/with-keys.sh goreleaser release --config .goreleaser.yaml --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GORELEASER_CURRENT_TAG: ${{ needs.validate.outputs.tag }}
+          ATELIER_SIGNING_GPG_KEY: ${{ secrets.ATELIER_SIGNING_GPG_KEY }}
+          ATELIER_SIGNING_GPG_PASSPHRASE: ${{ secrets.ATELIER_SIGNING_GPG_PASSPHRASE }}
+          ATELIER_SIGNING_APK_KEY: ${{ secrets.ATELIER_SIGNING_APK_KEY }}
+      - name: Require published release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          body="$(gh release view "$RELEASE_TAG" --json body --jq .body)"
+          if [[ -z "${body//[[:space:]]/}" ]]; then
+            echo "::error::${RELEASE_TAG} was published without release notes."
+            exit 1
+          fi
+      - name: Verify the published checksum manifest and signatures
+        run: packaging/signing/verify-release.sh
+      - name: Attest every archive, package and public key
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: ${{ steps.artifacts.outputs.checksums }}
+      - name: Pass the generated cask to the tap job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: homebrew-cask
+          path: dist/homebrew/Casks/atelier.rb
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  tap:
+    environment: tap
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: homebrew-cask
+          path: cask
+      - name: Mint a tap-only token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: vyrwu/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+          path: tap
+          persist-credentials: false
+      - name: Publish cask without rolling back the tap
+        working-directory: tap
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          for attempt in 1 2 3; do
+            git -c http.extraheader="$auth" fetch origin main
+            git reset --hard origin/main
+            current="$(sed -nE 's/^ *version "([^"]+)"/\1/p' Casks/atelier.rb)"
+            version="${RELEASE_TAG#v}"
+            if [[ -n "$current" && "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)" != "$version" ]]; then
+              echo "::error::The tap already has ${current}, newer than ${version}."
+              exit 1
+            fi
+            mkdir -p Casks
+            cp ../cask/atelier.rb Casks/atelier.rb
+            git add Casks/atelier.rb
+            if git diff --cached --quiet; then
+              echo "Cask already at ${RELEASE_TAG}"
+              exit 0
+            fi
+            git commit -m "atelier ${RELEASE_TAG}"
+            git -c http.extraheader="$auth" push origin HEAD:main && exit 0
+            echo "Tap advanced during attempt ${attempt}; rechecking its version."
+          done
+          exit 1

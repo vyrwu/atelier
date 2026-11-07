@@ -1,64 +1,59 @@
 name: release-please
 
-# release-please watches `main`. For every commit it parses against
-# Conventional Commits (feat: / fix: / etc.) and maintains a single
-# open "Release PR" that bumps the version + updates CHANGELOG.md.
-# Merging that PR tags the repo (e.g. v0.1.0), and the tag triggers
-# the existing release.yml workflow which runs goreleaser to publish
-# binaries + push formulas to the Homebrew tap.
-#
-# The author NEVER tags manually. The Release PR IS the release gesture.
-#
-# Trigger is `workflow_run: ci: completed` (not push) so the Release
-# PR is only created / updated when the tip of main has passed CI —
-# a broken main can't produce a Release PR that pretends the world
-# is fine.
-#
-# Auth uses a GitHub App installation token, NOT the default
-# GITHUB_TOKEN. GitHub's loop-prevention rule: events created with
-# GITHUB_TOKEN do not trigger further workflow runs. Under GITHUB_TOKEN,
-# (a) the Release PR's own CI never runs on release-please's pushes
-# (lands in action_required), and (b) the `release: published` event it
-# emits does NOT trigger release.yml — so goreleaser never builds
-# binaries. An App token is a distinct identity, so both downstream
-# workflows fire. This is why v0.2.0–v0.3.0 shipped with zero assets.
-#
-# Setup (one-time): create a GitHub App with repo permissions
-# Contents: read/write + Pull requests: read/write, install it on this
-# repo, then set repo variable RELEASE_APP_ID and repo secret
-# RELEASE_APP_PRIVATE_KEY (the App's generated .pem).
+# Keep the Release PR as the release gesture. The App token lets its PR pushes
+# and release-published event start downstream workflows.
 on:
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers] -- push-only guard, current-main SHA check, no checkout or artifacts
     workflows: [ci]
     types: [completed]
     branches: [main]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
 
 jobs:
   release-please:
+    environment: release-automation
     runs-on: ubuntu-latest
-    # Only fire on green CI. A failed / cancelled ci run leaves main
-    # in a state we don't want to advertise as releasable.
-    if: github.event.workflow_run.conclusion == 'success'
+    timeout-minutes: 10
+    # workflow_run also fires for PRs. Only a successful push in this repository
+    # can reach release credentials; never check out or execute its artifacts.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     steps:
-      # Mint a short-lived installation token for the release App.
-      - uses: actions/create-github-app-token@v2
+      - name: Require CI for the current main commit
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          main_sha="$(gh api "repos/${REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [[ "$main_sha" == "$TESTED_SHA" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Main advanced; waiting for its own CI."
+          fi
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        if: steps.current.outputs.publish == 'true'
         id: app-token
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-      - uses: googleapis/release-please-action@v5
+          owner: ${{ github.repository_owner }}
+          repositories: atelier
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        if: steps.current.outputs.publish == 'true'
         with:
-          # Manifest mode: version + changelog state lives in
-          # .release-please-manifest.json and release-please-config.json
-          # rather than being inferred from arguments. Survives renames
-          # and multi-package splits cleanly.
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          # App token (not GITHUB_TOKEN) so the tag + release-published
-          # event trigger release.yml and the Release PR's CI runs
-          # unattended.
           token: ${{ steps.app-token.outputs.token }}

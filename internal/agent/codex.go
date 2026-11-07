@@ -44,7 +44,7 @@ func codexHooks() map[string]atelierHook {
 // settings. Codex runs a user hook only once it is trusted: the first Codex
 // launch after this asks you to review them.
 func InstallCodexHooks() error {
-	return installHooks(filepath.Join(codexHome(), "hooks.json"), Codex, codexHooks(), 0o644)
+	return installHooks(filepath.Join(codexHome(), "hooks.json"), Codex, codexHooks(), 0o600)
 }
 
 // prepareCodex makes dir a first-class atelier workspace for Codex: it trusts
@@ -67,7 +67,7 @@ func prepareCodex(dir, slug string) error {
 // parse would stop every Codex session.
 func trustCodexProject(dir string) error {
 	path := filepath.Join(codexHome(), "config.toml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	unlock, err := lockConfig(path)
@@ -76,6 +76,7 @@ func trustCodexProject(dir string) error {
 	}
 	defer unlock()
 
+	// #nosec G304 -- Reads the owner's config.toml under CODEX_HOME, as required by Codex.
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -142,8 +143,8 @@ func writeCodexProject(dir, slug string) error {
 		return err
 	}
 	path := filepath.Join(dir, ".codex", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, b.Bytes(), 0o644)
+	return os.WriteFile(path, b.Bytes(), 0o600)
 }

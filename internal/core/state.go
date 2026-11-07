@@ -84,18 +84,28 @@ func (s *State) save() error {
 		return s.Workspaces[i].Created.After(s.Workspaces[j].Created)
 	})
 	path := StatePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+	// A fresh 0600 file also avoids reusing an old, more permissive .tmp file.
+	f, err := os.CreateTemp(filepath.Dir(path), ".state-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer func() { _ = os.Remove(f.Name()) }()
+	_, writeErr := f.Write(append(data, '\n'))
+	closeErr := f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(f.Name(), path)
 }
 
 // Update runs fn against the current state under an exclusive lock, then saves
@@ -167,10 +177,11 @@ func LockPRs() (func(), error) { return LockFile(filepath.Join(CacheDir(), "prs.
 // need be, and returns the unlock. Blocks until acquired. It only serialises
 // processes that take the same lock — atelier's own.
 func LockFile(path string) (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	// #nosec G304 -- Locks the owner-configured state/cache path used by this atelier instance.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -185,10 +196,11 @@ func LockFile(path string) (func(), error) {
 // another process does. The kernel drops the lock with its holder, so a crashed
 // holder never leaves it taken.
 func TryLockFile(path string) (unlock func(), ok bool, err error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	// #nosec G304 -- Locks the owner-configured state/cache path used by this atelier instance.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, false, err
 	}

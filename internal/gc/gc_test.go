@@ -66,9 +66,11 @@ func slugs(t *testing.T) []string {
 
 func touch(t *testing.T, path string, mtime time.Time) {
 	t.Helper()
+	// #nosec G703 -- Callers supply fixture paths rooted in sandbox(t) under t.TempDir.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G703 -- Callers supply fixture paths rooted in sandbox(t) under t.TempDir.
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -454,6 +456,7 @@ func TestSweep(t *testing.T) {
 		filepath.Join(root, "kept"): map[string]any{}, filepath.Join(root, "vanished"): map[string]any{},
 	}})
 	touch(t, claude, now)
+	// #nosec G703 -- sandbox(t) sets CLAUDE_CONFIG_DIR to this test's temporary directory.
 	if err := os.WriteFile(claude, cfg, 0o600); err != nil {
 		t.Fatal(err)
 	}

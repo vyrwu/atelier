@@ -1,0 +1,8 @@
+{
+  "name": "release tags: release App only",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+  "bypass_actors": [{"actor_id": 4281327, "actor_type": "Integration", "bypass_mode": "always"}],
+  "rules": [{"type": "creation"}, {"type": "update"}, {"type": "deletion"}]
+}

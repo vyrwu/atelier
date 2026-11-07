@@ -12,6 +12,17 @@ linters:
     - staticcheck
     - unused
     - misspell
+    - gosec
+    - nolintlint
+
+  exclusions:
+    rules:
+      # Tests create fixture files (including deliberately permissive modes)
+      # under t.TempDir and invoke fixed tools against those fixtures. Keep
+      # all other gosec checks, including overflow/crypto checks, in tests.
+      - path: _test\.go$
+        linters: [gosec]
+        text: "G(204|301|302|304|306):"
 
   settings:
     errcheck:

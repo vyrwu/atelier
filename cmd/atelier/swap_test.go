@@ -161,3 +161,19 @@ func TestHandoffNoteExportsOrFails(t *testing.T) {
 		t.Error("a failed export save must abort the handoff")
 	}
 }
+
+// CLI slugs must never turn the swap reservation into a path outside its cache.
+func TestSwapPathsStayInLockDirectory(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := filepath.Join(core.CacheDir(), "locks")
+	for _, slug := range []string{"brave-otter", "../../outside", "../../../outside", "/absolute", "a/b", "..", "a%2Fb"} {
+		for _, path := range []string{swapLock(slug), swapPending(slug)} {
+			if filepath.Dir(path) != dir {
+				t.Errorf("slug %q escaped locks directory: %s", slug, path)
+			}
+		}
+	}
+	if swapLock("a/b") == swapLock("a%2Fb") {
+		t.Fatal("escaped slug aliases a different reservation")
+	}
+}

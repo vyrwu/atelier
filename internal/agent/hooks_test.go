@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -327,7 +328,7 @@ func TestPrepareProjectConcurrently(t *testing.T) {
 	errs := make(chan error, n)
 	for i := 0; i < n; i++ {
 		go func(i int) {
-			errs <- PrepareProject(filepath.Join("/spaces", string(rune('a'+i))), "s")
+			errs <- PrepareProject(filepath.Join("/spaces", strconv.Itoa(i)), "s")
 		}(i)
 	}
 	for i := 0; i < n; i++ {

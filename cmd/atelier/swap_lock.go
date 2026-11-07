@@ -16,6 +16,7 @@ func swapPending(slug string) string { return swapLock(slug) + ".pending" }
 const swapLaunchTimeout = 30 * time.Second
 
 func swapReserved(slug string) bool {
+	// #nosec G703 -- swapLock URL-escapes the slug so it cannot introduce path separators.
 	fi, err := os.Stat(swapPending(slug))
 	return err == nil && time.Since(fi.ModTime()) < swapLaunchTimeout
 }
@@ -32,6 +33,7 @@ func reserveSwap(slug string) (string, func(), error) {
 		return "", nil, nil
 	}
 	token := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+	// #nosec G703 -- swapLock URL-escapes the slug so it cannot introduce path separators.
 	if err := os.WriteFile(swapPending(slug), []byte(token), 0o600); err != nil {
 		unlock()
 		return "", nil, err
@@ -63,11 +65,13 @@ func takeSwap(slug, token string) (func(), error) {
 		}
 		return unlock, nil
 	}
+	// #nosec G703 -- swapLock URL-escapes the slug so it cannot introduce path separators.
 	pending, err := os.ReadFile(swapPending(slug))
 	if err != nil || string(pending) != token {
 		unlock()
 		return nil, fmt.Errorf("%s swap reservation is no longer current", slug)
 	}
+	// #nosec G703 -- swapLock URL-escapes the slug so it cannot introduce path separators.
 	if err := os.Remove(swapPending(slug)); err != nil {
 		unlock()
 		return nil, err

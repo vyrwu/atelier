@@ -91,6 +91,7 @@ func repoSegment(root, path string) string {
 // CurrentBranch returns the abbreviated current branch of the git worktree at
 // path, or "" on error (e.g. detached HEAD or not a repo).
 func CurrentBranch(path string) string {
+	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return ""
@@ -108,6 +109,7 @@ func AheadBehind(path string) (ahead, behind int, ok bool) {
 	if def == "" {
 		return 0, 0, false
 	}
+	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	out, err := exec.Command("git", "-C", path, "rev-list", "--left-right", "--count", def+"...HEAD").Output()
 	if err != nil {
 		return 0, 0, false
@@ -125,12 +127,14 @@ func AheadBehind(path string) (ahead, behind int, ok bool) {
 // ("origin/main"), preferring origin/HEAD and falling back to origin/main or
 // origin/master when it exists.
 func defaultRef(path string) string {
+	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	if out, err := exec.Command("git", "-C", path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output(); err == nil {
 		if s := strings.TrimSpace(string(out)); s != "" {
 			return s
 		}
 	}
 	for _, c := range []string{"origin/main", "origin/master"} {
+		// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 		if exec.Command("git", "-C", path, "rev-parse", "--verify", "--quiet", c).Run() == nil {
 			return c
 		}
@@ -142,6 +146,7 @@ func defaultRef(path string) string {
 // there is no origin or it isn't a recognisable one. Local and instant (no
 // network), which is what lets the PR refresh address repos by name.
 func OriginRepo(path string) string {
+	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	out, err := exec.Command("git", "-C", path, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return ""
@@ -178,6 +183,7 @@ func RepoFromRemoteURL(u string) string {
 
 // HeadOID is the commit the worktree at path has checked out, or "".
 func HeadOID(path string) string {
+	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	out, err := exec.Command("git", "-C", path, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return ""
@@ -187,6 +193,7 @@ func HeadOID(path string) string {
 
 // IsDirty reports whether the git worktree at path has uncommitted changes.
 func IsDirty(path string) bool {
+	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output()
 	if err != nil {
 		return false
@@ -201,6 +208,7 @@ func IsDirty(path string) bool {
 // does not publish their commits. It fails closed when git can't read the work.
 // Empty means nothing would be lost.
 func Unsaved(path string, published []string) string {
+	// #nosec G204 -- Fixed git inspection; the owner's repository path is a separate argument, without a shell.
 	out, err := exec.Command("git", "-C", path, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none").Output()
 	if err != nil {
 		return "unreadable"
@@ -208,6 +216,7 @@ func Unsaved(path string, published []string) string {
 	if len(strings.TrimSpace(string(out))) > 0 {
 		return "uncommitted changes"
 	}
+	// #nosec G204 -- Fixed git inspection; the owner's repository path is a separate argument, without a shell.
 	out, err = exec.Command("git", "-C", path, "rev-list", "--count", "HEAD", "--not", "--remotes").Output()
 	if err != nil {
 		return "unreadable"
@@ -229,6 +238,7 @@ func unsavedSubmodules(path string) string {
 	// Read gitlinks from the index with NUL delimiters so paths containing
 	// spaces, tabs, or newlines remain intact. Uninitialized modules hold no
 	// checkout to remove, so only follow ones with their own .git entry.
+	// #nosec G204 -- Fixed git inspection; the owner's repository path is a separate argument, without a shell.
 	out, err := exec.Command("git", "-C", path, "ls-files", "--stage", "-z").Output()
 	if err != nil {
 		return "unreadable submodules"
@@ -257,6 +267,7 @@ func unsavedSubmodules(path string) string {
 // without running git — the file outlives a source repo that has since moved.
 // "" if path isn't a linked worktree.
 func SourceGitDir(path string) string {
+	// #nosec G304 -- Reads the .git metadata of the owner's worktree to locate its source repository.
 	data, err := os.ReadFile(filepath.Join(path, ".git"))
 	if err != nil {
 		return ""
@@ -281,6 +292,7 @@ func PruneWorktrees(gitDir string, dry bool) ([]string, error) {
 	if dry {
 		args = append(args, "--dry-run")
 	}
+	// #nosec G204 -- Fixed worktree pruning; the owner's git directory is a separate argument, without a shell.
 	out, err := exec.Command("git", args...).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git worktree prune in %s: %w (%s)", gitDir, err, strings.TrimSpace(string(out)))
@@ -301,12 +313,14 @@ func RemoveWorktree(path string) error {
 	// The source repo is found before anything is deleted: the prune below has to
 	// run there, and once the worktree is gone it can't be reached through it.
 	common := ""
+	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	if out, err := exec.Command("git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
 		common = strings.TrimSpace(string(out))
 	}
 	// Forced twice: once for local changes, twice for a lock. Deleting a space is
 	// confirmed first, and its worktrees go with it either way — a single force
 	// refused a locked one, and the fallback below can't prune a locked record.
+	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	if err := exec.Command("git", "-C", path, "worktree", "remove", "--force", "--force", path).Run(); err == nil {
 		return nil
 	}

@@ -302,3 +302,37 @@ func putWorkspace(w Workspace) error {
 		s.Workspaces = append(s.Workspaces, w)
 	})
 }
+
+func TestStateIsPrivateAfterSaving(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	path := StatePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Replacing a state file created by an older version tightens its mode.
+	if err := os.WriteFile(path, []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A stale temporary file from an interrupted older save must not decide
+	// the new state's permissions or receive its private data.
+	if err := os.WriteFile(path+".tmp", []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Update(func(s *State) {
+		s.Workspaces = append(s.Workspaces, Workspace{Slug: "private", Intent: "private task"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path + ".tmp"); err != nil || string(data) != "stale" {
+		t.Errorf("old temporary file was reused: %q, %v", data, err)
+	}
+	for _, file := range []string{path, path + ".lock"} {
+		info, err := os.Stat(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("%s mode = %o, want 0600", file, info.Mode().Perm())
+		}
+	}
+}

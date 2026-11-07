@@ -84,7 +84,7 @@ func handleCreateWorktree(raw json.RawMessage) map[string]interface{} {
 		return textResult("fetch origin "+def+" failed: "+out, true)
 	}
 	target := filepath.Join(ws.Root(), filepath.Base(source), a.Branch)
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return textResult("mkdir failed: "+err.Error(), true)
 	}
 	// --no-track: branching from origin/<default> would otherwise make that the
@@ -214,6 +214,7 @@ func runGitFor(d time.Duration, dir string, args ...string) (string, error) {
 		ctx, cancel = context.WithTimeout(ctx, d)
 		defer cancel()
 	}
+	// #nosec G204 G702 -- Fixed git/gh binaries; commands are assembled by the MCP handlers as separate arguments.
 	c := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
 	out, err := c.CombinedOutput()
@@ -259,6 +260,7 @@ func gitAuthed(dir string, args ...string) (string, error) {
 }
 
 func runGH(dir string, args ...string) (string, error) {
+	// #nosec G204 G702 -- Fixed git/gh binaries; commands are assembled by the MCP handlers as separate arguments.
 	c := exec.Command("gh", args...)
 	c.Dir = dir
 	out, err := c.CombinedOutput()

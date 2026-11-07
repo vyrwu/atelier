@@ -34,6 +34,7 @@ func PrepareProject(dir, slug string) error {
 	defer unlock()
 
 	cfg := map[string]any{}
+	// #nosec G304 -- Reads the owner's agent config at its configured location to preserve their settings.
 	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 		if json.Unmarshal(data, &cfg) != nil {
 			return nil // don't clobber a file we can't parse
@@ -77,6 +78,7 @@ func PruneProjects(root string, dry bool) ([]string, error) {
 		return nil, err
 	}
 	defer unlock()
+	// #nosec G304 -- Reads the owner's agent config at its configured location to prune stale project entries.
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 {
 		return nil, nil
@@ -163,10 +165,10 @@ func EnsureWorkspaceGuide() (string, error) {
 	if _, err := os.Stat(path); err == nil {
 		return path, nil // exists — respect user edits
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(workspaceGuide), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(workspaceGuide), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -265,7 +267,7 @@ func settingsPath() string {
 
 // InstallHooks merges atelier's lifecycle hooks into the user's global Claude
 // settings (~/.claude/settings.json), preserving all existing content.
-func InstallHooks() error { return installHooks(settingsPath(), Claude, atelierHooks(), 0o644) }
+func InstallHooks() error { return installHooks(settingsPath(), Claude, atelierHooks(), 0o600) }
 
 // installHooks merges one guarded command hook for agent k per lifecycle event
 // in table into the "hooks" object of the JSON file at path — the same shape in Claude's
@@ -273,7 +275,7 @@ func InstallHooks() error { return installHooks(settingsPath(), Claude, atelierH
 // event while keeping the user's own hooks and everything else in the file, and
 // writes the result atomically.
 func installHooks(path string, k Kind, table map[string]atelierHook, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	unlock, err := lockConfig(path)
@@ -283,6 +285,7 @@ func installHooks(path string, k Kind, table map[string]atelierHook, mode os.Fil
 	defer unlock()
 
 	settings := map[string]any{}
+	// #nosec G304 -- Reads the owner's agent config at its configured location to preserve their settings.
 	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return err

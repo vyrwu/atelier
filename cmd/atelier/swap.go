@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,6 +49,7 @@ func swapAgent(args []string) error {
 	launched := false
 	defer func() {
 		if !launched {
+			// #nosec G703 -- Swap filenames escape slashes; handoff paths come from the owner-controlled workspace state.
 			_ = os.Remove(swapPending(slug))
 		}
 	}()
@@ -75,7 +77,7 @@ func swapAgent(args []string) error {
 
 // swapLock is the lock a space's handoff holds.
 func swapLock(slug string) string {
-	return filepath.Join(core.CacheDir(), "locks", "swap-"+slug+".lock")
+	return filepath.Join(core.CacheDir(), "locks", "swap-"+url.PathEscape(slug)+".lock")
 }
 
 // handoff is the swap itself, run in the space's agent window in place of the
@@ -111,6 +113,7 @@ func handoff(slug, toName, token string) error {
 func become(k agent.Kind, cmd string) error {
 	env := append(envWithout("ATELIER_AGENT", "CLAUDE_CODE_RESUME_THRESHOLD_MINUTES"),
 		"ATELIER_AGENT="+string(k), "CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=1000000")
+	// #nosec G204 G702 -- cmd comes from the agent command builders, which shell-quote dynamic arguments.
 	return syscall.Exec("/bin/sh", []string{"sh", "-lc", cmd}, env)
 }
 
@@ -215,12 +218,14 @@ func handoffNote(ws core.Workspace, from, to agent.Kind, at time.Time) (string, 
 // handoff directory too, so exports made by previous versions are protected.
 func writeHandoff(path, text string) error {
 	dir := filepath.Dir(path)
+	// #nosec G703 -- Swap filenames escape slashes; handoff paths come from the owner-controlled workspace state.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	if err := protectHandoffDir(dir); err != nil {
 		return err
 	}
+	// #nosec G304 G703 -- Exclusive creation of an export under the owner-controlled workspace handoff directory.
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -234,6 +239,7 @@ func writeHandoff(path, text string) error {
 }
 
 func protectHandoffDir(dir string) error {
+	// #nosec G703 -- Swap filenames escape slashes; handoff paths come from the owner-controlled workspace state.
 	fi, err := os.Lstat(dir)
 	if err != nil {
 		return err
@@ -241,6 +247,7 @@ func protectHandoffDir(dir string) error {
 	if !fi.IsDir() {
 		return fmt.Errorf("handoff directory is not a directory: %s", dir)
 	}
+	// #nosec G302 G703 -- This is a directory; owner execute permission is required to access exports.
 	return os.Chmod(dir, 0o700)
 }
 

@@ -63,6 +63,7 @@ func TestSweepRecoversCodexConversationBeforeDirectoryEdit(t *testing.T) {
 	old := time.Now().Add(-24 * time.Hour)
 	data, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]string{"id": "existing", "cwd": dir, "source": "cli"}})
 	touch(t, path, old)
+	// #nosec G703 -- sandbox(t) sets CODEX_HOME to this test's temporary directory.
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}

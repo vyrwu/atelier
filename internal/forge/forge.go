@@ -498,6 +498,7 @@ func Open(url string) error {
 	if runtime.GOOS == "darwin" {
 		bin = "open"
 	}
+	// #nosec G204 G702 -- Runs a fixed browser opener or gh subcommand with separate arguments, without a shell.
 	return exec.Command(bin, url).Run()
 }
 
@@ -512,6 +513,7 @@ const ghTimeout = 10 * time.Second
 func ghOutput(dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
 	defer cancel()
+	// #nosec G204 G702 -- Runs a fixed browser opener or gh subcommand with separate arguments, without a shell.
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	if dir != "" {
 		cmd.Dir = dir
@@ -602,6 +604,7 @@ func ghPR(repo string, number int, verb string, extra ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
 	defer cancel()
 	args := append([]string{"pr", verb, strconv.Itoa(number), "--repo", repo}, extra...)
+	// #nosec G204 G702 -- Runs a fixed browser opener or gh subcommand with separate arguments, without a shell.
 	if out, err := exec.CommandContext(ctx, "gh", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("gh pr %s: %s", verb, strings.TrimSpace(string(out)))
 	}

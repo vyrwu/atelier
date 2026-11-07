@@ -395,7 +395,13 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
 8. **Uncommitted changes on delete:** warn and allow. The confirm names dirty
    worktrees; it does not refuse.
 9. **Distribution.** A Homebrew cask that strips the quarantine attribute on
-   install, so the un-notarized binary runs without a Gatekeeper prompt.
+   install, so the un-notarized binary runs without a Gatekeeper prompt. Release
+   PRs remain the release operation. Tagged commits pass the full CI and install
+   checks before a cache-free build. Archives, packages and public keys receive
+   GitHub provenance. Native Linux packages and the manifest get release-key signatures;
+   protected environments and a release-App-only tag ruleset guard those keys.
+   A separate tap-only App updates the tap. Older releases cannot
+   overwrite newer ones. See [release security](docs/release-security.md).
 10. **Swapping agents is a handoff, not a shared session.** Claude Code and
     Codex can't continue each other's conversations, so `M-x` hands over the
     outgoing one's, exported to a file. The swap replaces the agent with the

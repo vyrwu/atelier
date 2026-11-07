@@ -35,6 +35,7 @@ func Run(args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	full := append([]string{"-L", socket()}, args...)
+	// #nosec G204 G702 -- Fixed tmux binary and argument array; shell commands are quoted by their builders.
 	out, err := exec.CommandContext(ctx, "tmux", full...).CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("tmux %s: %w (%s)",

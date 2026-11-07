@@ -1,0 +1,109 @@
+name: Bump tools
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-tools
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: '2026.11.4'
+          cache: false
+      - name: Bump tools
+        id: bump
+        run: |
+          mise upgrade --bump
+          mise lock
+          go mod edit -toolchain="go$(mise current go)"
+          if ! git diff --quiet; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff
+          fi
+      - name: Validate updated tools
+        if: steps.bump.outputs.changed == 'true'
+        run: mise run ci
+      - name: Upload only the candidate toolchain files
+        if: steps.bump.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: toolchain-update
+          path: |
+            mise.toml
+            mise.lock
+            go.mod
+            go.sum
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  pull-request:
+    needs: bump
+    environment: release-automation
+    if: needs.bump.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Candidate tools never run on this runner. Only these four text files
+      # cross the boundary; no scripts, caches, hooks or environment survive.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: toolchain-update
+          path: update
+      - name: Apply candidate files as data
+        run: |
+          cp update/mise.toml mise.toml
+          cp update/mise.lock mise.lock
+          cp update/go.mod go.mod
+          cp update/go.sum go.sum
+      # App-created PRs trigger their own Linux/macOS CI, unlike GITHUB_TOKEN.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: atelier
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Open update PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          branch="tools/bump-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git add mise.toml mise.lock go.mod go.sum
+          git commit -m 'build(tools): Bump pinned toolchain'
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="$auth" push origin "$branch"
+          cat > "$RUNNER_TEMP/tools-pr.md" <<'BODY'
+          Updates the pinned tools in mise.toml and the Go toolchain directive.
+
+          The full local CI suite passed on these versions. This PR also runs
+          the Linux and macOS checks and release installation tests before merge.
+          BODY
+          gh pr create --head "$branch" --title 'build(tools): Bump pinned toolchain' \
+            --body-file "$RUNNER_TEMP/tools-pr.md"

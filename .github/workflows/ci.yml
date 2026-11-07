@@ -5,99 +5,118 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit validated by the release workflow
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || inputs.ref || github.ref }}
   cancel-in-progress: true
 
+env:
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+
 jobs:
-  # Named for the required status check on main ("build-and-test (<os>)") — a
-  # rename here reports under a new context, which the branch protection then
-  # waits on forever.
+  # These names are required checks on main. Every PR, including release PRs,
+  # runs the checks; branch names are not a trust boundary.
   build-and-test:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # RELEASE_PR flags release-please's auto-generated PRs so each step is
-    # skipped (not the job) — a skipped job would mark the required check
-    # "skipped" and block merge; skipped steps still report "success".
-    env:
-      RELEASE_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') }}
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-        if: env.RELEASE_PR != 'true'
-      - uses: actions/setup-go@v6
-        if: env.RELEASE_PR != 'true'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version: '1.25'
-          cache: true
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: '2026.11.4'
       - name: Install tmux for cleanup tests
-        if: env.RELEASE_PR != 'true' && runner.os == 'macOS'
+        if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
         run: brew list tmux >/dev/null 2>&1 || brew install tmux
-      - name: go mod verify
-        if: env.RELEASE_PR != 'true'
-        run: go mod verify
-      - name: gofmt
-        if: env.RELEASE_PR != 'true'
-        run: test -z "$(gofmt -l internal cmd)" || (gofmt -l internal cmd; exit 1)
-      - name: vet
-        if: env.RELEASE_PR != 'true'
-        run: go vet ./...
-      - name: test
-        if: env.RELEASE_PR != 'true'
-        run: go test ./...
-      - name: build
-        if: env.RELEASE_PR != 'true'
-        run: make build
-      - name: Release-PR skip marker
-        if: env.RELEASE_PR == 'true'
-        run: echo "release-please PR — CI intentionally skipped."
+      - run: mise run ci
 
   lint:
     runs-on: ubuntu-latest
-    env:
-      RELEASE_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') }}
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-        if: env.RELEASE_PR != 'true'
-      - uses: actions/setup-go@v6
-        if: env.RELEASE_PR != 'true'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version: '1.25'
-          cache: true
-      - uses: golangci/golangci-lint-action@v9
-        if: env.RELEASE_PR != 'true'
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: v2.12.2
-          args: --timeout=5m
-      - name: Release-PR skip marker
-        if: env.RELEASE_PR == 'true'
-        run: echo "release-please PR — lint intentionally skipped."
+          version: '2026.11.4'
+      - run: |
+          mise run lint
+          mise run actions
+          mise run vuln
 
-  goreleaser-check:
-    runs-on: ubuntu-latest
-    env:
-      RELEASE_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') }}
+  release-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-        if: env.RELEASE_PR != 'true'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
-      - uses: actions/setup-go@v6
-        if: env.RELEASE_PR != 'true'
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          go-version: '1.25'
-          cache: true
-      - uses: goreleaser/goreleaser-action@v7
-        if: env.RELEASE_PR != 'true'
+          version: '2026.11.4'
+      - run: mise run snapshot
+      - name: Check archive installation
+        run: scripts/test-release.sh
+      - name: Install the generated Homebrew cask
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: scripts/test-cask.sh
+
+  signed-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          distribution: goreleaser
-          version: v2.17.0
-          args: check
-      - name: Release-PR skip marker
-        if: env.RELEASE_PR == 'true'
-        run: echo "release-please PR — goreleaser check intentionally skipped."
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: '2026.11.4'
+      # No production keys are available in CI. This exercises the actual
+      # provisioning and signing scripts against a fake GitHub API.
+      - name: Build and verify with throwaway keys
+        run: packaging/signing/test-signing.sh
+      - name: Verify and install native Linux packages
+        run: packaging/signing/test-packages.sh
+
+  # Preserve the required status while making both installation checks gates.
+  goreleaser-check:
+    needs: [release-build, signed-packages]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every release build and install check
+        env:
+          RESULT: ${{ needs.release-build.result }}
+          SIGNED_RESULT: ${{ needs.signed-packages.result }}
+        run: test "$RESULT" = success && test "$SIGNED_RESULT" = success

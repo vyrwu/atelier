@@ -705,6 +705,7 @@ func spawnDetached(args ...string) {
 	if err != nil {
 		self = "atelier"
 	}
+	// #nosec G204 G702 -- Starts this executable with an argument array, without a shell.
 	c := exec.Command(self, args...)
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	_ = c.Start()

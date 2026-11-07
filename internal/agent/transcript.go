@@ -123,6 +123,7 @@ func latestClaudeSession(projects, root string, since time.Time) (id, path strin
 // claudeInteractive reports whether the transcript at path is an interactive
 // session launched in root: its first record that says how it was started.
 func claudeInteractive(path, root string) bool {
+	// #nosec G304 -- Reads a transcript selected from the owner's agent session directories.
 	f, err := os.Open(path)
 	if err != nil {
 		return false
@@ -170,6 +171,7 @@ func latestCodexSession(sessions, root string, since time.Time) (id, path string
 // codexSessionIn is the id of the rollout at path when it is an interactive
 // session in one of roots, else "".
 func codexSessionIn(path string, roots map[string]bool) string {
+	// #nosec G304 -- Reads a transcript selected from the owner's agent session directories.
 	f, err := os.Open(path)
 	if err != nil {
 		return ""
@@ -202,6 +204,7 @@ const HandoffMark = "[atelier handoff]"
 // out — they are most of a transcript's bytes, and the next agent can re-run
 // what it needs.
 func Export(k Kind, path string, since time.Time) (string, error) {
+	// #nosec G304 -- Reads a transcript selected from the owner's agent session directories.
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -233,7 +236,7 @@ func (w *exportWriter) say(who, text string) {
 		fmt.Fprintf(w, "\n## %s\n\n", who)
 		w.last = who
 	}
-	w.WriteString(text + "\n\n")
+	_, _ = w.WriteString(text + "\n\n") // strings.Builder writes cannot fail.
 }
 
 func (w *exportWriter) tool(name, input string) {
