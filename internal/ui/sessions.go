@@ -207,6 +207,9 @@ func padAge(s string) string {
 
 // age renders a compact relative time ("3m", "2h", "5d").
 func age(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
 	d := time.Since(t)
 	switch {
 	case d < time.Minute:

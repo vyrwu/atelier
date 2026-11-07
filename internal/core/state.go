@@ -30,6 +30,11 @@ func Load() *State {
 	return s
 }
 
+// Read is Load for a caller that acts on what it reads: a state file that can't
+// be trusted is an error rather than an empty list, which would read as every
+// space being gone.
+func Read() (*State, error) { return load() }
+
 // load reads the state file, distinguishing "there is none yet" (an empty state)
 // from "there is one, but it can't be trusted" (an error): unreadable, corrupt,
 // or written by another version. Only the first is safe to build on and save.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/vyrwu/atelier/internal/core"
@@ -63,6 +64,63 @@ func PrepareProject(dir, slug string) error {
 		return err
 	}
 	return writeConfig(path, out, 0o600)
+}
+
+// PruneProjects drops the ~/.claude.json projects entries PrepareProject (or
+// Claude itself, for a worktree it ran in) left for directories under root that
+// no longer exist, and returns the directories. With dry set it only reports.
+// Nothing outside root is touched, and an unparseable file is left alone.
+func PruneProjects(root string, dry bool) ([]string, error) {
+	path := claudeConfigJSON()
+	unlock, err := lockConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return nil, nil
+	}
+	cfg := map[string]any{}
+	if json.Unmarshal(data, &cfg) != nil {
+		return nil, nil
+	}
+	projects, _ := cfg["projects"].(map[string]any)
+	gone := goneProjects(projects, root)
+	if dry || len(gone) == 0 {
+		return gone, nil
+	}
+	for _, dir := range gone {
+		delete(projects, dir)
+	}
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return gone, writeConfig(path, out, 0o600)
+}
+
+// goneProjects is the sorted keys of projects that sit under root, by its own
+// path or its resolved one, and whose directory is missing. A missing root (an
+// unmounted volume, say) yields nothing: every space would look deleted.
+func goneProjects(projects map[string]any, root string) []string {
+	real, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil
+	}
+	sep := string(filepath.Separator)
+	prefixes := []string{filepath.Clean(root) + sep, real + sep}
+	var gone []string
+	for dir := range projects {
+		if !strings.HasPrefix(dir, prefixes[0]) && !strings.HasPrefix(dir, prefixes[1]) {
+			continue
+		}
+		if _, err := os.Lstat(dir); os.IsNotExist(err) {
+			gone = append(gone, dir)
+		}
+	}
+	sort.Strings(gone)
+	return gone
 }
 
 // atelierMCPServer is the local-scope MCP server entry for a workspace.

@@ -93,6 +93,11 @@ type Workspace struct {
 // Root is the workspace directory path (~/ateliers/<slug>).
 func (w Workspace) Root() string { return filepath.Join(AteliersRoot(), w.Slug) }
 
+// ValidSpaceName checks names used as workspace or session path components.
+func ValidSpaceName(s string) bool {
+	return s != "" && !strings.HasPrefix(s, ".") && !strings.ContainsAny(s, `/\`)
+}
+
 // Worktree is a git worktree belonging to a workspace, derived from the
 // filesystem (a `.git` *file* marks it). Never stored.
 type Worktree struct {

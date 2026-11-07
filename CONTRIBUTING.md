@@ -69,13 +69,14 @@ Give it the same format.
 
 | Path | |
 |---|---|
-| `cmd/atelier` | the one binary: `up`, `open`, `home`, `create`, `swap`, `handoff`, `win`, `hook`, `usage`, `mcp`, `install`, `version` |
+| `cmd/atelier` | the one binary: `up`, `open`, `home`, `create`, `swap`, `handoff`, `win`, `hook`, `usage`, `mcp`, `install`, `ls`, `purge`, `gc`, `version` |
 | `internal/core` | domain types, the state file, config, paths |
 | `internal/tmux` | the tmux wrapper (dedicated socket) |
 | `internal/git` | worktree derivation and git queries |
 | `internal/forge` | GitHub: the PR query and PR state changes |
 | `internal/agent` | Claude Code and Codex: launch and resume, handoff export, status, hooks, project setup |
 | `internal/mcp` | the stdio MCP server agents use: `create_worktree`, `create_pr`, `register_pr` |
+| `internal/gc` | deleting spaces, by hand or by age, and sweeping up after them |
 | `internal/ui` | the overlay and the splash |
 
 ## Reporting bugs and asking for features

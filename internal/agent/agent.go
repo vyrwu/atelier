@@ -43,6 +43,23 @@ func EnsureAgent(ws core.Workspace) error {
 // is running — which is how a swap replaces one agent with the other without
 // killing the session (and detaching whoever is in it with its last window).
 func RunAgent(ws core.Workspace, k Kind, cmd string) error {
+	var launchErr error
+	err := core.Update(func(s *core.State) {
+		current := s.Find(ws.Slug)
+		if current == nil || current.Retired {
+			launchErr = fmt.Errorf("space %q is no longer active", ws.Slug)
+			return
+		}
+		launchErr = runAgent(*current, k, cmd)
+	})
+	if err != nil {
+		return err
+	}
+	return launchErr
+}
+
+// Launch while holding the state lock shared with purge and restoration.
+func runAgent(ws core.Workspace, k Kind, cmd string) error {
 	env := Env(ws.Slug, k)
 	_ = InstallClaudeUsage(ws.Root())
 	var err error
@@ -138,12 +155,37 @@ func statusFile(session string) string {
 // SetStatus records st as session's current runtime status, creating the
 // agents directory if needed. The file body is "<status>\n<unix-ts>".
 func SetStatus(session string, st core.AgentStatus) error {
+	if !core.ValidSpaceName(session) {
+		return fmt.Errorf("invalid session name %q", session)
+	}
 	path := statusFile(session)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	body := fmt.Sprintf("%s\n%d\n", st, time.Now().Unix())
 	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// LastEvent is when session's agent last reported anything — the status file's
+// mtime, which every hook rewrites — or zero if it never has.
+func LastEvent(session string) time.Time {
+	fi, err := os.Stat(statusFile(session))
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
+}
+
+// ClearStatus drops session's status file, for a space that no longer exists.
+func ClearStatus(session string) error {
+	if !core.ValidSpaceName(session) {
+		return fmt.Errorf("invalid session name %q", session)
+	}
+	err := os.Remove(statusFile(session))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // workingStaleAfter bounds how long a "working" status survives without a fresh

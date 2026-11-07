@@ -71,10 +71,37 @@ workspace by branch, not by ownership.
 
 **Retire is soft, delete is hard.** Retiring kills a workspace's processes but
 keeps its directory, worktrees, and agent conversation, so restoring resumes
-the agent. Deleting removes the worktrees through git (so no source repository
-keeps stale metadata), then the session, directory, and record, behind a confirm
-that names dirty worktrees. Retire/restore is the one lifecycle state that
+the agent. Deleting stops the session, removes the worktrees through git (so no
+source repository keeps stale metadata), then the directory and, last, the
+record — so a delete that fails partway stays listed — behind a confirm that
+names dirty worktrees. Retire/restore is the one lifecycle state that
 shipped; it is not an undo of delete.
+
+**Purge deletes by age; collecting garbage deletes no work.** `atelier purge`
+deletes spaces untouched for longer than an age — the Trash, or every space
+with `--all` — the same way the Trash does, but keeps any holding work that
+exists nowhere else (uncommitted, or neither on a remote nor a pull request's
+head) unless forced, and re-reads each space before deleting it, since the
+list it confirmed may be stale. The state lock covers that final read, the
+safety checks, and deletion, serializing them with restoration. Agent launch
+holds the same lock, and purge keeps running sessions unless explicitly forced.
+Incomplete directory scans and unrecognized files outside verified worktrees
+count as unsaved. Untouched is
+derived, not stored: the latest of created, swapped, retired, and the agent's
+status file's mtime (updated by hooks and restoration). `atelier gc` reconciles
+state with disk (NFR-R2): a record whose
+directory is gone is dropped; a space directory with no record — one atelier
+made, linking the central guide — is recovered into Trash, or kept active when
+its session still runs. Its agent comes from live metadata or interactive
+transcripts. Creation remains unknown so recovery does not exclude an older
+conversation; idle age uses the directory's mtime. Session-query failures stop
+the sweep, and failed session stops retain the space and report an error;
+leftovers keyed by deleted spaces (status files, Claude project entries, source
+repositories' worktree records) are removed. Swap lock files stay in place:
+unlinking one can leave waiting openers and new openers locking different
+inodes at the same path. It judges nothing
+by its directory when the root itself is missing, and nothing at all when the
+state file can't be read.
 
 **The slug is immutable.** Git worktree metadata stores absolute paths, so
 renaming the directory after a worktree exists would break every repository the
@@ -268,13 +295,14 @@ trusted.
 | Interface | Purpose | Consumers |
 |---|---|---|
 | **UI** | Everything the user sees and does | The user |
-| **CLI** | `hook`, `usage`, `poll`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `version` | Agent hooks, tmux bindings, the agents (MCP) |
+| **CLI** | `hook`, `usage`, `poll`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `ls`, `purge`, `gc`, `version` | Agent hooks, tmux bindings, the agents (MCP), the user |
 | **MCP** | `create_worktree`, `create_pr`, `register_pr` | The agent |
 | **tmux fragment** | Bindings and options, generated and sourced into atelier's own server | atelier itself |
 
 The CLI exists so hooks and bindings have something fast to call. The status
 line calls nothing; it renders options the hooks push. Users run only
-`atelier`, `atelier install`, and `atelier version`.
+`atelier`, `atelier install`, `atelier version`, and the housekeeping trio:
+`ls`, `purge`, and `gc`.
 
 ---
 

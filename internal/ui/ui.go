@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"sort"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
+	"github.com/vyrwu/atelier/internal/gc"
 	"github.com/vyrwu/atelier/internal/git"
 	"github.com/vyrwu/atelier/internal/tmux"
 )
@@ -607,7 +609,9 @@ func (m *Model) askSwap(w *core.Workspace) {
 func (m *Model) deactivate(w core.Workspace) {
 	m.moveOuterOff(w.Session)
 	_ = tmux.KillSession(w.Session)
-	setRetired(w.Slug, true)
+	if err := setRetired(w.Slug, true); err != nil {
+		m.err = err.Error()
+	}
 	agent.RefreshAttention() // a killed session may have been blocked
 	name := w.Title
 	if name == "" {
@@ -644,13 +648,25 @@ func (m Model) fallbackSession(exclude string) string {
 
 // reactivate restores a retired workspace and switches into it (resuming its agent).
 func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
-	setRetired(w.Slug, false)
+	if err := setRetired(w.Slug, false); err != nil {
+		m.err = err.Error()
+		m.load()
+		return m, nil
+	}
 	return m.switchTo(w.Session)
 }
 
-func setRetired(slug string, retired bool) {
-	_ = core.Update(func(s *core.State) {
+func setRetired(slug string, retired bool) error {
+	found := false
+	var statusErr error
+	err := core.Update(func(s *core.State) {
 		if w := s.Find(slug); w != nil {
+			found = true
+			if !retired {
+				if statusErr = agent.SetStatus(w.Session, core.StatusIdle); statusErr != nil {
+					return
+				}
+			}
 			w.Retired = retired
 			if retired {
 				w.RetiredAt = time.Now()
@@ -659,21 +675,25 @@ func setRetired(slug string, retired bool) {
 			}
 		}
 	})
+	if err != nil {
+		return err
+	}
+	if statusErr != nil {
+		return statusErr
+	}
+	if !found {
+		return fmt.Errorf("space %q no longer exists", slug)
+	}
+	return nil
 }
 
-// deleteWorkspace removes worktrees, the session, the directory, and the state
-// entry, then refreshes the list in place.
+// deleteWorkspace deletes w for good (gc.Delete), then refreshes the list in
+// place.
 func (m *Model) deleteWorkspace(w core.Workspace) {
 	m.moveOuterOff(w.Session)
-	// Derived for this space, not read from the model — removing the directory
-	// without removing the worktrees would leave the source repos registering
-	// checkouts that no longer exist.
-	for _, t := range git.Worktrees(w.Root()) {
-		_ = git.RemoveWorktree(t.Path)
+	if err := gc.Delete(w); err != nil {
+		m.err = "delete " + w.Slug + ": " + err.Error()
 	}
-	_ = tmux.KillSession(w.Session)
-	_ = os.RemoveAll(w.Root())
-	_ = core.RemoveWorkspace(w.Slug)
 	agent.RefreshAttention() // a deleted session may have been blocked
 	m.load()
 }

@@ -20,8 +20,11 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   their config (trust + MCP registration), the per-workspace guide
 - `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
 - `internal/ui` — the Bubble Tea overlay + the home splash (the only UI)
+- `internal/gc` — deleting spaces (one, or all older than an age) and sweeping
+  up what deleted spaces leave behind
 - `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
-  `handoff` / `win` / `hook` / `usage` / `poll` / `mcp` / `install` / `version`
+  `handoff` / `win` / `hook` / `usage` / `poll` / `mcp` / `install` / `ls` /
+  `purge` / `gc` / `version`
 
 ## Model & bindings
 
@@ -63,6 +66,22 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - Lifecycle: create → **active**; `M-d` delete → Trash (kill processes, keep on
   disk); Trash `↵` restore (resume); Trash `M-d` delete permanently (confirm).
   `Retired bool` + `RetiredAt` on the workspace (zero value = active, no migration).
+  Both deletes go through `gc.Delete`. `atelier purge` deletes by idle age
+  (`gc.LastActive`: created/swapped/retired/last hook), Trash only unless
+  `--all`, skipping unsaved work and running sessions unless `--force`. Both
+  caller and cwd spaces are excluded; the final re-read, safety checks, and
+  deletion hold the state lock shared with restoration and agent launch.
+  Restoring refreshes the status timestamp before changing the record.
+  `atelier gc` drops records
+  whose directory is gone (10-minute grace for a space being made), adopts
+  record-less space dirs into Trash or active Spaces according to their session,
+  recovers their agent from metadata/transcripts without a creation cutoff,
+  kills sessions of retired spaces, and
+  removes orphaned cache files, Claude project entries, and git worktree
+  records; it refuses to run on an unreadable state and skips directory checks
+  when the root is missing. Swap lock files are retained to preserve locking
+  across concurrent openers. Unknown session-query results abort cleanup;
+  failed stops are errors and leave the workspace on disk.
 - Overlays: `M-s` spaces · `M-p` PRs · `M-w` worktrees · `M-t` trash · `M-n` new
   (background). `M-h` switches to the home splash (a session switch, not an
   overlay); the keymap, version, and dependency doctor live there — there is no
