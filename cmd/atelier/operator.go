@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/vyrwu/atelier/internal/operator"
 )
@@ -70,4 +71,20 @@ func sendCmd(args []string) error {
 		return err
 	}
 	return operator.Send(slug, text, keys, !noEnter)
+}
+
+func waitCmd(args []string) error {
+	var timeout time.Duration
+	var asJSON bool
+	if ok, err := flags("wait", args, func(fs *flag.FlagSet) {
+		fs.DurationVar(&timeout, "timeout", 0, "maximum wait (default 5m, Grok 50s)")
+		fs.BoolVar(&asJSON, "json", false, "print JSON")
+	}); !ok {
+		return err
+	}
+	spaces, err := operator.Wait(timeout)
+	if err != nil {
+		return err
+	}
+	return printSpaces(spaces, asJSON)
 }
