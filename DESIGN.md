@@ -45,7 +45,7 @@ atelier is **not**:
   gh-enhance) rather than drawing its own
 - a general-purpose terminal multiplexer
 
-It supports **Claude Code, Codex, and Antigravity CLI**, with Grok via Cursor CLI next, one agent
+It supports **Claude Code, Codex, and Antigravity CLI**, with Grok Build next, one agent
 live per workspace, and **one forge** (GitHub). A workspace can hand its work
 from one agent to another — when one runs out of quota, say — which is
 sequential, not orchestration. This is a design decision, not a limitation to be worked around.
@@ -316,8 +316,8 @@ line calls nothing; it renders options the hooks push. Users run only
 Tripwires, not sentiments. Every one exists because its absence has a
 predictable failure mode. They are enforced in review.
 
-- **Few agents, one forge, one renderer** — Claude Code, Codex, and Antigravity CLI (Grok via
-  Cursor CLI next), GitHub, Bubble Tea. An agent joins only with launch, resume,
+- **Few agents, one forge, one renderer** — Claude Code, Codex, and Antigravity CLI (Grok Build
+  next), GitHub, Bubble Tea. An agent joins only with launch, resume,
   handoff, native status events, and usage all working; a second forge or renderer means
   deleting the first.
 - **Extract an interface only when a second real implementation exists and is in

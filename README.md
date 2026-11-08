@@ -36,8 +36,8 @@ requests your agents open come to you, with their diff and CI one key away.
 
 **Supported agents:** [Claude Code](https://claude.com/claude-code),
 [Codex](https://developers.openai.com/codex), and
-[Antigravity CLI](https://antigravity.google/docs/cli/reference/) (`agy`). Grok via
-[Cursor CLI](https://cursor.com/cli) is coming soon.
+[Antigravity CLI](https://antigravity.google/docs/cli/reference/) (`agy`).
+[Grok Build](https://docs.x.ai/build/overview) is coming soon.
 
 ## Highlights
 
@@ -236,7 +236,7 @@ The reasoning behind all of it is in [DESIGN.md](DESIGN.md).
 
 ## Roadmap
 
-- **Grok via Cursor CLI**, as another agent.
+- **Grok Build**, as another agent.
 - **Remote spaces**: run a space's agent on another host.
   ([#104](https://github.com/vyrwu/atelier/issues/104))
 - **Embedded CLI**: describe a command in a shell, get it ready to run.

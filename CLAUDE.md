@@ -1,7 +1,7 @@
 # CLAUDE.md — atelier
 
-A workshop for parallel coding agents (Claude Code, Codex, and Antigravity CLI today; Grok via
-Cursor CLI next): a terminal-based agentic development environment, where
+A workshop for parallel coding agents (Claude Code, Codex, and Antigravity CLI today; Grok Build
+next): a terminal-based agentic development environment, where
 reviewing a PR should be as easy as making the change by hand.
 The design, its principles (`NFR-*`, cited in code), and the rules (§5) are in
 DESIGN.md, imported below. User-facing behaviour is README.md; contributor
