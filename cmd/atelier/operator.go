@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/mattn/go-isatty"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,14 +57,13 @@ func readCmd(args []string) error {
 
 func sendCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: atelier send <space> [text] [--key K] [--no-enter]")
+		return fmt.Errorf("usage: atelier send <space> [text] [--key K] [--no-enter] [-- text]")
 	}
 	slug := args[0]
 	args = args[1:]
-	text := ""
-	if len(args) > 0 && !strings.HasPrefix(args[0], "--") {
-		text = args[0]
-		args = args[1:]
+	text, args, err := splitSendText(args)
+	if err != nil {
+		return err
 	}
 	var keys []string
 	var noEnter bool
@@ -84,7 +85,7 @@ func waitCmd(args []string) error {
 	}); !ok {
 		return err
 	}
-	spaces, err := operator.Wait(timeout)
+	spaces, err := operator.Wait(context.Background(), timeout)
 	if err != nil {
 		return err
 	}
@@ -123,7 +124,7 @@ func deleteCmd(args []string) error {
 	if ok, err := flags("delete", args[1:], func(fs *flag.FlagSet) { fs.BoolVar(&yes, "yes", false, "don't ask (except in Maître)") }); !ok {
 		return err
 	}
-	return operator.Delete(args[0], destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, operator.ConfirmDestroy))
+	return operator.Delete(args[0], destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, confirmMaitreDestroy))
 }
 
 func lifecycleCmd(verb string, args []string) error {
@@ -145,4 +146,27 @@ func lifecycleCmd(verb string, args []string) error {
 		return operator.Focus(args[0])
 	}
 	return fmt.Errorf("unknown operator command %q", verb)
+}
+
+func confirmMaitreDestroy(prompt string) error {
+	return operator.ConfirmDestroy(context.Background(), prompt)
+}
+
+// A delimiter lets text beginning with -- stay literal, while flags before it
+// still control submission and menu keys. The prompt is one shell argument.
+func splitSendText(args []string) (string, []string, error) {
+	text := ""
+	hasText := len(args) > 0 && !strings.HasPrefix(args[0], "--")
+	if hasText {
+		text = args[0]
+		args = args[1:]
+	}
+	if i := slices.Index(args, "--"); i >= 0 {
+		if hasText || len(args[i+1:]) != 1 {
+			return "", nil, fmt.Errorf("send expects one text argument after --")
+		}
+		text = args[i+1]
+		args = args[:i]
+	}
+	return text, args, nil
 }

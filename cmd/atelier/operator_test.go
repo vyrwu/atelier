@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/vyrwu/atelier/internal/core"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -41,20 +42,41 @@ func TestOperatorCommandsRejectBadArguments(t *testing.T) {
 }
 
 func TestGeneratedTitlePreservesRename(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if err := core.Update(func(s *core.State) { s.Workspaces = []core.Workspace{{Slug: "s", Session: "s", Title: "initial"}} }); err != nil {
-		t.Fatal(err)
+	s := &core.State{Workspaces: []core.Workspace{{Slug: "s", Session: "s", Title: "initial"}}}
+	if !setGeneratedTitle(s, "s", "initial", "generated") {
+		t.Fatal("initial title was not replaced")
 	}
-	if changed, err := setGeneratedTitle("s", "initial", "generated"); err != nil || !changed {
-		t.Fatal(changed, err)
+	s.Find("s").Title = "human choice"
+	if setGeneratedTitle(s, "s", "initial", "late result") {
+		t.Fatal("overwrote a renamed title")
 	}
-	if err := core.Update(func(s *core.State) { s.Find("s").Title = "human choice" }); err != nil {
-		t.Fatal(err)
-	}
-	if changed, err := setGeneratedTitle("s", "initial", "late result"); err != nil || changed {
-		t.Fatal(changed, err)
-	}
-	if got := core.Load().Find("s").Title; got != "human choice" {
+	if got := s.Find("s").Title; got != "human choice" {
 		t.Fatal(got)
+	}
+}
+
+func TestSplitSendText(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		text  string
+		flags []string
+		bad   bool
+	}{
+		{[]string{"hello", "--no-enter"}, "hello", []string{"--no-enter"}, false},
+		{[]string{"-h"}, "-h", []string{}, false},
+		{[]string{"--", "--version"}, "--version", []string{}, false},
+		{[]string{"--no-enter", "--", "--key Enter"}, "--key Enter", []string{"--no-enter"}, false},
+		{[]string{"--key", "Down"}, "", []string{"--key", "Down"}, false},
+		{[]string{"hello", "--", "second"}, "", nil, true},
+		{[]string{"--"}, "", nil, true},
+	} {
+		text, flags, err := splitSendText(tc.args)
+		if (err != nil) != tc.bad {
+			t.Errorf("%q: %v", tc.args, err)
+			continue
+		}
+		if !tc.bad && (text != tc.text || !slices.Equal(flags, tc.flags)) {
+			t.Errorf("%q: text=%q flags=%q", tc.args, text, flags)
+		}
 	}
 }

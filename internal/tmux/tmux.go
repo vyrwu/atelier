@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -32,11 +33,17 @@ func socket() string {
 // a wedged server as a bug rather than hanging the UI (attach blocks legitimately
 // and goes through execTmux/syscall.Exec, never here).
 func Run(args ...string) ([]byte, error) {
+	return runInput(nil, args...)
+}
+
+func runInput(input io.Reader, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	full := append([]string{"-L", socket()}, args...)
 	// #nosec G204 G702 -- Fixed tmux binary and argument array; shell commands are quoted by their builders.
-	out, err := exec.CommandContext(ctx, "tmux", full...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "tmux", full...)
+	cmd.Stdin = input
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("tmux %s: %w (%s)",
 			strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -409,12 +416,16 @@ func CapturePane(target string, scrollback int) (string, error) {
 	return string(out), err
 }
 
-func sendLiteralArgs(target, text string) []string {
-	return []string{"send-keys", "-t", target, "-l", "--", text}
-}
-
+// SendLiteral uses tmux's paste protocol, not synthetic typing. Bracketed paste
+// keeps multiline prompts in one input, and stdin keeps text out of tmux's
+// argument/command parser (including flags, semicolons and large messages).
 func SendLiteral(target, text string) error {
-	_, err := Run(sendLiteralArgs(target, text)...)
+	buffer := fmt.Sprintf("atelier-input-%d-%d", os.Getpid(), time.Now().UnixNano())
+	if _, err := runInput(strings.NewReader(text), "load-buffer", "-b", buffer, "-"); err != nil {
+		return err
+	}
+	defer func() { _, _ = Run("delete-buffer", "-b", buffer) }()
+	_, err := Run("paste-buffer", "-d", "-p", "-r", "-b", buffer, "-t", target)
 	return err
 }
 

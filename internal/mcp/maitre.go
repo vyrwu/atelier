@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -37,7 +38,7 @@ func maitreTools() []interface{} {
 	}
 }
 
-func callMaitreTool(p callEnvelope) map[string]interface{} {
+func callMaitreTool(ctx context.Context, p callEnvelope) map[string]interface{} {
 	var spec map[string]interface{}
 	for _, t := range maitreTools() {
 		s := t.(map[string]interface{})
@@ -92,7 +93,7 @@ func callMaitreTool(p callEnvelope) map[string]interface{} {
 	case "restore_space":
 		err = operator.Restore(a.Space)
 	case "delete_space":
-		err = operator.Delete(a.Space, operator.ConfirmDestroy)
+		err = operator.Delete(a.Space, func(prompt string) error { return operator.ConfirmDestroy(ctx, prompt) })
 	case "purge_spaces":
 		result, err = operator.Purge(a.OlderThan, a.All)
 	case "swap_agent":
@@ -109,7 +110,7 @@ func callMaitreTool(p callEnvelope) map[string]interface{} {
 		if a.Timeout < 0 || a.Timeout > int64(operator.MaxWait/time.Second) {
 			err = fmt.Errorf("timeout_seconds must be between 0 and 1800")
 		} else {
-			result, err = operator.Wait(time.Duration(a.Timeout) * time.Second)
+			result, err = operator.Wait(ctx, time.Duration(a.Timeout)*time.Second)
 		}
 	case "focus_space":
 		err = operator.Focus(a.Space)

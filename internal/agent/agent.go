@@ -322,3 +322,14 @@ func RefreshAttention() {
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
+
+// RefreshTitle backfills a live session from current state while holding the
+// same lock as rename/naming. A stale UI or restore snapshot must not publish
+// its old title after an operator's newer choice.
+func RefreshTitle(session string) {
+	_ = core.Update(func(s *core.State) {
+		if w := s.FindBySession(session); w != nil {
+			_ = tmux.SetTitle(session, w.Title)
+		}
+	})
+}

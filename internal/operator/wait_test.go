@@ -60,3 +60,16 @@ func TestDefaultWait(t *testing.T) {
 		t.Fatal("bad timeout")
 	}
 }
+
+func TestWaitChangedCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	_, err := waitChanged(ctx, time.Millisecond, func() (map[string]core.AgentStatus, error) {
+		calls++
+		cancel()
+		return map[string]core.AgentStatus{}, nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation returned %v after %d snapshots", err, calls)
+	}
+}

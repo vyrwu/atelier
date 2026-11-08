@@ -40,6 +40,10 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   human client must confirm the tmux menu, hidden/timeout/dismissal means no.
   MCP config pins the instance socket and all provider directories, and agent
   identity is also pinned in the tmux session environment.
+  Missing Maître records recover the provider from live session metadata or
+  transcripts without imposing a new conversation cutoff. MCP waits have
+  request contexts and run alongside other requests; tool mutations remain
+  serial. Screen text uses tmux bracketed paste, with the payload on stdin.
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
   `claude` window runs the agent — the selected agent, `Workspace.Agent` (""

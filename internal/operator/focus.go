@@ -21,16 +21,21 @@ func Focus(slug string) error {
 	if err := agent.EnsureAgent(w); err != nil {
 		return err
 	}
+	// A revived session has no display options yet; restore the cached title
+	// and status even when no new hook fires on resume.
+	agent.RefreshTitle(w.Session)
 	if err := tmux.SelectWindow(w.Session, agent.Window); err != nil {
 		return err
 	}
 	if err := tmux.SwitchClient(outer, w.Session); err != nil {
 		return err
 	}
-	if agent.Status(w.Session, true) == core.StatusBlocked {
+	status := agent.Status(w.Session, true)
+	if status == core.StatusBlocked {
 		_ = agent.SetStatus(w.Session, core.StatusIdle)
-		_ = tmux.SetStatusMarker(w.Session, agent.StatusMarker(core.StatusIdle))
+		status = core.StatusIdle
 		agent.RefreshAttention()
 	}
+	_ = tmux.SetStatusMarker(w.Session, agent.StatusMarker(status))
 	return tmux.DetachSession(core.MaitreSlug)
 }

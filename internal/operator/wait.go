@@ -34,6 +34,9 @@ func statusesOf(ws []core.Workspace, live map[string]bool) map[string]core.Agent
 // waitChanged compares successive snapshots. Already-idle spaces do not wake
 // the caller; new spaces and transitions back to idle or blocked do.
 func waitChanged(ctx context.Context, every time.Duration, snap func() (map[string]core.AgentStatus, error)) ([]string, error) {
+	if ctx.Err() == context.Canceled {
+		return nil, ctx.Err()
+	}
 	before, err := snap()
 	if err != nil {
 		return nil, err
@@ -43,6 +46,9 @@ func waitChanged(ctx context.Context, every time.Duration, snap func() (map[stri
 	for {
 		select {
 		case <-ctx.Done():
+			if ctx.Err() == context.Canceled {
+				return nil, ctx.Err()
+			}
 			return []string{}, nil
 		case <-tick.C:
 			after, err := snap()
@@ -64,7 +70,7 @@ func waitChanged(ctx context.Context, every time.Duration, snap func() (map[stri
 	}
 }
 
-func Wait(timeout time.Duration) ([]Space, error) {
+func Wait(ctx context.Context, timeout time.Duration) ([]Space, error) {
 	if timeout < 0 {
 		return nil, fmt.Errorf("timeout must be positive")
 	}
@@ -72,7 +78,7 @@ func Wait(timeout time.Duration) ([]Space, error) {
 		timeout = DefaultWait(os.Getenv("ATELIER_AGENT"))
 	}
 	timeout = min(timeout, MaxWait)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	changed, err := waitChanged(ctx, time.Second, func() (map[string]core.AgentStatus, error) {
 		st, err := core.Read()

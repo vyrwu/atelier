@@ -178,7 +178,7 @@ func purge(args []string) error {
 		slugs = append(slugs, "…")
 	}
 	prompt := fmt.Sprintf("Purge %d spaces: %s?", len(doomed), strings.Join(slugs, ", "))
-	if err := destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, operator.ConfirmDestroy)(prompt); err != nil {
+	if err := destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, confirmMaitreDestroy)(prompt); err != nil {
 		return err
 	}
 	failed := 0

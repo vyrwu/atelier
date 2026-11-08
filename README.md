@@ -166,6 +166,7 @@ atelier spaces --trash                   # retired spaces
 atelier create "Fix the API tests" --agent codex  # prints the new slug before naming finishes
 atelier read spry-otter --lines 60        # agent screen and scrollback
 atelier send spry-otter "Use the existing fixture"
+atelier send spry-otter --no-enter -- "--version"  # literal text starting with --
 atelier send spry-otter --key Down --key Enter
 atelier wait --timeout 5m --json          # newly blocked or idle spaces; [] on timeout
 atelier rename spry-otter "Fix API tests"
@@ -175,11 +176,13 @@ atelier focus spry-otter                  # move the client that opened Maître
 atelier delete spry-otter                 # permanent; asks first
 ```
 
-`send` types text literally and submits it; `--no-enter` leaves it unsubmitted.
+`send` pastes text literally and submits it; multiline text stays in one paste,
+and `--no-enter` leaves it unsubmitted. Put flag-like text after `--`.
 Named keys are `Enter`, `Escape`, `Up`, `Down`, `Tab`, `1`–`9`, and `C-c`.
 `wait` ignores spaces already idle when called; its default is five minutes
 (50 seconds under Grok), capped at 30 minutes. Maître's Claude and Codex tool
 connections allow ten minutes per call, so keep MCP waits below that limit.
+MCP waits accept cancellation and leave the connection free for other requests.
 
 Deletion and purge invoked by Maître always ask through atelier's menu on a
 client viewing Maître. Hidden, dismissed, and unanswered requests are refused;

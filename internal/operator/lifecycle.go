@@ -129,13 +129,15 @@ func Rename(slug, title string) error {
 		w, actionErr = target(s, slug, wantActive)
 		if actionErr == nil {
 			s.Find(slug).Title = title
+			// Publish under the same lock as generated titles; otherwise an
+			// older writer can overwrite the display after a later rename.
+			_ = tmux.SetTitle(w.Session, title)
 		}
 	})
 	if err = errors.Join(err, actionErr); err != nil {
 		return err
 	}
 	// The durable title is authoritative even if the session has exited.
-	_ = tmux.SetTitle(w.Session, title)
 	_ = tmux.RefreshStatus()
 	return nil
 }

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"sort"
@@ -10,7 +11,7 @@ import (
 
 func TestMaitreToolList(t *testing.T) {
 	for _, maitre := range []bool{false, true} {
-		r, _ := dispatch(request{ID: json.RawMessage(`1`), Method: "tools/list"}, maitre)
+		r, _ := dispatch(context.Background(), request{ID: json.RawMessage(`1`), Method: "tools/list"}, maitre)
 		tools := r.Result.(map[string]interface{})["tools"].([]interface{})
 		var names []string
 		for _, tool := range tools {
@@ -41,7 +42,7 @@ func TestMaitreToolRejectsBadArgs(t *testing.T) {
 		{"wait_for_change", `{"timeout_seconds":-1}`, "timeout"},
 		{"nope", `{}`, "unknown tool"},
 	} {
-		r := callMaitreTool(callEnvelope{Name: tc.name, Arguments: json.RawMessage(tc.args)})
+		r := callMaitreTool(context.Background(), callEnvelope{Name: tc.name, Arguments: json.RawMessage(tc.args)})
 		text := r["content"].([]map[string]interface{})[0]["text"].(string)
 		if r["isError"] != true || !strings.Contains(text, tc.want) {
 			t.Fatalf("%s: %v", tc.name, r)

@@ -135,6 +135,7 @@ func splitOnce(s string, sep byte) []string {
 }
 
 func TestEnsureMaitreIsIdempotent(t *testing.T) {
+	t.Setenv("ATELIER_ROOT", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	a, err := EnsureMaitre("codex")
 	if err != nil {
@@ -153,5 +154,21 @@ func TestEnsureMaitreIsIdempotent(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/config")
 	if MaitreGuidePath() != "/config/atelier/MAITRE.md" {
 		t.Fatal(MaitreGuidePath())
+	}
+}
+
+func TestEnsureMaitreKeepsExistingConversationEligible(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("ATELIER_ROOT", t.TempDir())
+	root := filepath.Join(AteliersRoot(), MaitreSlug)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	w, err := EnsureMaitre("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !w.Created.IsZero() {
+		t.Fatal("recovered record excludes conversations older than its recreation")
 	}
 }

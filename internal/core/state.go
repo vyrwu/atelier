@@ -222,6 +222,11 @@ func EnsureMaitre(agent string) (Workspace, error) {
 			return
 		}
 		w = Workspace{Slug: MaitreSlug, Session: MaitreSlug, Title: MaitreTitle, Agent: agent, Created: time.Now()}
+		// A missing index record must not make existing transcripts too old
+		// to resume. As in GC adoption, the original creation time is unknown.
+		if fi, err := os.Stat(w.Root()); err == nil && fi.IsDir() {
+			w.Created = time.Time{}
+		}
 		s.Workspaces = append(s.Workspaces, w)
 	})
 	return w, err

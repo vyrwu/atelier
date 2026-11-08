@@ -58,6 +58,8 @@ func Send(slug, text string, keys []string, enter bool) error {
 		if err := tmux.SendLiteral(pane, text); err != nil {
 			return err
 		}
+		// Both explicit menu keys and automatic Enter must follow paste detection.
+		time.Sleep(pasteSettle)
 	}
 	if len(keys) > 0 {
 		if err := tmux.SendKeys(pane, keys...); err != nil {
@@ -65,7 +67,6 @@ func Send(slug, text string, keys []string, enter bool) error {
 		}
 	}
 	if text != "" && enter {
-		time.Sleep(pasteSettle)
 		return tmux.SendKeys(pane, "Enter")
 	}
 	return nil

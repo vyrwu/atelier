@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"errors"
 	"os"
 	"time"
@@ -37,9 +38,11 @@ func confirmWith(prompt string, clients func() ([]string, error), ask Asker) err
 	return nil
 }
 
-func ConfirmDestroy(prompt string) error {
+func ConfirmDestroy(ctx context.Context, prompt string) error {
 	_ = agent.SetStatus(core.MaitreSlug, core.StatusBlocked)
 	agent.RefreshAttention()
 	defer func() { _ = agent.SetStatus(core.MaitreSlug, core.StatusWorking); agent.RefreshAttention() }()
-	return confirmWith(prompt, func() ([]string, error) { return tmux.SessionClients(core.MaitreSlug) }, tmux.ConfirmMenu)
+	return confirmWith(prompt, func() ([]string, error) { return tmux.SessionClients(core.MaitreSlug) }, func(client, prompt string, timeout time.Duration) (bool, error) {
+		return tmux.ConfirmMenu(ctx, client, prompt, timeout)
+	})
 }

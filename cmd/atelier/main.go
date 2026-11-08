@@ -541,13 +541,13 @@ func createWorkspace(args []string) error {
 		_ = core.RemoveWorkspace(slug)
 		return err
 	}
-	fmt.Println(slug) // the builder continues naming after its caller gets the handle
 	if gitCfg := agent.GitConfigGlobal(); gitCfg != "" {
 		_ = tmux.SetSessionEnv(slug, "GIT_CONFIG_GLOBAL", gitCfg) // future windows too
 	}
-	_ = tmux.SetTitle(slug, w.Title)                                       // placeholder title on the status line
+	agent.RefreshTitle(slug)                                               // placeholder title on the status line
 	_ = tmux.SetStatusMarker(slug, agent.StatusMarker(core.StatusWorking)) // it's launching — show working at once
 
+	fmt.Println(slug) // publish only after the initial display is ready
 	outer := flagVal(args, "--outer")
 	if hasFlag(args, "--switch") {
 		_ = tmux.SelectWindow(slug, agent.Window)
@@ -558,9 +558,15 @@ func createWorkspace(args []string) error {
 	title := w.Title
 	if cfg.Naming {
 		if ttl := agent.GenerateTitle(k, intent, cfg.NamingModel); ttl != "" {
-			if changed, err := setGeneratedTitle(slug, w.Title, ttl); err == nil && changed {
+			changed := false
+			err := core.Update(func(s *core.State) {
+				changed = setGeneratedTitle(s, slug, w.Title, ttl)
+				if changed {
+					_ = tmux.SetTitle(slug, ttl)
+				}
+			})
+			if err == nil && changed {
 				title = ttl
-				_ = tmux.SetTitle(slug, ttl)
 				_ = tmux.RefreshStatus()
 			}
 		}
@@ -688,13 +694,10 @@ func deterministicTitle(intent string) string {
 }
 
 // A rename while async naming runs is intentional and must win over its result.
-func setGeneratedTitle(slug, expected, title string) (bool, error) {
-	changed := false
-	err := core.Update(func(s *core.State) {
-		if w := s.Find(slug); w != nil && w.Title == expected {
-			w.Title = title
-			changed = true
-		}
-	})
-	return changed, err
+func setGeneratedTitle(s *core.State, slug, expected, title string) bool {
+	if w := s.Find(slug); w != nil && w.Title == expected {
+		w.Title = title
+		return true
+	}
+	return false
 }

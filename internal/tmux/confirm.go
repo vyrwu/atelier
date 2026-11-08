@@ -21,8 +21,8 @@ func SessionClients(session string) ([]string, error) {
 // display-menu remains running until the human answers or dismisses it. Its
 // transient option is unique to this request; late selections after timeout are
 // ignored because the pending option has been removed.
-func ConfirmMenu(client, prompt string, timeout time.Duration) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func ConfirmMenu(ctx context.Context, client, prompt string, timeout time.Duration) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	option := fmt.Sprintf("@atelier_confirm_%d_%d", os.Getpid(), time.Now().UnixNano())
 	if err := SetGlobal(option, "pending"); err != nil {
