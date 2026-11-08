@@ -54,7 +54,10 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   a finished turn's hook refreshes that agent detached
   (`atelier usage refresh <agent>`), at most once a minute each (shared file
   locks; no model calls). Codex uses
-  `account/rateLimits/read`; Claude uses native `claude -p /usage`, validating
+  `account/rateLimits/read`; Grok starts `grok agent --no-leader stdio`,
+  initializes ACP v1 and calls `_x.ai/billing`, without creating a session or
+  sending a prompt. Its weekly period enum is USAGE_PERIOD_TYPE_WEEKLY.
+  Claude uses native `claude -p /usage`, validating
   `local_command=usage` and zero turns/cost. Reset dates are parsed in UTC;
   unsupported output fails closed. Claude spaces also use local `statusLine`
   settings as a fallback to capture native JSON with

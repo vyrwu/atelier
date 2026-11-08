@@ -338,7 +338,8 @@ predictable failure mode. They are enforced in review.
   only reads that cache. Agent account allowances
   are fetched when an agent's turn ends (its hook), at most once a minute each,
   and by the asynchronous tmux status job once a reading is stale: a minute for
-  Codex, whose check is cheap, and 15 minutes for Claude, whose check boots its
+  Codex and Grok, whose checks read account metadata through their native CLI
+  protocols without starting model turns, and 15 minutes for Claude, whose check boots its
   CLI (about 4s of CPU) and whose sessions report their own status line. Neither fetch blocks rendering or agent
   startup. Current Claude Code has a non-interactive native `/usage` command;
   session status-line payloads are a fallback for versions without it. Cached

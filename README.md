@@ -210,9 +210,9 @@ tmux -L atelier               atelier's own server; your tmux is untouched
   earlier conversation there if it had one. Grok reads its native session updates.
 - **Usage** is each provider's own reading: Codex's every minute, Claude's
   after each turn or every 15 minutes. `~` marks a reading that may be out of
-  date; `—` means unknown. Grok reads native `grok usage --json` once a minute
-  where its runtime supports account quotas. Unsupported Grok runtimes show
-  `—`; use the native usage UI for the balance.
+  date; `—` means unknown. Grok reads the account balance behind its native `/usage` view once a
+  minute through the CLI's ACP billing endpoint, including on Grok Build 1.0.70.
+  Missing authentication or unavailable account quotas show `—`.
   Token counts are never treated as subscription quotas.
 - **Codex runs without its sandbox and approval prompts.** A worktree's git
   data lives in its source repository, outside the space, so the sandbox
