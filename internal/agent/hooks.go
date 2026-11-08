@@ -176,7 +176,7 @@ func EnsureWorkspaceGuide() (string, error) {
 }
 
 // LinkGuide links the central guide into a workspace under the name each agent
-// reads — CLAUDE.md for Claude, AGENTS.md for Codex, Grok, and Cursor —
+// reads — CLAUDE.md for Claude, AGENTS.md for Codex and Grok —
 // so whichever agent the space runs, now or after a swap, has it. An
 // existing file of either name is left alone.
 func LinkGuide(root string) {

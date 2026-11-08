@@ -1,6 +1,3 @@
-# Preserve Cursor's normal login/config before dev redirects XDG_CONFIG_HOME.
-CURSOR_CONFIG := $(if $(CURSOR_CONFIG_DIR),$(CURSOR_CONFIG_DIR),$(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME)/cursor,$(HOME)/.cursor))
-
 BIN := bin/atelier
 DEV ?= $(HOME)/.atelier-dev
 
@@ -26,14 +23,13 @@ run: build
 
 # dev runs the freshly-built binary in a fully isolated instance: its own tmux
 # socket, its own state/config/cache, its own workspace root, and the dev binary
-# first on PATH. It shares the agents' config (Claude, Codex, Grok, and Cursor)
+# first on PATH. It shares the agents' config (Claude, Codex, and Grok)
 # (auth + the guarded hooks, which route to this binary via the dev PATH/env). Nothing here touches your
 # real atelier server, state, config, or installed binary. Reset with `dev-clean`.
 dev: build
 	@ATELIER_DEV=1 \
 	 ATELIER_SOCKET=atelier-dev \
 	 ATELIER_ROOT=$(DEV)/ateliers \
-	 CURSOR_CONFIG_DIR="$(CURSOR_CONFIG)" \
 	 XDG_CONFIG_HOME=$(DEV)/config \
 	 XDG_STATE_HOME=$(DEV)/state \
 	 XDG_CACHE_HOME=$(DEV)/cache \

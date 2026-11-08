@@ -1,6 +1,6 @@
 # CLAUDE.md — atelier
 
-A workshop for parallel coding agents (Claude Code, Codex, Grok Build, and Cursor CLI): a terminal-based agentic development environment, where
+A workshop for parallel coding agents (Claude Code, Codex, and Grok Build): a terminal-based agentic development environment, where
 reviewing a PR should be as easy as making the change by hand.
 The design, its principles (`NFR-*`, cited in code), and the rules (§5) are in
 DESIGN.md, imported below. User-facing behaviour is README.md; contributor
@@ -14,7 +14,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/tmux` — tmux CLI wrapper (dedicated socket)
 - `internal/git` — worktree derivation + git queries
 - `internal/forge` — `gh` PR queries + open-in-browser
-- `internal/agent` — the coding agents (Claude Code, Codex, Grok Build, Cursor CLI): launch/resume, finding
+- `internal/agent` — the coding agents (Claude Code, Codex, Grok Build): launch/resume, finding
   and exporting their conversations for a handoff, per-session status, hooks,
   their config (trust + MCP registration), the per-workspace guide
 - `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)

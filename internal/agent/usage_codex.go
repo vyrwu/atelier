@@ -17,11 +17,6 @@ import (
 // however many turns end or status lines ask. Native metadata commands never
 // spend model tokens; unsupported readings remain unknown.
 func RefreshUsage(k Kind) error {
-	// Cursor has no supported non-interactive account quota command.
-	// Never fall through to another provider's account or query a model for it.
-	if k == Cursor {
-		return nil
-	}
 	path := usagePath(k)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err

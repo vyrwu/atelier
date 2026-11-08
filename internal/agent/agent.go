@@ -107,8 +107,6 @@ func providerPaths() map[string]string {
 		"CLAUDE_CONFIG_DIR": os.Getenv("CLAUDE_CONFIG_DIR"),
 		"CODEX_HOME":        codexHome(),
 		"GROK_HOME":         grokHome(),
-		"CURSOR_CONFIG_DIR": cursorDir(false),
-		"CURSOR_DATA_DIR":   cursorDir(true),
 	}
 }
 

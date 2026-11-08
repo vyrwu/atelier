@@ -43,11 +43,8 @@ func usage(args []string) error {
 		return nil
 	}
 	kinds := []agent.Kind{agent.Claude, agent.Codex}
-	for _, k := range []agent.Kind{agent.Grok, agent.Cursor} {
-		_, err := exec.LookPath(k.Bin())
-		if err == nil || agent.Of(core.LoadConfig().Agent) == k {
-			kinds = append(kinds, k)
-		}
+	if _, err := exec.LookPath(agent.Grok.Bin()); err == nil || agent.Of(core.LoadConfig().Agent) == agent.Grok {
+		kinds = append(kinds, agent.Grok)
 	}
 	status := func() string {
 		readings := map[agent.Kind]agent.Usage{}
@@ -95,7 +92,7 @@ func pollJob() string { return statusJob("poll '#{session_name}'") }
 func statusJob(args string) string {
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 	// A removed override must also disappear from the old server's environment.
-	keys := []string{"XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "ATELIER_ROOT", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "CURSOR_CONFIG_DIR", "CURSOR_DATA_DIR", "PATH"}
+	keys := []string{"XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "ATELIER_ROOT", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "PATH"}
 	cmd := "env"
 	for _, key := range keys {
 		cmd += " -u " + key

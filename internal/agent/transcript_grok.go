@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -30,24 +29,6 @@ func latestGrokSession(sessions, root string, since time.Time) (string, string) 
 			if summary.Info.ID != "" {
 				return summary.Info.ID, path
 			}
-		}
-	}
-	return "", ""
-}
-
-var cursorDash = regexp.MustCompile(`-+`)
-
-func latestCursorSession(projects, root string, since time.Time) (string, string) {
-	if real, err := filepath.EvalSymlinks(root); err == nil {
-		root = real
-	}
-	encoded := strings.Trim(cursorDash.ReplaceAllString(notAlnum.ReplaceAllString(root, "-"), "-"), "-")
-	dir := filepath.Join(projects, encoded, "agent-transcripts")
-	for _, path := range newestFirst(dir, since, func(name string) bool { return strings.HasSuffix(name, ".jsonl") }) {
-		id := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-		// Current and legacy primary layouts; subagent transcripts are nested deeper.
-		if filepath.Dir(path) == dir || filepath.Dir(path) == filepath.Join(dir, id) {
-			return id, path
 		}
 	}
 	return "", ""

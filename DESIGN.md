@@ -45,7 +45,7 @@ atelier is **not**:
   gh-enhance) rather than drawing its own
 - a general-purpose terminal multiplexer
 
-It supports **Claude Code, Codex, Grok Build, and Cursor CLI**, one agent
+It supports **Claude Code, Codex, and Grok Build**, one agent
 live per workspace, and **one forge** (GitHub). A workspace can hand its work
 from one agent to another — when one runs out of quota, say — which is
 sequential, not orchestration. This is a design decision, not a limitation to be worked around.
@@ -282,12 +282,10 @@ captures an agent started by hand inside a workspace — and atelier doesn't hav
 to own the launch command. Every write to Claude's config honours
 `$CLAUDE_CONFIG_DIR`, and every write to Codex's honours `$CODEX_HOME`, or it
 lands in a file the agent never reads. Codex runs a hook only once the user has
-trusted it, so its status starts after a one-time review. Grok and Cursor use
-project hooks (`.grok/hooks/atelier.json` and `.cursor/hooks.json`) and project
-MCP configuration; launch trusts the workspace. Cursor hooks return their
-required JSON permission reply. Subagent events never settle the main session.
-Grok honours `GROK_HOME`; Cursor separates `CURSOR_CONFIG_DIR` (auth/config)
-from `CURSOR_DATA_DIR` (transcripts). Their ordinary tool permissions remain in force.
+trusted it, so its status starts after a one-time review. Grok uses project
+hooks (`.grok/hooks/atelier.json`) and project MCP configuration; launch trusts
+the workspace. Subagent events never settle the main session. Grok honours
+`GROK_HOME`, and its ordinary tool permissions remain in force.
 Every agent launch carries all providers' config and history paths and pins them
 in the tmux session, so later popups and handoffs use the same accounts and history.
 
@@ -296,14 +294,10 @@ workspace is read off its own transcripts on disk (NFR-R2) — the newest
 interactive one in the workspace's directory, no older than the workspace — so
 a swap works for workspaces older than the feature and before any hook is
 trusted. Grok reads `summary.json` plus `updates.jsonl`; headless runs and
-subagents are excluded. Cursor reads primary JSONL under `agent-transcripts`,
-excluding nested subagent files. Its messages have no timestamps, so the last
-atelier handoff marker defines the export boundary; without one all available
-history is retained. These providers need no additional session bookkeeping.
+subagents are excluded. Grok needs no additional session bookkeeping.
 
 Grok quota refresh uses native `grok usage --json` when the runtime supports it.
-Unsupported runtimes, team-managed billing, and Cursor's unavailable native
-quota command render unknown. No model call or token count estimates an account
+Unsupported runtimes and team-managed billing render unknown. No model call or token count estimates an account
 balance, and credentials remain owned by the provider CLI.
 
 ### 4.3 Interfaces
@@ -327,8 +321,7 @@ line calls nothing; it renders options the hooks push. Users run only
 Tripwires, not sentiments. Every one exists because its absence has a
 predictable failure mode. They are enforced in review.
 
-- **Few agents, one forge, one renderer** — Claude Code, Codex, Grok Build, and
-  Cursor CLI, GitHub, Bubble Tea. An agent joins only with launch, resume,
+- **Few agents, one forge, one renderer** — Claude Code, Codex, and Grok Build, GitHub, Bubble Tea. An agent joins only with launch, resume,
   handoff, hooks, and explicit usage availability; a second forge or renderer means
   deleting the first.
 - **Extract an interface only when a second real implementation exists and is in

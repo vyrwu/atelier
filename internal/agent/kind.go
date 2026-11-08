@@ -16,11 +16,10 @@ const (
 	Claude Kind = "claude"
 	Codex  Kind = "codex"
 	Grok   Kind = "grok"
-	Cursor Kind = "cursor"
 )
 
 // Kinds is the stable order used by the new-space and swap pickers.
-func Kinds() []Kind { return []Kind{Claude, Codex, Grok, Cursor} }
+func Kinds() []Kind { return []Kind{Claude, Codex, Grok} }
 
 // Valid distinguishes an explicit CLI choice from legacy empty state.
 func Valid(name string) bool {
@@ -57,20 +56,13 @@ func (k Kind) Label() string {
 		return "Codex"
 	case Grok:
 		return "Grok Build"
-	case Cursor:
-		return "Cursor CLI"
 	default:
 		return "Claude Code"
 	}
 }
 
-// Bin uses Cursor's unambiguous alias: `agent` can also be a Grok installation.
-func (k Kind) Bin() string {
-	if k == Cursor {
-		return "cursor-agent"
-	}
-	return string(k)
-}
+// Bin is the native CLI that runs the agent.
+func (k Kind) Bin() string { return string(k) }
 
 // codexFlags go on every interactive Codex launch. Codex runs unsandboxed and
 // without approval prompts: a worktree's git data lives in its source repo,
@@ -86,9 +78,6 @@ func (k Kind) LaunchCmd(prompt string) string {
 	if k == Grok {
 		return "grok --trust" + codexArg(prompt)
 	}
-	if k == Cursor {
-		return "cursor-agent --trust --approve-mcps" + codexArg(prompt)
-	}
 	if k == Codex {
 		return "codex " + codexFlags + codexArg(prompt)
 	}
@@ -99,7 +88,7 @@ func (k Kind) LaunchCmd(prompt string) string {
 // prompt (if any) as its next message — or, with no id or one that no longer
 // resumes, starts the agent fresh with it.
 func (k Kind) ResumeCmd(id, prompt string) string {
-	if k == Grok || k == Cursor {
+	if k == Grok {
 		fresh := k.LaunchCmd(prompt)
 		if id == "" {
 			return fresh
@@ -146,7 +135,7 @@ const askTimeout = 5 * time.Minute
 // it, and returns its answer. It runs from a scratch directory without a
 // space's identity, so it cannot load its guide, become its resumed conversation,
 // or rewrite its status. Claude and Codex disable tools/config and persistence;
-// Grok disables built-in tools, and Cursor uses its read-only Ask mode.
+// Grok disables built-in tools.
 // model applies to Claude only; other agents use their configured default.
 func (k Kind) Ask(prompt, input, model string) (string, error) {
 	dir, err := os.MkdirTemp("", "atelier-ask-")
@@ -162,9 +151,6 @@ func (k Kind) Ask(prompt, input, model string) (string, error) {
 	case Grok:
 		// #nosec G204 G702 -- Fixed CLI and separate prompt argument in a private scratch directory.
 		cmd = exec.CommandContext(ctx, "grok", "-p", prompt+"\n"+input, "--tools", "", "--no-subagents", "--disable-web-search", "--max-turns", "1", "--output-format", "plain")
-	case Cursor:
-		// #nosec G204 G702 -- Fixed CLI with read-only Ask mode; the prompt follows --.
-		cmd = exec.CommandContext(ctx, "cursor-agent", "--print", "--mode", "ask", "--output-format", "text", "--", prompt+"\n"+input)
 	case Codex:
 		// #nosec G204 G702 -- Runs a fixed agent binary with separate arguments in a private scratch directory.
 		cmd = exec.CommandContext(ctx, "codex", "exec", "-C", dir, "--skip-git-repo-check", "--ephemeral",
@@ -212,9 +198,6 @@ func withoutSpace(env []string) []string {
 func (k Kind) Prepare(dir, slug string) error {
 	if k == Grok {
 		return prepareGrok(dir, slug)
-	}
-	if k == Cursor {
-		return prepareCursor(dir, slug)
 	}
 	if k == Codex {
 		return prepareCodex(dir, slug)

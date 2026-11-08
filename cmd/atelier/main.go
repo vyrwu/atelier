@@ -169,8 +169,7 @@ func hook(status string) error {
 	if session != "" {
 		prior = string(agent.Status(session, true))
 	}
-	if status == "cursor" || status == "grok" {
-		k := agent.Kind(status)
+	if status == "grok" {
 		if session == "" || os.Getenv("ATELIER_AGENT") != status {
 			return nil
 		}
@@ -178,7 +177,7 @@ func hook(status string) error {
 		if err != nil {
 			return err
 		}
-		status = agent.CLIHookStatus(k, data, prior)
+		status = agent.GrokHookStatus(data, prior)
 		if status == "" {
 			return nil
 		}
@@ -488,7 +487,7 @@ func createWorkspace(args []string) error {
 	k := agent.Of(cfg.Agent)
 	if a := flagVal(args, "--agent"); a != "" {
 		if !agent.Valid(a) {
-			return fmt.Errorf("--agent %q: want claude, codex, grok, or cursor", a)
+			return fmt.Errorf("--agent %q: want claude, codex, or grok", a)
 		}
 		k = agent.Of(a)
 	}

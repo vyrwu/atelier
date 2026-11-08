@@ -35,8 +35,7 @@ own task, and tells you which one needs you. Describe a task and it becomes a
 requests your agents open come to you, with their diff and CI one key away.
 
 **Supported agents:** [Claude Code](https://claude.com/claude-code),
-[Codex](https://developers.openai.com/codex), [Grok Build](https://docs.x.ai/build/overview),
-and [Cursor CLI](https://cursor.com/cli).
+[Codex](https://developers.openai.com/codex), and [Grok Build](https://docs.x.ai/build/overview).
 
 ## Highlights
 
@@ -61,7 +60,7 @@ and [Cursor CLI](https://cursor.com/cli).
 |---|---|
 | [tmux](https://github.com/tmux/tmux) 3.3+, git | atelier runs its own tmux server |
 | [GitHub CLI](https://cli.github.com) | run `gh auth login` first |
-| Claude Code, Codex, Grok Build, or Cursor CLI | at least the agent new spaces start with |
+| Claude Code, Codex, or Grok Build | at least the agent new spaces start with |
 | A [Nerd Font](https://www.nerdfonts.com) 3.5.0+ | for the GitHub and agent icons |
 
 Optional: [diffnav](https://github.com/dlvhdr/diffnav) or
@@ -104,15 +103,13 @@ Using Codex? Its first launch asks you to review new hooks: trust atelier's (the
 ones running `atelier hook`). Until you do, Codex spaces show no status.
 
 For Grok, install [Grok Build](https://docs.x.ai/build/overview) and run `grok login`
-with your subscription account. For Cursor, install [Cursor CLI](https://cursor.com/docs/cli/installation)
-and run `cursor-agent login`. Atelier reuses each CLI's login and selected model;
-no API key is required in atelier. It invokes `grok` and `cursor-agent` explicitly
-because the generic `agent` command can belong to either installation.
+with your subscription account. Atelier reuses its login and selected model;
+no API key is required in atelier.
 
-Choose either with `Tab` in the new-space or swap dialog, or use
-`atelier create "Fix the tests" --agent grok` and `atelier swap <space> --to cursor`.
-Grok and Cursor receive project-local hooks and atelier's MCP tools automatically.
-Their normal tool approval and sandbox settings still apply; allow access to the
+Choose Grok Build with `Tab` in the new-space or swap dialog, or use
+`atelier create "Fix the tests" --agent grok` and `atelier swap <space> --to grok`.
+Grok receives project-local hooks and atelier's MCP tools automatically.
+Its normal tool approval and sandbox settings still apply; allow access to the
 source repository's git directory when committing from a worktree.
 
 ## Keys
@@ -180,15 +177,15 @@ Optional, in `~/.config/atelier/config.toml`:
 ```toml
 root         = "~/ateliers"  # where spaces live
 socket       = "atelier"     # atelier's tmux socket
-agent        = "claude"      # "claude", "codex", "grok", or "cursor"
+agent        = "claude"      # "claude", "codex", or "grok"
 naming       = true          # let the agent title new spaces
 naming_model = "sonnet"      # the model Claude titles them with
 ```
 
 `ATELIER_ROOT` and `ATELIER_SOCKET` override `root` and `socket`. Every agent
 reads one shared guide, `~/.config/atelier/WORKSPACE_CLAUDE.md`; edit it to
-change what they're told. `GROK_HOME`, `CURSOR_CONFIG_DIR`, and `CURSOR_DATA_DIR`
-are respected for agent config, login, and transcript discovery.
+change what they're told. `GROK_HOME` is respected for Grok config,
+login, and transcript discovery.
 
 ## How it works
 
@@ -206,13 +203,11 @@ tmux -L atelier               atelier's own server; your tmux is untouched
 - **Swapping** saves the outgoing agent's conversation to `.atelier/handoff/`
   in the space. The incoming agent starts at once with it, resuming its own
   earlier conversation there if it had one. Grok reads its native session updates.
-  Cursor exports its native JSONL since the last handoff marker, because its
-  messages carry no timestamps; with no marker it keeps the available history.
 - **Usage** is each provider's own reading: Codex's every minute, Claude's
   after each turn or every 15 minutes. `~` marks a reading that may be out of
   date; `—` means unknown. Grok reads native `grok usage --json` once a minute
-  where its runtime supports account quotas. Older/shell-route Grok runtimes
-  and Cursor CLI show `—`; use their native usage UI for the balance.
+  where its runtime supports account quotas. Unsupported Grok runtimes show
+  `—`; use the native usage UI for the balance.
   Token counts are never treated as subscription quotas.
 - **Codex runs without its sandbox and approval prompts.** A worktree's git
   data lives in its source repository, outside the space, so the sandbox

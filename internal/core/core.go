@@ -82,7 +82,7 @@ type Workspace struct {
 	// RetiredAt is when it was moved to trash — drives the Trash view's ordering
 	// and its "time since close" column. Zero unless retired.
 	RetiredAt time.Time `json:"retired_at,omitempty"`
-	// Agent is which coding agent the space runs now: "claude", "codex", "grok", or "cursor". Empty
+	// Agent is which coding agent the space runs now: "claude", "codex", or "grok". Empty
 	// means claude, so state written before there was a choice loads unchanged.
 	Agent string `json:"agent,omitempty"`
 	// SwappedAt is when the agent last changed. A handoff carries over only what

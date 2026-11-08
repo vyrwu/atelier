@@ -23,22 +23,14 @@ func TestGrokQuotaFailsClosed(t *testing.T) {
 	if got := renderUsage(Grok, u, now); !strings.Contains(got, "7d ") || !strings.Contains(got, "25%") {
 		t.Fatal(got)
 	}
-	if got := renderUsage(Cursor, u, now); strings.Contains(got, "%") {
-		t.Fatalf("Cursor inherited another account's quota: %s", got)
-	}
 }
 
-func TestCLIQuotaCachesAreSeparate(t *testing.T) {
+func TestGrokQuotaCachesAreSeparate(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	for _, tc := range []struct {
-		kind Kind
-		key  string
-	}{{Grok, "GROK_HOME"}, {Cursor, "CURSOR_CONFIG_DIR"}} {
-		t.Setenv(tc.key, "/first")
-		first := usagePath(tc.kind)
-		t.Setenv(tc.key, "/second")
-		if first == usagePath(tc.kind) || usagePath(tc.kind) == usagePath(Codex) {
-			t.Fatalf("shared %s account cache", tc.kind)
-		}
+	t.Setenv("GROK_HOME", "/first")
+	first := usagePath(Grok)
+	t.Setenv("GROK_HOME", "/second")
+	if first == usagePath(Grok) || usagePath(Grok) == usagePath(Codex) {
+		t.Fatal("shared Grok account cache")
 	}
 }

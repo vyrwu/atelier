@@ -47,8 +47,6 @@ func usagePath(k Kind) string {
 		dir = settingsPath()
 	case Grok:
 		dir = grokHome()
-	case Cursor:
-		dir = cursorDir(false)
 	}
 	hash := sha256.Sum256([]byte(dir))
 	return filepath.Join(core.CacheDir(), "usage", fmt.Sprintf("%s-%x.json", k, hash[:6]))
@@ -204,13 +202,8 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 		glyph, color = "\uec81", 39
 	case Grok:
 		glyph, color = "G", 252
-	case Cursor:
-		glyph, color = "C", 110
 	}
 	text := fmt.Sprintf("#[fg=colour%d]%s", color, glyph) + usageDim
-	if k == Cursor {
-		return text + " —"
-	}
 	if len(u.Buckets) == 0 {
 		if k == Claude {
 			return text + " 5h — 7d —"

@@ -35,11 +35,10 @@ const (
 )
 
 // Agent glyphs mark which agent a space runs. Claude and Codex use Codicons
-// (Nerd Fonts 3.5.0+); Grok and Cursor use distinct letters.
+// (Nerd Fonts 3.5.0+); Grok uses its initial.
 const (
 	glyphClaude = "\uec82" // nf-cod-claude (U+EC82)
 	glyphGrok   = "G"
-	glyphCursor = "C"
 	glyphCodex  = "\uec81" // nf-cod-openai (U+EC81)
 )
 
@@ -50,8 +49,6 @@ func agentColor(k agent.Kind) lipgloss.Color {
 		return cCodex
 	case agent.Grok:
 		return cText
-	case agent.Cursor:
-		return cAccent
 	}
 	return cClaude
 }
@@ -64,8 +61,6 @@ func agentGlyph(k agent.Kind) string {
 		g = glyphCodex
 	case agent.Grok:
 		g = glyphGrok
-	case agent.Cursor:
-		g = glyphCursor
 	}
 	return lipgloss.NewStyle().Foreground(agentColor(k)).Render(g)
 }

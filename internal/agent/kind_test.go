@@ -8,13 +8,16 @@ import (
 // State and config written before there was a choice of agent say nothing, and
 // mean Claude; so does anything unrecognised.
 func TestOfDefaultsToClaude(t *testing.T) {
-	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude, "grok": Grok, "cursor": Cursor} {
+	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude, "grok": Grok, "cursor": Claude} {
 		if got := Of(name); got != want {
 			t.Errorf("Of(%q) = %q, want %q", name, got, want)
 		}
 	}
+	if Valid("cursor") {
+		t.Fatal("Cursor must not be an available provider")
+	}
 	k := Claude
-	for _, want := range []Kind{Codex, Grok, Cursor, Claude} {
+	for _, want := range []Kind{Codex, Grok, Claude} {
 		k = k.Next()
 		if k != want {
 			t.Fatalf("next = %s, want %s", k, want)
@@ -85,7 +88,6 @@ func TestResumeCmd(t *testing.T) {
 		{Claude, "abc", "go", "claude --resume 'abc' 'go' || claude 'go'"},
 		{Grok, "", "", "grok --trust"},
 		{Grok, "abc", "go", "grok --trust --resume 'abc' -- 'go' || grok --trust -- 'go'"},
-		{Cursor, "abc", "go", "cursor-agent --trust --approve-mcps --resume 'abc' -- 'go' || cursor-agent --trust --approve-mcps -- 'go'"},
 		{Codex, "", "", "codex " + codexFlags},
 		{Codex, "abc", "go", "codex resume " + codexFlags + " 'abc' -- 'go' || codex " + codexFlags + " -- 'go'"},
 	}
