@@ -73,7 +73,7 @@ package); CLI prints text by default and JSON with `--json`, MCP returns JSON.
 | `create <intent> [--agent A]` | Builds a space and returns its slug once the agent is launched; titling continues detached. `createWorkspace` is split into build (returns slug) and name (detached) so `M-n` keeps its current behaviour. |
 | `rename <space> <title>` | Sets the title in state and on the status line. Slug never changes. |
 | `retire <space>` / `restore <space>` | Moves to Trash / back with resume. The logic in `internal/ui` (`setRetired` and restore) moves to a shared package so UI, CLI, and MCP call one implementation. |
-| `delete <space>` | `gc.Delete` with its existing unsaved-work guard, behind an operator confirm (below). |
+| `delete <space>` | `gc.Delete`, behind an operator confirm (below) whose prompt names any unsaved work (`gc.Unsaved`). |
 | `purge [--older-than] [--all]` | Existing purge, behind one operator confirm listing the batch. |
 | `swap <space> --to A` | Existing swap. |
 | `read <space> [--lines N]` | The agent window's visible screen plus N lines of scrollback (default 60), plain text, joined wrapped lines. |
@@ -129,8 +129,7 @@ approvals, because the guard lives in atelier, not in the agent.
 
 ### Popup and keys
 
-- `M-m` (global): records the opening client in `@atelier_outer` (as overlays
-  do), then `display-popup -E -T " Maître " -w 80% -h 80% "atelier maitre"`.
+- `M-m` (global): records the opening client in `@atelier_maitre_outer`, then `display-popup -E -T " Maître " -w 80% -h 80% "atelier maitre"`.
   `atelier maitre` ensures the record and session, then execs `tmux attach -t
   maitre` with `TMUX` unset (a nested client of the same server). Maître's
   session has its status line off.
@@ -142,7 +141,10 @@ approvals, because the guard lives in atelier, not in the agent.
 - `M-x` inside Maître: the existing swap confirm, for Maître.
 - The overlay keys (`M-n`, `M-s`, `M-t`, `M-p`, `M-w`, `M-h`) do nothing inside
   Maître. They'd act on the popup's nested client, not yours; `focus` is how
-  Maître moves you.
+  Maître moves you. Mechanism: Maître's session sets tmux's `key-table` to
+  `maitre`, which binds only `M-m`, `M-r`, and `M-x`; every other key goes to
+  Maître's agent. `M-m` records the opening client in `@atelier_maitre_outer`
+  (not `@atelier_outer`, which `M-x` inside the popup overwrites).
 - Splash keymap: `M-m Maître` under "Anywhere", with `M-r` restart noted.
 
 ## Documentation changes
