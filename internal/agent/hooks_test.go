@@ -83,7 +83,7 @@ func TestHookCommandIsGuarded(t *testing.T) {
 	if !strings.HasSuffix(cmd, "|| true") {
 		t.Errorf("hookCommand = %q, want it to always succeed", cmd)
 	}
-	if !strings.Contains(cmd, "atelier hook working") {
+	if !strings.Contains(cmd, `"${ATELIER_BIN:-atelier}" hook working`) {
 		t.Errorf("hookCommand = %q, want it to record the status", cmd)
 	}
 }

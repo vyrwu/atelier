@@ -8,23 +8,34 @@ import (
 // State and config written before there was a choice of agent say nothing, and
 // mean Claude; so does anything unrecognised.
 func TestOfDefaultsToClaude(t *testing.T) {
-	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude} {
+	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude, "grok": Grok, "cursor": Claude} {
 		if got := Of(name); got != want {
 			t.Errorf("Of(%q) = %q, want %q", name, got, want)
 		}
 	}
-	if Claude.Other() != Codex || Codex.Other() != Claude {
-		t.Error("Other must flip between the two agents")
+	if Valid("cursor") {
+		t.Fatal("Cursor must not be an available provider")
+	}
+	k := Claude
+	for _, want := range []Kind{Codex, Grok, Claude} {
+		k = k.Next()
+		if k != want {
+			t.Fatalf("next = %s, want %s", k, want)
+		}
 	}
 }
 
 // The prompt is user-written prose that tmux runs through a shell: quotes,
 // backticks, and semicolons in it must stay data, for either agent.
 func TestLaunchCmdQuotesPrompt(t *testing.T) {
-	for _, k := range []Kind{Claude, Codex} {
+	for _, k := range Kinds() {
 		for _, p := range []string{"it's broken", "rm -rf /; echo pwned", "use `git log` and $HOME", `say "hi"`} {
 			cmd := k.LaunchCmd(p)
-			if !strings.HasPrefix(cmd, string(k)+" ") || !strings.HasSuffix(cmd, "'") {
+			prefix := k.Bin() + " "
+			if k == Grok {
+				prefix = grokCommand + " "
+			}
+			if !strings.HasPrefix(cmd, prefix) || !strings.HasSuffix(cmd, "'") {
 				t.Errorf("%s.LaunchCmd(%q) = %q, want the prompt single-quoted last", k, p, cmd)
 			}
 			if !strings.Contains(cmd, shellQuote(p)) {
@@ -79,6 +90,8 @@ func TestResumeCmd(t *testing.T) {
 		{Claude, "", "go", "claude 'go'"},
 		{Claude, "abc", "", "claude --resume 'abc' || claude"},
 		{Claude, "abc", "go", "claude --resume 'abc' 'go' || claude 'go'"},
+		{Grok, "", "", grokCommand},
+		{Grok, "abc", "go", grokCommand + " --resume 'abc' -- 'go' || " + grokCommand + " -- 'go'"},
 		{Codex, "", "", "codex " + codexFlags},
 		{Codex, "abc", "go", "codex resume " + codexFlags + " 'abc' -- 'go' || codex " + codexFlags + " -- 'go'"},
 	}
@@ -95,5 +108,24 @@ func TestWithoutSpace(t *testing.T) {
 	got := withoutSpace([]string{"PATH=/bin", "ATELIER_SESSION=s", "ATELIER_SLUG=s", "ATELIER_AGENT=claude", "ATELIER_ROOT=/r"})
 	if strings.Join(got, " ") != "PATH=/bin ATELIER_ROOT=/r" {
 		t.Errorf("withoutSpace = %v", got)
+	}
+}
+
+func TestRuntimePathsPinInstance(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "/test/cache")
+	t.Setenv("XDG_STATE_HOME", "/test/state")
+	t.Setenv("XDG_CONFIG_HOME", "/test/config")
+	t.Setenv("ATELIER_ROOT", "/test/spaces")
+	t.Setenv("ATELIER_SOCKET", "test-socket")
+	env := Env("test-space", Grok)
+	for key, want := range map[string]string{
+		"ATELIER_BIN": selfPath(), "ATELIER_WORKSPACE": "/test/spaces/test-space",
+		"XDG_CACHE_HOME": "/test/cache", "XDG_STATE_HOME": "/test/state",
+		"XDG_CONFIG_HOME": "/test/config", "ATELIER_ROOT": "/test/spaces",
+		"ATELIER_SOCKET": "test-socket", "ATELIER_AGENT": "grok",
+	} {
+		if env[key] != want {
+			t.Errorf("%s = %q, want %q", key, env[key], want)
+		}
 	}
 }

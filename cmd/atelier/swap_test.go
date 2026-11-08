@@ -18,8 +18,8 @@ import (
 // seeded by exactly the same handoff note.
 func TestHandoffAgentCmdSessionChoice(t *testing.T) {
 	note := "read the exported conversation"
-	for _, from := range []agent.Kind{agent.Claude, agent.Codex} {
-		to := from.Other()
+	for _, from := range agent.Kinds() {
+		to := from.Next()
 		cross := handoffAgentCmd(from, to, "target-session", note)
 		if !strings.Contains(cross, "resume") || !strings.Contains(cross, "target-session") {
 			t.Errorf("%s → %s does not resume the target: %q", from, to, cross)

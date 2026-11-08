@@ -42,15 +42,23 @@ func usage(args []string) error {
 		}
 		return nil
 	}
+	kinds := []agent.Kind{agent.Claude, agent.Codex}
+	if _, err := exec.LookPath(agent.Grok.Bin()); err == nil || agent.Of(core.LoadConfig().Agent) == agent.Grok {
+		kinds = append(kinds, agent.Grok)
+	}
 	status := func() string {
-		return agent.UsageStatus(agent.LoadUsage(agent.Claude), agent.LoadUsage(agent.Codex), time.Now())
+		readings := map[agent.Kind]agent.Usage{}
+		for _, k := range kinds {
+			readings[k] = agent.LoadUsage(k)
+		}
+		return agent.UsageStatus(readings, time.Now())
 	}
 	prior := status()
 	fmt.Println(prior)
 	// Agents refresh their own reading when a turn ends. Fetch here only what
 	// has gone stale without one, by each agent's own measure of stale.
 	var refresh sync.WaitGroup
-	for _, k := range []agent.Kind{agent.Claude, agent.Codex} {
+	for _, k := range kinds {
 		if time.Since(agent.LoadUsage(k).Observed) > agent.UsageStale(k) {
 			refresh.Go(func() { _ = agent.RefreshUsage(k) })
 		}
@@ -84,7 +92,7 @@ func pollJob() string { return statusJob("poll '#{session_name}'") }
 func statusJob(args string) string {
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 	// A removed override must also disappear from the old server's environment.
-	keys := []string{"XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "ATELIER_ROOT", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH"}
+	keys := []string{"XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "ATELIER_ROOT", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "PATH"}
 	cmd := "env"
 	for _, key := range keys {
 		cmd += " -u " + key

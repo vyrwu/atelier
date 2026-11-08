@@ -20,10 +20,10 @@ type Config struct {
 	// NamingModel is the model Claude generates titles with (default "sonnet";
 	// Haiku follows the "reply with ONLY…" instruction
 	// too loosely — it adds preamble/quotes that fail extraction and fall back
-	// to the raw prompt). Codex uses its own default model.
+	// to the raw prompt). Codex and Grok use their own default models.
 	NamingModel string `toml:"naming_model"`
 	// Agent is the coding agent new spaces start with: "claude" (default) or
-	// "codex". M-n can pick the other one per space.
+	// "codex" or "grok". M-n can choose per space.
 	Agent string `toml:"agent"`
 }
 

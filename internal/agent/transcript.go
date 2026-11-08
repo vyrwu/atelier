@@ -36,7 +36,7 @@ func Transcript(k Kind, root string, since time.Time) string {
 func RecentKind(root string, fallback Kind) Kind {
 	kind := fallback
 	var newest time.Time
-	for _, k := range []Kind{Claude, Codex} {
+	for _, k := range Kinds() {
 		path := Transcript(k, root, time.Time{})
 		if fi, err := os.Stat(path); err == nil && fi.ModTime().After(newest) {
 			kind, newest = k, fi.ModTime()
@@ -46,6 +46,9 @@ func RecentKind(root string, fallback Kind) Kind {
 }
 
 func latestSession(k Kind, root string, since time.Time) (id, path string) {
+	if k == Grok {
+		return latestGrokSession(filepath.Join(grokHome(), "sessions"), root, since)
+	}
 	if k == Codex {
 		return latestCodexSession(filepath.Join(codexHome(), "sessions"), root, since)
 	}
@@ -211,9 +214,12 @@ func Export(k Kind, path string, since time.Time) (string, error) {
 	}
 	defer func() { _ = f.Close() }()
 	w := &exportWriter{agent: k.Label()}
-	if k == Codex {
+	switch k {
+	case Codex:
 		err = exportCodex(f, since, w)
-	} else {
+	case Grok:
+		err = exportGrok(f, since, w)
+	default:
 		err = exportClaude(f, since, w)
 	}
 	return w.String(), err

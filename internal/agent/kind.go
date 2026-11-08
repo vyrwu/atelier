@@ -9,41 +9,59 @@ import (
 	"time"
 )
 
-// Kind is a coding agent a space can run. Everything that differs between Claude
-// Code and Codex is a switch on it.
+// Kind is a coding agent a space can run.
 type Kind string
 
 const (
 	Claude Kind = "claude"
 	Codex  Kind = "codex"
+	Grok   Kind = "grok"
 )
 
-// Of reads a stored or configured agent name. Anything but "codex" is Claude, so
-// state and config written before there was a choice mean Claude.
+// Kinds is the stable order used by the new-space and swap pickers.
+func Kinds() []Kind { return []Kind{Claude, Codex, Grok} }
+
+// Valid distinguishes an explicit CLI choice from legacy empty state.
+func Valid(name string) bool {
+	for _, k := range Kinds() {
+		if string(k) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Of preserves the default for legacy state and unrecognised config values.
 func Of(name string) Kind {
-	if Kind(name) == Codex {
-		return Codex
+	if Valid(name) {
+		return Kind(name)
 	}
 	return Claude
 }
 
-// Other is the agent a swap hands a space to.
-func (k Kind) Other() Kind {
-	if k == Codex {
-		return Claude
+// Next cycles through every agent, including a fresh conversation with oneself.
+func (k Kind) Next() Kind {
+	kinds := Kinds()
+	for i, candidate := range kinds {
+		if candidate == k {
+			return kinds[(i+1)%len(kinds)]
+		}
 	}
-	return Codex
+	return Claude
 }
 
-// Label is the agent's name as the UI shows it.
 func (k Kind) Label() string {
-	if k == Codex {
+	switch k {
+	case Codex:
 		return "Codex"
+	case Grok:
+		return "Grok Build"
+	default:
+		return "Claude Code"
 	}
-	return "Claude Code"
 }
 
-// Bin is the CLI that runs the agent.
+// Bin is the native CLI that runs the agent.
 func (k Kind) Bin() string { return string(k) }
 
 // codexFlags go on every interactive Codex launch. Codex runs unsandboxed and
@@ -54,9 +72,15 @@ func (k Kind) Bin() string { return string(k) }
 // environment, which has no ATELIER_SESSION.
 const codexFlags = "--dangerously-bypass-approvals-and-sandbox -c check_for_update_on_startup=false"
 
+// Grok's terminal theme leaves the operator's canvas and cursor colors intact.
+const grokCommand = "env GROK_TERMINAL_THEME=1 GROK_THEME=terminal grok --trust"
+
 // LaunchCmd is the shell command that starts the agent fresh in a space with
 // prompt as its opening message.
 func (k Kind) LaunchCmd(prompt string) string {
+	if k == Grok {
+		return grokCommand + codexArg(prompt)
+	}
 	if k == Codex {
 		return "codex " + codexFlags + codexArg(prompt)
 	}
@@ -67,6 +91,13 @@ func (k Kind) LaunchCmd(prompt string) string {
 // prompt (if any) as its next message — or, with no id or one that no longer
 // resumes, starts the agent fresh with it.
 func (k Kind) ResumeCmd(id, prompt string) string {
+	if k == Grok {
+		fresh := k.LaunchCmd(prompt)
+		if id == "" {
+			return fresh
+		}
+		return k.LaunchCmd("") + " --resume " + shellQuote(id) + codexArg(prompt) + " || " + fresh
+	}
 	fresh := "claude"
 	if prompt != "" {
 		fresh += " " + shellQuote(prompt)
@@ -104,11 +135,12 @@ func codexArg(prompt string) string {
 const askTimeout = 5 * time.Minute
 
 // Ask runs the agent once, non-interactively, on prompt with input piped after
-// it, and returns its answer. It runs from a scratch directory with no hooks, no
-// MCP servers, no tools, no user config, nothing saved, and without a space's
-// identity in its environment — otherwise the run would load a space's guide, become the
-// conversation a resume picks up, and rewrite the space's status through the
-// hooks. model applies to Claude only; Codex uses its configured default.
+// it, and returns its answer. It runs from a scratch directory without a
+// space's identity, so it cannot load its guide, become its resumed conversation,
+// or rewrite its status. Claude and Codex disable tools/config and persistence;
+// Grok disables built-in tools and denies tool calls, including MCP tools.
+// Grok's native user settings and headless session persistence still apply.
+// model applies to Claude only; other agents use their configured default.
 func (k Kind) Ask(prompt, input, model string) (string, error) {
 	dir, err := os.MkdirTemp("", "atelier-ask-")
 	if err != nil {
@@ -119,11 +151,16 @@ func (k Kind) Ask(prompt, input, model string) (string, error) {
 	defer cancel()
 	answer := filepath.Join(dir, "answer.md")
 	var cmd *exec.Cmd
-	if k == Codex {
+	switch k {
+	case Grok:
+		// #nosec G204 G702 -- Fixed CLI and separate prompt argument in a private scratch directory.
+		cmd = exec.CommandContext(ctx, "grok", "-p", prompt+"\n"+input, "--tools", "", "--deny", "*",
+			"--permission-mode", "dontAsk", "--no-subagents", "--disable-web-search", "--max-turns", "1", "--output-format", "plain")
+	case Codex:
 		// #nosec G204 G702 -- Runs a fixed agent binary with separate arguments in a private scratch directory.
 		cmd = exec.CommandContext(ctx, "codex", "exec", "-C", dir, "--skip-git-repo-check", "--ephemeral",
 			"--ignore-user-config", "--ignore-rules", "-s", "read-only", "--disable", "hooks", "-o", answer, prompt)
-	} else {
+	default:
 		args := []string{"-p", "--no-session-persistence", "--strict-mcp-config", "--tools", "",
 			"--settings", `{"disableAllHooks":true}`}
 		if model != "" {
@@ -164,6 +201,9 @@ func withoutSpace(env []string) []string {
 // Prepare readies dir for agent k: folder trust and atelier's MCP server, so it
 // starts without a trust prompt and with create_worktree and create_pr to hand.
 func (k Kind) Prepare(dir, slug string) error {
+	if k == Grok {
+		return prepareGrok(dir, slug)
+	}
 	if k == Codex {
 		return prepareCodex(dir, slug)
 	}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -175,8 +176,8 @@ func EnsureWorkspaceGuide() (string, error) {
 }
 
 // LinkGuide links the central guide into a workspace under the name each agent
-// reads — CLAUDE.md for Claude, AGENTS.md for Codex, which never reads the
-// other's — so whichever agent the space runs, now or after a swap, has it. An
+// reads — CLAUDE.md for Claude, AGENTS.md for Codex and Grok —
+// so whichever agent the space runs, now or after a swap, has it. An
 // existing file of either name is left alone.
 func LinkGuide(root string) {
 	guide, err := EnsureWorkspaceGuide()
@@ -196,7 +197,7 @@ func LinkGuide(root string) {
 // before there was a choice have no $ATELIER_AGENT, and run Claude. It prints
 // nothing: both agents add what some hooks print to the model's context.
 func hookCommand(status string, k Kind) string {
-	return `[ -n "$ATELIER_SESSION" ] && [ "${ATELIER_AGENT:-claude}" = ` + string(k) + ` ] && atelier hook ` + status + " || true"
+	return `[ -n "$ATELIER_SESSION" ] && [ "${ATELIER_AGENT:-claude}" = ` + string(k) + ` ] && "${ATELIER_BIN:-atelier}" hook ` + status + " || true"
 }
 
 // atelierHook is one lifecycle event atelier listens to: the status it records,
@@ -290,6 +291,9 @@ func installHooks(path string, k Kind, table map[string]atelierHook, mode os.Fil
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return err
 		}
+		if settings == nil {
+			return fmt.Errorf("%s: expected a JSON object", path)
+		}
 	}
 
 	hooks, _ := settings["hooks"].(map[string]any)
@@ -350,7 +354,7 @@ func groupHasAtelierHook(group any) bool {
 		if !ok {
 			continue
 		}
-		if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "atelier hook ") {
+		if cmd, ok := hm["command"].(string); ok && (strings.Contains(cmd, "atelier hook ") || strings.Contains(cmd, `"${ATELIER_BIN:-atelier}" hook `)) {
 			return true
 		}
 	}

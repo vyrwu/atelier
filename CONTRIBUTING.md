@@ -8,7 +8,7 @@ below before writing code; they are enforced in review.
 
 Install [mise](https://mise.jdx.dev) for the pinned toolchain in `mise.toml`.
 You also need tmux 3.3+, git, the GitHub CLI, and
-Claude Code and/or Codex.
+at least one supported coding agent.
 
 ```sh
 git clone https://github.com/vyrwu/atelier && cd atelier
@@ -84,7 +84,7 @@ Give it the same format.
 | `internal/tmux` | the tmux wrapper (dedicated socket) |
 | `internal/git` | worktree derivation and git queries |
 | `internal/forge` | GitHub: the PR query and PR state changes |
-| `internal/agent` | Claude Code and Codex: launch and resume, handoff export, status, hooks, project setup |
+| `internal/agent` | Claude Code, Codex, and Grok Build: launch and resume, handoff export, status, hooks, project setup |
 | `internal/mcp` | the stdio MCP server agents use: `create_worktree`, `create_pr`, `register_pr` |
 | `internal/gc` | deleting spaces, by hand or by age, and sweeping up after them |
 | `internal/ui` | the overlay and the splash |

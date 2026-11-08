@@ -1,7 +1,6 @@
 # CLAUDE.md — atelier
 
-A workshop for parallel coding agents (Claude Code and Codex today; Grok via
-Cursor CLI next): a terminal-based agentic development environment, where
+A workshop for parallel coding agents (Claude Code, Codex, and Grok Build): a terminal-based agentic development environment, where
 reviewing a PR should be as easy as making the change by hand.
 The design, its principles (`NFR-*`, cited in code), and the rules (§5) are in
 DESIGN.md, imported below. User-facing behaviour is README.md; contributor
@@ -15,7 +14,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/tmux` — tmux CLI wrapper (dedicated socket)
 - `internal/git` — worktree derivation + git queries
 - `internal/forge` — `gh` PR queries + open-in-browser
-- `internal/agent` — the two agents (Claude Code, Codex): launch/resume, finding
+- `internal/agent` — the coding agents (Claude Code, Codex, Grok Build): launch/resume, finding
   and exporting their conversations for a handoff, per-session status, hooks,
   their config (trust + MCP registration), the per-workspace guide
 - `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
@@ -29,7 +28,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 ## Model & bindings
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
-  `claude` window runs the agent — Claude Code or Codex, `Workspace.Agent` (""
+  `claude` window runs the agent — the selected agent, `Workspace.Agent` (""
   = claude); the window name predates Codex (named windows: `claude`, `shell`,
   `<repo>-<branch>` per worktree — nav is keyed on names, so
   `automatic-rename`/`allow-rename` are off).
@@ -43,14 +42,24 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   lock; abandoned launches expire after 30 seconds. Exports are owner-only.
   Codex runs with `--dangerously-bypass-approvals-and-sandbox` and always a
   `-c` (without one it can attach to an app-server daemon lacking the space's
-  env). Each agent's hooks are guarded on `$ATELIER_AGENT`.
+  env). Each agent's hooks are guarded on `$ATELIER_AGENT` and use the launching
+  binary through `$ATELIER_BIN`. Launches pin the instance paths and socket,
+  and repeat provider preparation on restore. Grok titles use the same async
+  naming flow as the other agents, through `grok -p` in a scratch directory
+  without the space's identity. Built-in tools are disabled and all tool calls
+  denied; native user settings and headless session persistence still apply.
+  Grok launches set GROK_THEME=terminal and GROK_TERMINAL_THEME=1 so the TUI
+  inherits the terminal canvas instead of painting its own dark background.
 - Allowances: `atelier usage` is tmux's asynchronous status job. It renders
   cached account quotas immediately and refetches stale readings
   (`UsageStale`: Codex 1 min, Claude 15 min — its `/usage` boots the CLI);
   a finished turn's hook refreshes that agent detached
   (`atelier usage refresh <agent>`), at most once a minute each (shared file
   locks; no model calls). Codex uses
-  `account/rateLimits/read`; Claude uses native `claude -p /usage`, validating
+  `account/rateLimits/read`; Grok starts `grok agent --no-leader stdio`,
+  initializes ACP v1 and calls `_x.ai/billing`, without creating a session or
+  sending a prompt. Its weekly period enum is USAGE_PERIOD_TYPE_WEEKLY.
+  Claude uses native `claude -p /usage`, validating
   `local_command=usage` and zero turns/cost. Reset dates are parsed in UTC;
   unsupported output fails closed. Claude spaces also use local `statusLine`
   settings as a fallback to capture native JSON with

@@ -34,9 +34,8 @@ own task, and tells you which one needs you. Describe a task and it becomes a
 **space**: a directory, a tmux session, and an agent already working. The pull
 requests your agents open come to you, with their diff and CI one key away.
 
-**Supported agents:** [Claude Code](https://claude.com/claude-code) and
-[Codex](https://developers.openai.com/codex). Grok via
-[Cursor CLI](https://cursor.com/cli) is coming soon.
+**Supported agents:** [Claude Code](https://claude.com/claude-code),
+[Codex](https://developers.openai.com/codex), and [Grok Build](https://docs.x.ai/build/overview).
 
 ## Highlights
 
@@ -46,8 +45,8 @@ requests your agents open come to you, with their diff and CI one key away.
   line and listed first.
 - **Swap agents mid-task.** `M-x` hands a space from one agent to another, for
   when one runs out of quota. Swapping back resumes where it left off.
-- **See every agent's usage.** The status line shows how much of each
-  subscription's limits you've spent.
+- **See subscription usage.** The status line shows each provider's available
+  account quota; unsupported readings stay explicitly unknown.
 - **Review in the terminal.** Pull requests with CI, review, and merge-queue
   status, local diffs, and CI logs.
 - **Worktrees that are never stale.** Agents branch from the freshly fetched
@@ -61,7 +60,7 @@ requests your agents open come to you, with their diff and CI one key away.
 |---|---|
 | [tmux](https://github.com/tmux/tmux) 3.3+, git | atelier runs its own tmux server |
 | [GitHub CLI](https://cli.github.com) | run `gh auth login` first |
-| Claude Code and/or Codex | at least the agent new spaces start with |
+| Claude Code, Codex, or Grok Build | at least the agent new spaces start with |
 | A [Nerd Font](https://www.nerdfonts.com) 3.5.0+ | for the GitHub and agent icons |
 
 Optional: [diffnav](https://github.com/dlvhdr/diffnav) or
@@ -97,11 +96,28 @@ atelier install   # once: agent hooks, tmux bindings, the per-space guide
 atelier           # start, or re-attach
 ```
 
-Press `M-n`, describe a task, and press `Enter` (`Tab` picks the other agent).
+Press `M-n`, describe a task, and press `Enter` (`Tab` cycles through agents).
 `M-s` lists your spaces. `M-` means `Alt` (`Option` on a Mac).
 
 Using Codex? Its first launch asks you to review new hooks: trust atelier's (the
 ones running `atelier hook`). Until you do, Codex spaces show no status.
+
+For Grok, install [Grok Build](https://docs.x.ai/build/overview) and run `grok login`
+with your subscription account. Atelier reuses its login and selected model;
+no API key is required in atelier.
+
+Choose Grok Build with `Tab` in the new-space or swap dialog, or use
+`atelier create "Fix the tests" --agent grok` and `atelier swap <space> --to grok`.
+Grok receives project-local hooks and atelier's MCP tools automatically.
+Its space titles are generated asynchronously through `grok -p`, using your
+configured Grok model. As with the other agents, `naming = false` disables this
+call and keeps the task text as the title. Atelier launches
+Grok with its native `terminal` theme so your terminal background and cursor
+colors stay intact. Its logo uses the **Atelier Logos** fallback font
+(U+100001), installed and configured for WezTerm by `nix-config`; other terminal
+profiles need that font in their fallback list.
+Its normal tool approval and sandbox settings still apply; allow access to the
+source repository's git directory when committing from a worktree.
 
 ## Keys
 
@@ -123,8 +139,8 @@ In the overlays, type to filter, `Up`/`Down` to move, `Esc` to close.
 | Trash | `Enter` restore · `M-d` delete permanently |
 | Pull requests | `Enter` diff · `M-e` checks · `M-b` browser · `M-o` reopen or ready · `M-c` close · `M-y` copy link |
 | Worktrees | `Enter` shell in the worktree |
-| New | `Enter` start · `Alt-Enter` start and switch · `Tab` other agent · `Ctrl-j` newline |
-| Swap | `y` swap · `n` cancel · `Tab` a fresh conversation with the same agent |
+| New | `Enter` start · `Alt-Enter` start and switch · `Tab` next agent · `Ctrl-j` newline |
+| Swap | `y` swap · `n` cancel · `Tab` next agent (choose the current one for a fresh conversation) |
 
 In a PR's diff window, `M-e` opens its checks; in its checks window, `M-d` goes
 back to the diff.
@@ -168,14 +184,15 @@ Optional, in `~/.config/atelier/config.toml`:
 ```toml
 root         = "~/ateliers"  # where spaces live
 socket       = "atelier"     # atelier's tmux socket
-agent        = "claude"      # the agent new spaces start with: "claude" or "codex"
+agent        = "claude"      # "claude", "codex", or "grok"
 naming       = true          # let the agent title new spaces
 naming_model = "sonnet"      # the model Claude titles them with
 ```
 
 `ATELIER_ROOT` and `ATELIER_SOCKET` override `root` and `socket`. Every agent
 reads one shared guide, `~/.config/atelier/WORKSPACE_CLAUDE.md`; edit it to
-change what they're told.
+change what they're told. `GROK_HOME` is respected for Grok config,
+login, and transcript discovery.
 
 ## How it works
 
@@ -183,7 +200,7 @@ change what they're told.
 tmux -L atelier               atelier's own server; your tmux is untouched
 ├── home                      the splash: keymap and dependency check
 └── spry-otter                one session per space
-    ├── claude                the agent (Claude Code or Codex)
+    ├── claude                the selected coding agent
     ├── shell                 M-c
     └── pr-atelier-128        a PR diff, opened from M-p
 ```
@@ -192,10 +209,13 @@ tmux -L atelier               atelier's own server; your tmux is untouched
   nothing outside atelier.
 - **Swapping** saves the outgoing agent's conversation to `.atelier/handoff/`
   in the space. The incoming agent starts at once with it, resuming its own
-  earlier conversation there if it had one.
+  earlier conversation there if it had one. Grok reads its native session updates.
 - **Usage** is each provider's own reading: Codex's every minute, Claude's
   after each turn or every 15 minutes. `~` marks a reading that may be out of
-  date; `—` means unknown.
+  date; `—` means unknown. Grok reads the account balance behind its native `/usage` view once a
+  minute through the CLI's ACP billing endpoint, including on Grok Build 1.0.70.
+  Missing authentication or unavailable account quotas show `—`.
+  Token counts are never treated as subscription quotas.
 - **Codex runs without its sandbox and approval prompts.** A worktree's git
   data lives in its source repository, outside the space, so the sandbox
   would block every commit.
@@ -220,7 +240,6 @@ The reasoning behind all of it is in [DESIGN.md](DESIGN.md).
 
 ## Roadmap
 
-- **Grok via Cursor CLI**, as a third agent.
 - **Remote spaces**: run a space's agent on another host.
   ([#104](https://github.com/vyrwu/atelier/issues/104))
 - **Embedded CLI**: describe a command in a shell, get it ready to run.

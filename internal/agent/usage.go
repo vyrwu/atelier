@@ -42,8 +42,11 @@ type UsageWindow struct {
 // CODEX_HOME (or CLAUDE_CONFIG_DIR) cannot inherit this account's percentages.
 func usagePath(k Kind) string {
 	dir := codexHome()
-	if k == Claude {
+	switch k {
+	case Claude:
 		dir = settingsPath()
+	case Grok:
+		dir = grokHome()
 	}
 	hash := sha256.Sum256([]byte(dir))
 	return filepath.Join(core.CacheDir(), "usage", fmt.Sprintf("%s-%x.json", k, hash[:6]))
@@ -173,7 +176,7 @@ const usageDim = "#[fg=colour245,nobold]"
 // the whole CLI, about 4s of CPU and 0.5GB, so its reading waits for a turn,
 // its own status line while a session runs, or 15 minutes.
 func UsageStale(k Kind) time.Duration {
-	if k == Codex {
+	if k == Codex || k == Grok {
 		return time.Minute
 	}
 	return 15 * time.Minute
@@ -182,14 +185,23 @@ func UsageStale(k Kind) time.Duration {
 // UsageStatus shows percentages spent, coloured by usage level.
 // Session-reported readings and readings older than UsageStale are '~'.
 // Expired data never implies an unused allowance.
-func UsageStatus(claude, codex Usage, now time.Time) string {
-	return renderUsage(Claude, claude, now) + usageDim + " · " + renderUsage(Codex, codex, now) + usageDim + " spent"
+func UsageStatus(readings map[Kind]Usage, now time.Time) string {
+	var parts []string
+	for _, k := range Kinds() {
+		if u, ok := readings[k]; ok {
+			parts = append(parts, renderUsage(k, u, now))
+		}
+	}
+	return strings.Join(parts, usageDim+" · ") + usageDim + " spent"
 }
 
 func renderUsage(k Kind, u Usage, now time.Time) string {
 	glyph, color := "\uec82", 209
-	if k == Codex {
+	switch k {
+	case Codex:
 		glyph, color = "\uec81", 39
+	case Grok:
+		glyph, color = "\U00100001", 252 // Atelier Logos: Grok (U+100001)
 	}
 	text := fmt.Sprintf("#[fg=colour%d]%s", color, glyph) + usageDim
 	if len(u.Buckets) == 0 {
@@ -237,7 +249,10 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 			if w == nil {
 				continue
 			}
-			text += " " + usageDuration(w.Minutes) + " "
+			text += " "
+			if w.Minutes > 0 {
+				text += usageDuration(w.Minutes) + " "
+			}
 			if w.Used == nil || math.IsNaN(*w.Used) || math.IsInf(*w.Used, 0) || *w.Used < 0 || *w.Used > 100 || w.Reset <= now.Unix() {
 				text += "—"
 				continue
@@ -260,6 +275,9 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 }
 
 func usageDuration(minutes int) string {
+	if minutes == 0 {
+		return "plan"
+	}
 	if minutes >= 1440 {
 		return fmt.Sprintf("%dd", minutes/1440)
 	}

@@ -14,8 +14,8 @@ import (
 )
 
 // RefreshUsage fetches account metadata at most once per minute per agent,
-// however many turns end or status lines ask. Neither provider needs a model call or a live
-// interactive session, so both balances stay current regardless of focus.
+// however many turns end or status lines ask. Native metadata commands never
+// spend model tokens; unsupported readings remain unknown.
 func RefreshUsage(k Kind) error {
 	path := usagePath(k)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -34,10 +34,15 @@ func RefreshUsage(k Kind) error {
 		return err
 	}
 	var u Usage
-	if k == Claude {
+	switch k {
+	case Claude:
 		u, err = readClaudeUsage()
-	} else {
+	case Grok:
+		u, err = readGrokUsage()
+	case Codex:
 		u, err = readCodexUsage()
+	default:
+		return fmt.Errorf("unsupported quota provider %q", k)
 	}
 	if err != nil {
 		return err // retain the previous observation, visibly marked stale

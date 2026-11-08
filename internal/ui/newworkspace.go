@@ -16,7 +16,7 @@ func (m Model) updateNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		return m, tea.Quit
 	case tea.KeyTab:
-		m.newAgent = m.newAgent.Other()
+		m.newAgent = m.newAgent.Next()
 		return m, nil
 	}
 	// Enter is submit; newline is Ctrl-J only (Alt+Enter is start-and-open).
@@ -28,7 +28,7 @@ func (m Model) updateNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) viewNew() string {
 	var b strings.Builder
-	// The agent is part of the question, so Tab reads as asking the other one.
+	// The agent is part of the question, so Tab reads as asking the next one.
 	b.WriteString(titleStyle.Render("What can ") + agentGlyph(m.newAgent) + " " +
 		dimStyle.Bold(true).Render(m.newAgent.Label()) +
 		titleStyle.Render(" do for you?"))
