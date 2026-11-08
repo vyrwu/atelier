@@ -141,7 +141,7 @@ func mergeJSON(path string, edit func(map[string]any)) error {
 
 // CLIHookStatus interprets native payloads; nested agents must never settle
 // their parent's status. Unknown events leave the previous status alone.
-func CLIHookStatus(k Kind, data []byte) string {
+func CLIHookStatus(k Kind, data []byte, prior string) string {
 	var h struct {
 		Event            string `json:"hook_event_name"`
 		GrokEvent        string `json:"hookEventName"`
@@ -157,31 +157,45 @@ func CLIHookStatus(k Kind, data []byte) string {
 		return ""
 	}
 	if k == Grok {
-		h.Event, h.Tool, h.Notification = h.GrokEvent, h.GrokTool, h.GrokNotification
+		// Native event values are snake_case; the compatibility alias uses
+		// PascalCase. Keep either envelope usable without requiring both.
+		if h.GrokEvent != "" {
+			h.Event = h.GrokEvent
+		}
+		if h.GrokTool != "" {
+			h.Tool = h.GrokTool
+		}
+		if h.GrokNotification != "" {
+			h.Notification = h.GrokNotification
+		}
 	}
-	switch h.Event {
-	case "SessionStart", "SessionEnd", "Stop", "StopCancelled", "sessionStart", "sessionEnd":
+	switch strings.ReplaceAll(strings.ToLower(h.Event), "_", "") {
+	case "sessionstart", "sessionend", "stopcancelled":
 		return "idle"
-	case "StopFailure":
+	case "stopfailure":
 		return "blocked"
 	case "stop":
 		if h.Status == "error" {
 			return "blocked"
 		}
 		return "idle"
-	case "UserPromptSubmit", "beforeSubmitPrompt", "PostToolUse", "postToolUse":
+	case "userpromptsubmit", "beforesubmitprompt", "posttooluse":
 		return "working"
-	case "PreToolUse", "preToolUse":
-		if h.Tool == "ask_user" || h.Tool == "AskUserQuestion" || h.Tool == "AskQuestion" {
+	case "pretooluse":
+		if h.Tool == "ask_user" || h.Tool == "ask_user_question" || h.Tool == "AskUserQuestion" || h.Tool == "AskQuestion" {
 			return "blocked"
 		}
 		return "working"
-	case "Notification":
+	case "notification":
 		switch h.Notification {
 		case "permission_prompt", "agent_needs_input":
 			return "blocked"
 		case "idle_prompt":
-			return "idle"
+			// Grok sends this delayed reminder even after StopFailure. Keep
+			// the failure visible until the operator returns or starts a turn.
+			if prior != "blocked" {
+				return "idle"
+			}
 		}
 	}
 	return ""

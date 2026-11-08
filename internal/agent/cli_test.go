@@ -93,6 +93,7 @@ func TestPrepareCLIRejectsMalformedConfig(t *testing.T) {
 		path, body string
 	}{
 		{Grok, ".grok/config.toml", "[broken"},
+		{Grok, ".grok/hooks/atelier.json", "null"},
 		{Cursor, ".cursor/mcp.json", "{broken"},
 		{Cursor, ".cursor/mcp.json", "null"},
 		{Cursor, ".cursor/hooks.json", "{broken"},
@@ -119,6 +120,13 @@ func TestCLIHookStatus(t *testing.T) {
 		kind       Kind
 		data, want string
 	}{
+		{Grok, `{"hookEventName":"user_prompt_submit","hook_event_name":"UserPromptSubmit"}`, "working"},
+		{Grok, `{"hookEventName":"pre_tool_use","hook_event_name":"PreToolUse","toolName":"ask_user_question"}`, "blocked"},
+		{Grok, `{"hookEventName":"post_tool_use","toolName":"ask_user_question"}`, "working"},
+		{Grok, `{"hookEventName":"notification","notificationType":"permission_prompt"}`, "blocked"},
+		{Grok, `{"hookEventName":"stop_failure","hook_event_name":"StopFailure"}`, "blocked"},
+		{Grok, `{"hookEventName":"stop_cancelled"}`, "idle"},
+		{Grok, `{"hook_event_name":"PreToolUse","tool_name":"ask_user_question"}`, "blocked"},
 		{Grok, `{"hookEventName":"UserPromptSubmit"}`, "working"},
 		{Grok, `{"hookEventName":"PreToolUse","toolName":"ask_user"}`, "blocked"},
 		{Grok, `{"hookEventName":"Notification","notificationType":"permission_prompt"}`, "blocked"},
@@ -135,25 +143,55 @@ func TestCLIHookStatus(t *testing.T) {
 		{Cursor, `{"hook_event_name":"unknown"}`, ""},
 		{Cursor, `{broken`, ""},
 	} {
-		if got := CLIHookStatus(tc.kind, []byte(tc.data)); got != tc.want {
+		if got := CLIHookStatus(tc.kind, []byte(tc.data), ""); got != tc.want {
 			t.Errorf("%s %s: %q, want %q", tc.kind, tc.data, got, tc.want)
 		}
 	}
 }
 
+func TestGrokIdleReminderPreservesFailure(t *testing.T) {
+	status := "idle"
+	for _, tc := range []struct{ event, want string }{
+		{`{"hookEventName":"user_prompt_submit"}`, "working"},
+		{`{"hookEventName":"stop_failure"}`, "blocked"},
+		{`{"hookEventName":"notification","notificationType":"idle_prompt"}`, "blocked"},
+		{`{"hookEventName":"user_prompt_submit"}`, "working"},
+		{`{"hookEventName":"stop"}`, "idle"},
+		{`{"hookEventName":"notification","notificationType":"idle_prompt"}`, "idle"},
+	} {
+		if next := CLIHookStatus(Grok, []byte(tc.event), status); next != "" {
+			status = next
+		}
+		if status != tc.want {
+			t.Fatalf("after %s: %s, want %s", tc.event, status, tc.want)
+		}
+	}
+}
+
 func TestCLIConfigPathsAndEnvironment(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/claude")
+	t.Setenv("CODEX_HOME", "/custom/codex")
 	t.Setenv("GROK_HOME", "/custom/grok")
 	t.Setenv("CURSOR_CONFIG_DIR", "/custom/cursor-config")
 	t.Setenv("CURSOR_DATA_DIR", "/custom/cursor-data")
-	if env := Env("space", Grok); env["GROK_HOME"] != "/custom/grok" {
-		t.Fatal(env)
-	}
-	if env := Env("space", Cursor); env["CURSOR_CONFIG_DIR"] != "/custom/cursor-config" || env["CURSOR_DATA_DIR"] != "/custom/cursor-data" {
-		t.Fatal(env)
+	for _, k := range Kinds() {
+		env := Env("space", k)
+		for key, want := range map[string]string{
+			"CLAUDE_CONFIG_DIR": "/custom/claude", "CODEX_HOME": "/custom/codex",
+			"GROK_HOME": "/custom/grok", "CURSOR_CONFIG_DIR": "/custom/cursor-config", "CURSOR_DATA_DIR": "/custom/cursor-data",
+		} {
+			if env[key] != want {
+				t.Errorf("swap to %s lost %s: %q, want %q", k, key, env[key], want)
+			}
+		}
 	}
 	t.Setenv("CURSOR_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
 	if cursorDir(false) != "/xdg/cursor" || cursorDir(true) != "/custom/cursor-data" {
 		t.Fatal("Cursor config and data paths were conflated")
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	if value, present := Env("space", Cursor)["CLAUDE_CONFIG_DIR"]; !present || value != "" {
+		t.Fatal("legacy Claude layout must clear a stale server override")
 	}
 }

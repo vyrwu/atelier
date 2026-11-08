@@ -96,7 +96,9 @@ func exportGrok(r io.Reader, since time.Time, w *exportWriter) error {
 			if u.Kind == "user_message_chunk" {
 				next = "Operator"
 			}
-			if next != who {
+			// User updates are submitted messages, including steering sent
+			// before a reply. Only assistant deltas form a streamed message.
+			if next != who || u.Kind == "user_message_chunk" {
 				flush()
 				who = next
 			}

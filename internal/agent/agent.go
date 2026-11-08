@@ -76,6 +76,14 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 	if err != nil {
 		return err
 	}
+	// Popups and future windows inherit the session environment, not the
+	// exports wrapped around the current agent command. A swap needs both
+	// providers' histories even when the server predates these overrides.
+	for key, value := range providerPaths() {
+		if err := tmux.SetSessionEnv(ws.Session, key, value); err != nil {
+			return err
+		}
+	}
 	return tmux.SetAgentName(ws.Session, k.Label())
 }
 
@@ -83,17 +91,25 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 // and MCP server key on, which agent it is (see hookCommand), and the operator's
 // git identity so it commits as them.
 func Env(slug string, k Kind) map[string]string {
-	env := map[string]string{"ATELIER_SESSION": slug, "ATELIER_SLUG": slug, "ATELIER_AGENT": string(k)}
-	if k == Grok {
-		env["GROK_HOME"] = grokHome()
-	}
-	if k == Cursor {
-		env["CURSOR_CONFIG_DIR"], env["CURSOR_DATA_DIR"] = cursorDir(false), cursorDir(true)
-	}
+	env := providerPaths()
+	env["ATELIER_SESSION"], env["ATELIER_SLUG"], env["ATELIER_AGENT"] = slug, slug, string(k)
 	if g := GitConfigGlobal(); g != "" {
 		env["GIT_CONFIG_GLOBAL"] = g
 	}
 	return env
+}
+
+// Every handoff reads the outgoing provider's history before starting the
+// destination. Empty CLAUDE_CONFIG_DIR preserves its legacy split layout and
+// clears any stale override inherited from the tmux server.
+func providerPaths() map[string]string {
+	return map[string]string{
+		"CLAUDE_CONFIG_DIR": os.Getenv("CLAUDE_CONFIG_DIR"),
+		"CODEX_HOME":        codexHome(),
+		"GROK_HOME":         grokHome(),
+		"CURSOR_CONFIG_DIR": cursorDir(false),
+		"CURSOR_DATA_DIR":   cursorDir(true),
+	}
 }
 
 // GenerateTitle asks agent k for a short human title for intent (used to name

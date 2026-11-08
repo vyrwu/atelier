@@ -114,3 +114,24 @@ func TestCursorHandoffBoundary(t *testing.T) {
 		t.Fatalf("initial export lost history: %q %v", all, err)
 	}
 }
+
+func TestGrokExportKeepsUserMessagesAfterHandoff(t *testing.T) {
+	w := &exportWriter{agent: Grok.Label()}
+	input := strings.Join([]string{
+		`{"timestamp":200,"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"[atelier handoff] Read the export."}}}}`,
+		`{"timestamp":201,"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Also fix the race."}}}}`,
+		`{"timestamp":202,"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Keep the public API."}}}}`,
+		`{"timestamp":203,"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I will check both."}}}}`,
+	}, "\n")
+	if err := exportGrok(strings.NewReader(input), time.Unix(150, 0), w); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Also fix the race.\n\nKeep the public API.", "I will check both."} {
+		if !strings.Contains(w.String(), want) {
+			t.Fatalf("lost user steering %q: %s", want, w.String())
+		}
+	}
+	if strings.Contains(w.String(), HandoffMark) {
+		t.Fatal("export included its own handoff note")
+	}
+}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -289,6 +290,9 @@ func installHooks(path string, k Kind, table map[string]atelierHook, mode os.Fil
 	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return err
+		}
+		if settings == nil {
+			return fmt.Errorf("%s: expected a JSON object", path)
 		}
 	}
 

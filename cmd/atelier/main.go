@@ -162,27 +162,26 @@ func insideOwnServer() bool {
 // status is not refreshed here: the agent only registers PRs (via the MCP
 // tools); their status comes from the poll status job.
 func hook(status string) error {
+	session := os.Getenv("ATELIER_SESSION")
+	// Read the prior status before interpreting native events or recording,
+	// so a delayed idle reminder cannot clear a failure's attention badge.
+	prior := ""
+	if session != "" {
+		prior = string(agent.Status(session, true))
+	}
 	if status == "cursor" || status == "grok" {
 		k := agent.Kind(status)
-		if os.Getenv("ATELIER_SESSION") == "" || os.Getenv("ATELIER_AGENT") != status {
+		if session == "" || os.Getenv("ATELIER_AGENT") != status {
 			return nil
 		}
 		data, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20))
 		if err != nil {
 			return err
 		}
-		status = agent.CLIHookStatus(k, data)
+		status = agent.CLIHookStatus(k, data, prior)
 		if status == "" {
 			return nil
 		}
-	}
-	session := os.Getenv("ATELIER_SESSION")
-	// Read the prior status before recording, so we redraw only on a transition
-	// (a busy agent fires PreToolUse/PostToolUse constantly — no need to flicker
-	// the bar when working→working).
-	prior := ""
-	if session != "" {
-		prior = string(agent.Status(session, true))
 	}
 	if err := agent.HandleHook(status); err != nil {
 		return err

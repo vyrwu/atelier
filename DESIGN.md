@@ -288,6 +288,8 @@ MCP configuration; launch trusts the workspace. Cursor hooks return their
 required JSON permission reply. Subagent events never settle the main session.
 Grok honours `GROK_HOME`; Cursor separates `CURSOR_CONFIG_DIR` (auth/config)
 from `CURSOR_DATA_DIR` (transcripts). Their ordinary tool permissions remain in force.
+Every agent launch carries all providers' config and history paths and pins them
+in the tmux session, so later popups and handoffs use the same accounts and history.
 
 **Handoffs never depend on hooks.** Which conversation an agent had in a
 workspace is read off its own transcripts on disk (NFR-R2) — the newest
