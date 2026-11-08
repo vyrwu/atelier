@@ -57,7 +57,7 @@ before provisioning. Run setup from a reviewed checkout with no release running.
    secret: use the original PEM or rotate the App key. Do not put this key in
    another environment, repository secret, or the tap job.
 3. Install a **separate App** with Contents read/write on `vyrwu/homebrew-tap`
-   only. Put its ID in `HOMEBREW_TAP_APP_ID` and PEM in
+   only. Put its Client ID in `HOMEBREW_TAP_CLIENT_ID` and PEM in
    `HOMEBREW_TAP_APP_PRIVATE_KEY`, both in the **tap** environment. Remove the old
    `HOMEBREW_TAP_GITHUB_TOKEN` PAT after confirming the new installation. The tap
    App must have no access to Atelier and no release-tag bypass.
@@ -75,7 +75,7 @@ before provisioning. Run setup from a reviewed checkout with no release running.
 | --- | --- | --- |
 | `release-automation` | branch `main` only | `RELEASE_APP_PRIVATE_KEY` |
 | `release` | tag `v*` only | `ATELIER_SIGNING_GPG_KEY`, `ATELIER_SIGNING_GPG_PASSPHRASE`, `ATELIER_SIGNING_APK_KEY` |
-| `tap` | tag `v*` only | separate `HOMEBREW_TAP_APP_PRIVATE_KEY` and `HOMEBREW_TAP_APP_ID` variable |
+| `tap` | tag `v*` only | separate `HOMEBREW_TAP_APP_PRIVATE_KEY` and `HOMEBREW_TAP_CLIENT_ID` variable |
 
 All environments disallow admin bypass. The provisioning guard checks live
 settings and inherited-secret assumptions for this personal repository. Re-audit
