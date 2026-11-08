@@ -68,6 +68,10 @@ func run(cmd string, args []string) error {
 		return usage(args)
 	case "poll": // atelier poll <session> — tmux's PR status job; prints nothing
 		return poll(args)
+	case "read":
+		return readCmd(args)
+	case "send":
+		return sendCmd(args)
 	case "spaces":
 		return spacesCmd(args)
 	case "ls": // atelier ls [--trash] [--older-than AGE] — the spaces, stalest first

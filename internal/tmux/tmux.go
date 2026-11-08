@@ -402,3 +402,23 @@ func RestartHome(cwd, cmd string) error {
 	_, err := Run("respawn-pane", "-k", "-c", cwd, "-t", "="+HomeSession+":", wrap(nil, cmd))
 	return err
 }
+
+// CapturePane joins wrapped lines and includes the requested scrollback.
+func CapturePane(target string, scrollback int) (string, error) {
+	out, err := Run("capture-pane", "-p", "-J", "-t", target, "-S", fmt.Sprintf("-%d", scrollback))
+	return string(out), err
+}
+
+func sendLiteralArgs(target, text string) []string {
+	return []string{"send-keys", "-t", target, "-l", "--", text}
+}
+
+func SendLiteral(target, text string) error {
+	_, err := Run(sendLiteralArgs(target, text)...)
+	return err
+}
+
+func SendKeys(target string, keys ...string) error {
+	_, err := Run(append([]string{"send-keys", "-t", target, "--"}, keys...)...)
+	return err
+}
