@@ -93,9 +93,9 @@ func callMaitreTool(ctx context.Context, p callEnvelope) map[string]interface{} 
 	case "restore_space":
 		err = operator.Restore(a.Space)
 	case "delete_space":
-		err = operator.Delete(a.Space, func(prompt string) error { return operator.ConfirmDestroy(ctx, prompt) })
+		err = operator.Delete(ctx, a.Space, func(prompt string) error { return operator.ConfirmDestroy(ctx, prompt) })
 	case "purge_spaces":
-		result, err = operator.Purge(a.OlderThan, a.All)
+		result, err = operator.Purge(ctx, a.OlderThan, a.All)
 	case "swap_agent":
 		result, err = operator.Swap(a.Space, a.To)
 	case "read_screen":

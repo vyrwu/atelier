@@ -1,6 +1,7 @@
 package gc
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -24,7 +25,7 @@ func TestPurgeKeepsWorktreeWithoutGitMarker(t *testing.T) {
 	if got := Unsaved(core.Workspace{Slug: "broken"}); len(got) == 0 {
 		t.Fatal("missing git marker was treated as clean")
 	}
-	if why, err := (Policy{}).Purge("broken", time.Now()); err != nil || !strings.Contains(why, "unsaved") {
+	if why, err := (Policy{}).Purge(context.Background(), "broken", time.Now()); err != nil || !strings.Contains(why, "unsaved") {
 		t.Fatalf("purge did not keep unverifiable work: %q, %v", why, err)
 	}
 	if _, err := os.Stat(file); err != nil {

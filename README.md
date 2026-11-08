@@ -191,6 +191,9 @@ this question and purge ignores `--force`, keeping running or unsaved spaces.
 Grok's own tool approval prompts still apply.
 CLI `retire` and `delete` refuse to stop the space containing their own process;
 run them from Home or another space.
+Canceling an MCP delete or purge invalidates its pending confirmation. Purge
+stops before the next deletion; cleanup already started for a space finishes
+before the command exits.
 
 ## Cleaning up
 

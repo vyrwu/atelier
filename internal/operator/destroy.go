@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -21,7 +22,10 @@ func deletePrompt(w core.Workspace, unsaved []string) string {
 	return prompt
 }
 
-func Delete(slug string, confirm func(string) error) error {
+func Delete(ctx context.Context, slug string, confirm func(string) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	w, err := find(slug, wantAny)
 	if err != nil {
 		return err
@@ -32,7 +36,7 @@ func Delete(slug string, confirm func(string) error) error {
 	if err := confirm(deletePrompt(w, gc.Unsaved(w))); err != nil {
 		return err
 	}
-	if err := gc.Delete(w); err != nil {
+	if err := gc.Delete(ctx, w); err != nil {
 		return err
 	}
 	agent.RefreshAttention()

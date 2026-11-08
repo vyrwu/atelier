@@ -1,8 +1,11 @@
 package operator
 
 import (
+	"context"
 	"errors"
 	"github.com/vyrwu/atelier/internal/core"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -44,13 +47,40 @@ func TestDeleteRefusesWithoutYes(t *testing.T) {
 	if err := core.Update(func(s *core.State) { s.Workspaces = []core.Workspace{{Slug: "keep", Session: "keep"}} }); err != nil {
 		t.Fatal(err)
 	}
-	if err := Delete("keep", func(string) error { return ErrDeclined }); !errors.Is(err, ErrDeclined) {
+	if err := Delete(context.Background(), "keep", func(string) error { return ErrDeclined }); !errors.Is(err, ErrDeclined) {
 		t.Fatal(err)
 	}
 	if core.Load().Find("keep") == nil {
 		t.Fatal("deleted refused space")
 	}
-	if err := Delete(core.MaitreSlug, func(string) error { return nil }); err == nil {
+	if err := Delete(context.Background(), core.MaitreSlug, func(string) error { return nil }); err == nil {
 		t.Fatal("Maître accepted")
+	}
+}
+
+func TestDeleteCancellationWinsOverLateConfirmation(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("ATELIER_ROOT", t.TempDir())
+	w := core.Workspace{Slug: "keep", Session: "keep"}
+	if err := os.MkdirAll(w.Root(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(w.Root(), "work.txt")
+	if err := os.WriteFile(file, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := core.Update(func(s *core.State) { s.Workspaces = []core.Workspace{w} }); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	err := Delete(ctx, w.Slug, func(string) error { cancel(); return nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if core.Load().Find(w.Slug) == nil {
+		t.Fatal("cancelled deletion removed state")
+	}
+	if data, err := os.ReadFile(file); err != nil || string(data) != "keep" {
+		t.Fatal("cancelled deletion removed work", err)
 	}
 }

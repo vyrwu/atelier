@@ -47,6 +47,9 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   Restart shares the handoff lock and respects its pending reservation. Opening
   Maître acknowledges its attention; CLI retire/delete refuse their enclosing
   space so session shutdown cannot interrupt cleanup or state persistence.
+  MCP purge cancellation interrupts its CLI child cooperatively, clearing the
+  confirmation and checking cancellation under the state lock before deletion.
+  Cleanup already started for one space finishes with its state write.
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
   `claude` window runs the agent — the selected agent, `Workspace.Agent` (""

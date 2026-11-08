@@ -35,6 +35,9 @@ func ConfirmMenu(ctx context.Context, client, prompt string, timeout time.Durati
 	// #nosec G204 G702 -- Fixed tmux binary, literal prompt argument and generated callback commands; no user text enters a command.
 	out, err := exec.CommandContext(ctx, "tmux", "-L", socket(), "display-menu", "-c", client, "-T", EscapeText(prompt), "Yes", "y", choose("yes"), "No", "n", choose("no")).CombinedOutput()
 	if ctx.Err() != nil {
+		// Killing the command client leaves the human client's overlay up.
+		// Close it as well, for cancellation and the confirmation timeout.
+		_, _ = Run("display-popup", "-C", "-c", client)
 		return false, nil
 	}
 	if err != nil {

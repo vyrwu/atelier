@@ -2,14 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -103,6 +106,12 @@ func state(w core.Workspace) string {
 // purge deletes spaces untouched for a while, behind a confirm:
 // atelier purge [--older-than AGE] [--all] [--force] [--dry-run] [--yes].
 func purge(args []string) error {
+	ctx := context.Background()
+	if operator.FromMaitre() {
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
 	var age ageFlag
 	var p gc.Policy
 	var dry, yes bool
@@ -130,6 +139,9 @@ func purge(args []string) error {
 	p.Keep = currentSpaces(st)
 	plan, err := p.Plan(st, time.Now())
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	var doomed, kept []gc.Candidate
@@ -178,13 +190,16 @@ func purge(args []string) error {
 		slugs = append(slugs, "…")
 	}
 	prompt := fmt.Sprintf("Purge %d spaces: %s?", len(doomed), strings.Join(slugs, ", "))
-	if err := destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, confirmMaitreDestroy)(prompt); err != nil {
+	maitreConfirm := func(prompt string) error { return operator.ConfirmDestroy(ctx, prompt) }
+	if err := destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, maitreConfirm)(prompt); err != nil {
 		return err
 	}
 	failed := 0
 	for _, c := range doomed {
-		skipped, err := p.Purge(c.Slug, time.Now())
+		skipped, err := p.Purge(ctx, c.Slug, time.Now())
 		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
 		case err != nil:
 			failed++
 			fmt.Printf("%s: %v\n", c.Slug, err)

@@ -3,6 +3,7 @@ package operator
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -82,13 +83,17 @@ func Create(intent, agentName string) (string, error) {
 	return slug, nil
 }
 
-func run(args ...string) (string, error) {
+func run(ctx context.Context, args ...string) (string, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
 	// #nosec G204 G702 -- Runs this executable with validated CLI arguments, without a shell.
-	out, err := exec.Command(self, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, self, args...)
+	// Purge handles interruption cooperatively: dismiss its confirmation and
+	// finish any deletion already started, including its state write.
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("atelier %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
 	}
@@ -102,10 +107,10 @@ func Swap(slug, to string) (string, error) {
 	if _, err := find(slug, wantActive); err != nil {
 		return "", err
 	}
-	return run("swap", slug, "--to", to)
+	return run(context.Background(), "swap", slug, "--to", to)
 }
 
-func Purge(olderThan string, all bool) (string, error) {
+func Purge(ctx context.Context, olderThan string, all bool) (string, error) {
 	if _, err := gc.ParseAge(olderThan); err != nil {
 		return "", err
 	}
@@ -113,5 +118,5 @@ func Purge(olderThan string, all bool) (string, error) {
 	if all {
 		args = append(args, "--all")
 	}
-	return run(args...)
+	return run(ctx, args...)
 }

@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"sort"
@@ -661,7 +662,7 @@ func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
 // place.
 func (m *Model) deleteWorkspace(w core.Workspace) {
 	m.moveOuterOff(w.Session)
-	if err := gc.Delete(w); err != nil {
+	if err := gc.Delete(context.Background(), w); err != nil {
 		m.err = "delete " + w.Slug + ": " + err.Error()
 	}
 	agent.RefreshAttention() // a deleted session may have been blocked

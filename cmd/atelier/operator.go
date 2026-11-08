@@ -128,7 +128,7 @@ func deleteCmd(args []string) error {
 	if err := refuseEnclosingSpace("delete", args[0]); err != nil {
 		return err
 	}
-	return operator.Delete(args[0], destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, confirmMaitreDestroy))
+	return operator.Delete(context.Background(), args[0], destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, confirmMaitreDestroy))
 }
 
 func lifecycleCmd(verb string, args []string) error {
