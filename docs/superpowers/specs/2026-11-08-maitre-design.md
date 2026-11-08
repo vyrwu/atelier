@@ -129,12 +129,15 @@ approvals, because the guard lives in atelier, not in the agent.
 
 ### Popup and keys
 
-- `M-m` (global): records the opening client in `@atelier_maitre_outer`, then `display-popup -E -T " Maître " -w 80% -h 80% "atelier maitre"`.
+- `M-m` (global): records the opening client in `@atelier_maitre_outer`, then
+  opens a 70% popup with the same rounded grey frame as the Bubble Tea overlays.
   `atelier maitre` ensures the record and session, then execs `tmux attach -t
   maitre` with `TMUX` unset (a nested client of the same server). Maître's
-  session has its status line off.
-- `M-m` inside Maître (the client's session is `maitre`): `detach-client`,
+  session reserves a bottom separator and shortcut legend outside the native
+  agent pane, using the shared overlay palette from `internal/ui`.
+- `Esc` or `M-m` inside Maître (the client's session is `maitre`): `detach-client`,
   which closes the popup. Maître keeps running.
+- `M-Esc` sends Escape to the native agent, for its own prompts and menus.
 - `M-r` inside Maître: `atelier maitre --restart` respawns its agent window with
   a fresh conversation, the same path as a swap to the same agent. Elsewhere
   `M-r` passes through (readline's revert-line).
@@ -142,10 +145,11 @@ approvals, because the guard lives in atelier, not in the agent.
 - The overlay keys (`M-n`, `M-s`, `M-t`, `M-p`, `M-w`, `M-h`) do nothing inside
   Maître. They'd act on the popup's nested client, not yours; `focus` is how
   Maître moves you. Mechanism: Maître's session sets tmux's `key-table` to
-  `maitre`, which binds only `M-m`, `M-r`, and `M-x`; every other key goes to
+  `maitre`, which binds `Esc`, `M-Esc`, `M-m`, `M-r`, and `M-x`; every other key goes to
   Maître's agent. `M-m` records the opening client in `@atelier_maitre_outer`
   (not `@atelier_outer`, which `M-x` inside the popup overwrites).
-- Splash keymap: `M-m Maître` under "Anywhere", with `M-r` restart noted.
+- Splash keymap: `M-m Maître` under "Anywhere", with close, restart, swap and
+  agent Escape shortcuts in the Maître group.
 
 ## Documentation changes
 

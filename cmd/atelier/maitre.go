@@ -9,6 +9,7 @@ import (
 	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/tmux"
+	"github.com/vyrwu/atelier/internal/ui"
 )
 
 func maitreAgent(cfg core.Config) string {
@@ -72,7 +73,7 @@ func prepareMaitre(restart bool) error {
 	if err != nil {
 		return err
 	}
-	if err := tmux.SetSessionOption(core.MaitreSlug, "status", "off"); err != nil {
+	if err := ui.ConfigureMaitreView(); err != nil {
 		return err
 	}
 	if err := tmux.SetSessionOption(core.MaitreSlug, "key-table", "maitre"); err != nil {

@@ -392,8 +392,10 @@ bind -n M-t set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --new"
 # Maître is one background session, viewed through a nested popup client.
 # Keep its opener separate from @atelier_outer, which its swap popup replaces.
-bind -n M-m set-option -gF @atelier_maitre_outer "#{client_name}" \; display-popup -w 80%% -h 80%% -T " Maître " -E "%[1]s maitre"
+bind -n M-m set-option -gF @atelier_maitre_outer "#{client_name}" \; display-popup -b rounded -S "%[6]s" -s "bg=default" -w 70%% -h 70%% -T " Maître " -E "%[1]s maitre"
 bind -T maitre M-m detach-client
+bind -T maitre Escape detach-client
+bind -T maitre M-Escape send-keys Escape
 bind -T maitre M-r run-shell -b "%[1]s maitre --restart"
 bind -T maitre M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 46 -h 11 -E "%[1]s open --swap"
 # Intra-workspace window nav (run-shell DOES expand #{session_name}). M-a brings
@@ -415,7 +417,7 @@ bind -n M-c run-shell "%[1]s win '#{session_name}' shell"
 bind -n M-h set-option -gF @atelier_outer "#{client_name}" \; run-shell "%[1]s home --switch"
 # M-q detaches atelier — back to the shell that spawned it.
 bind -n M-q detach-client
-`, self(), rgbSetting()+syncSetting(), usageJob(), title, pollJob())
+`, self(), rgbSetting()+syncSetting(), usageJob(), title, pollJob(), ui.MaitreBorderStyle())
 }
 
 func execTmux(args ...string) error {

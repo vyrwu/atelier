@@ -219,8 +219,9 @@ alone, regenerating them from the binary so an upgrade can't leave dead keys. It
 never generates, rewrites, or takes authority over the user's tmux
 configuration.
 
-**NFR-S5 — One renderer.** All user interface is Bubble Tea. No second UI
-technology, no external picker binary, no shelling out to draw.
+**NFR-S5 — One renderer.** Application screens use Bubble Tea. Maître's native
+agent viewport and human confirmation menu use the existing tmux host, with
+shared overlay styling. No additional UI technology or external picker binary.
 
 ### Operability
 
@@ -249,7 +250,9 @@ architectural risk.
 
 **Agent processes live in windows.** Maître's popup attaches a nested client to
 its persistent session; closing that viewport detaches the client while the
-agent keeps running. Other overlays are short-lived Bubble Tea programs.
+agent keeps running. The viewport shares the other overlays' 70% size, rounded
+frame and quiet palette. Its shortcut footer is outside the agent pane, so the
+agent cannot erase it. Other overlays are short-lived Bubble Tea programs.
 
 **Programs in windows aren't atelier's UI.** The agent, a shell, a diff pager,
 and gh-enhance run in windows atelier opens; atelier draws none of them. That is
@@ -337,8 +340,10 @@ predictable failure mode. They are enforced in review.
   deleting the first.
 - **Extract an interface only when a second real implementation exists and is in
   production.** Never for a mock, never for a hypothetical.
-- **All UI is Bubble Tea**, in `internal/ui`. No second UI technology, no
-  shelling out to draw.
+- **Application screens use Bubble Tea**, in `internal/ui`. The persistent
+  native Maître viewport and its confirmation menu use tmux; its frame and
+  shortcut footer share the overlay palette from `internal/ui`. No additional
+  renderer or terminal emulator.
 - **No process spawn per screen.** The overlay's screens are states of one
   process (NFR-P4).
 - **State lives in one JSON file, never in tmux**, and it is a cache and an
@@ -437,10 +442,11 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
     and approval prompts off: a worktree's git data lives in its source
     repository, outside the workspace, so the sandbox would stop every commit.
 
-11. **Maître is a single meta-session.** The popup is only a viewport. `M-m`
-    hides it, `M-r` starts fresh, and `M-x` reuses the existing handoff. A
+11. **Maître is a single meta-session.** The popup is only a viewport. `Esc` or
+    `M-m` hides it, `M-r` starts fresh, and `M-x` reuses the existing handoff. A
     session-specific key table leaves other shortcuts to the agent. The outer
-    client is kept separately from the swap popup's client.
+    client is kept separately from the swap popup's client. `M-Esc` sends Escape
+    to the agent, preserving access to its own prompts and menus.
 12. **Agents communicate through their screens.** Operator commands capture
     the agent window and send literal text or a bounded set of keys. No model
     backend or harness-specific message transport is built into atelier.
@@ -448,5 +454,5 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
 13. **Atelier owns destructive confirmation.** Maître's delete and purge calls,
     including CLI calls with bypass flags, need a human viewing its popup.
     A native tmux menu belongs to that human client, times out after 60 seconds,
-    and treats dismissal as refusal. This narrow menu is the exception to the
-    Bubble Tea renderer rule; it must run independently of the agent's approvals.
+    and treats dismissal as refusal. Like the native viewport, this menu uses
+    tmux; it must run independently of the agent's approvals.

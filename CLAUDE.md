@@ -19,7 +19,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   their config (trust + MCP registration), the per-workspace guide
 - `internal/mcp` — stdio MCP server: three space tools, or twelve operator tools with `--maitre`
 - `internal/operator` — space lifecycle, listing, screen I/O, waiting, focus and destructive confirmation
-- `internal/ui` — the Bubble Tea overlay + the home splash (the only UI)
+- `internal/ui` — Bubble Tea overlays, the home splash, and shared native Maître styling
 - `internal/gc` — deleting spaces (one, or all older than an age) and sweeping
   up what deleted spaces leave behind
 - `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
@@ -32,7 +32,10 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - Maître is the reserved `maitre` space: one meta-session per instance, hidden
   from ordinary listings and cleanup, still counted in attention. `M-m`
   attaches a nested popup client; hiding it leaves the agent running. Its
-  `maitre` key table binds only `M-m` close, `M-r` restart and `M-x` swap.
+  `maitre` key table binds `Esc`/`M-m` close, `M-r` restart, `M-x` swap and
+  `M-Esc` to send Escape to the agent. The viewport shares the 70% size and
+  rounded grey frame of the overlays; `internal/ui/maitre.go` uses the shared
+  palette for its native border and persistent bottom shortcut legend.
   `@atelier_maitre_outer` retains the real outer client when the swap overlay
   updates `@atelier_outer`. Operator tools refuse to target Maître itself;
   its own swap/restart controls deliberately use the ordinary launch path.
