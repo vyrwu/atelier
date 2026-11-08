@@ -1,6 +1,6 @@
 # CLAUDE.md — atelier
 
-A workshop for parallel coding agents (Claude Code and Codex today; Grok via
+A workshop for parallel coding agents (Claude Code, Codex, and Antigravity CLI today; Grok via
 Cursor CLI next): a terminal-based agentic development environment, where
 reviewing a PR should be as easy as making the change by hand.
 The design, its principles (`NFR-*`, cited in code), and the rules (§5) are in
@@ -15,7 +15,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/tmux` — tmux CLI wrapper (dedicated socket)
 - `internal/git` — worktree derivation + git queries
 - `internal/forge` — `gh` PR queries + open-in-browser
-- `internal/agent` — the two agents (Claude Code, Codex): launch/resume, finding
+- `internal/agent` — the agents (Claude Code, Codex, Antigravity): launch/resume, finding
   and exporting their conversations for a handoff, per-session status, hooks,
   their config (trust + MCP registration), the per-workspace guide
 - `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
@@ -29,7 +29,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 ## Model & bindings
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
-  `claude` window runs the agent — Claude Code or Codex, `Workspace.Agent` (""
+  `claude` window runs the agent — Claude Code, Codex, or Antigravity, `Workspace.Agent` (""
   = claude); the window name predates Codex (named windows: `claude`, `shell`,
   `<repo>-<branch>` per worktree — nav is keyed on names, so
   `automatic-rename`/`allow-rename` are off).
@@ -37,8 +37,8 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   with `atelier handoff`, which exports the outgoing agent's conversation since
   `SwappedAt` to `.atelier/handoff/`, records the swap, then execs into the
   incoming agent at once — resuming its latest conversation in the space
-  (derived from its transcripts, never recorded), or starting one; a swap to
-  the same agent (`Tab` in the confirm, `--to`) always starts one.
+  (derived from native transcripts; Antigravity uses the pointers described below), or starting one; a swap to
+  the same agent (`Tab` cycles all choices in the confirm, `--to`) always starts one.
   A launch reservation covers the gap before the handoff owns the per-space
   lock; abandoned launches expire after 30 seconds. Exports are owner-only.
   Codex runs with `--dangerously-bypass-approvals-and-sandbox` and always a
@@ -63,6 +63,20 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   `~` means last observed or stale; an
   expired window is unknown. Percentage spent uses green/amber/red based
   on spent quota; the icon retains its brand colour.
+- Antigravity (`agy`, CLI 1.5.3): workspace `.agents/mcp_config.json` is merged
+  without replacing other servers. `.atelier/antigravity-settings.json` is a
+  `--settings` overlay for folder trust and a statusLine collector; global
+  settings, model, effort, permissions, and an existing status command survive.
+  The collector is specific to that launch, guarded by ATELIER_SESSION and
+  ATELIER_AGENT, and maps native agent_state to working/idle/blocked. It captures
+  quota.remaining_fraction and reset_time as last-observed usage, never token
+  estimates. There is no background Google balance fetch. The TUI payload also
+  provides conversation_id and transcript_path; `.atelier/antigravity/<id>.json`
+  retains that pointer because native CLI history omits initial prompts and
+  its summary database can omit workspace paths. Restore chooses the newest
+  existing native transcript (preferring transcript_full.jsonl), and handoff
+  exports explicit USER_INPUT / PLANNER_RESPONSE text and tool calls. No
+  separate title generation: agy lacks a documented ephemeral, tool-free mode.
 - Lifecycle: create → **active**; `M-d` delete → Trash (kill processes, keep on
   disk); Trash `↵` restore (resume); Trash `M-d` delete permanently (confirm).
   `Retired bool` + `RetiredAt` on the workspace (zero value = active, no migration).

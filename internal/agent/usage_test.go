@@ -122,7 +122,7 @@ func TestUsageStatusColorsAndExpiry(t *testing.T) {
 	} {
 		w := &UsageWindow{Used: &tc.spent, Minutes: 300, Reset: now.Add(time.Hour).Unix()}
 		u := Usage{Observed: now, Buckets: []UsageBucket{{Primary: w}}}
-		got := UsageStatus(u, u, now)
+		got := UsageStatus(map[Kind]Usage{Claude: u, Codex: u}, now)
 		if !strings.Contains(got, tc.want) || !strings.Contains(got, "#[fg=colour209]\uec82") || !strings.Contains(got, "#[fg=colour39]\uec81") {
 			t.Errorf("spent %v: %q", tc.spent, got)
 		}
@@ -132,7 +132,7 @@ func TestUsageStatusColorsAndExpiry(t *testing.T) {
 			t.Errorf("expired quota = %q", expired)
 		}
 	}
-	unknown := UsageStatus(Usage{}, Usage{}, now)
+	unknown := UsageStatus(nil, now)
 	if strings.Contains(unknown, "%") || !strings.Contains(unknown, " —") {
 		t.Errorf("unknown usage = %q", unknown)
 	}

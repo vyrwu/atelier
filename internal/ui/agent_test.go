@@ -26,8 +26,12 @@ func TestNewSpaceTabTogglesAgent(t *testing.T) {
 		t.Errorf("prompt = %q, want it to ask Codex", v)
 	}
 	next, _ = next.(Model).updateNew(tea.KeyMsg{Type: tea.KeyTab})
-	if got := next.(Model).newAgent; got != agent.Claude {
-		t.Errorf("after Tab twice agent = %q, want claude", got)
+	if got := next.(Model).newAgent; got != agent.Antigravity {
+		t.Errorf("after Tab twice agent = %q, want antigravity", got)
+	}
+	next, _ = next.(Model).updateNew(tea.KeyMsg{Type: tea.KeyTab})
+	if next.(Model).newAgent != agent.Claude {
+		t.Error("third Tab must wrap to Claude")
 	}
 }
 
@@ -35,7 +39,7 @@ func TestNewSpaceTabTogglesAgent(t *testing.T) {
 // a choice runs Claude.
 func TestRowShowsTheAgent(t *testing.T) {
 	m := Model{w: 120}
-	for a, glyph := range map[string]string{"": glyphClaude, "claude": glyphClaude, "codex": glyphCodex} {
+	for a, glyph := range map[string]string{"": glyphClaude, "claude": glyphClaude, "codex": glyphCodex, "antigravity": glyphAntigravity} {
 		ws := &core.Workspace{Slug: "brave-otter", Agent: a, Created: time.Now()}
 		if line := m.renderRow(row{ws: ws}, false); !strings.Contains(line, glyph) {
 			t.Errorf("agent %q: row %q lacks %s", a, line, glyph)
@@ -73,6 +77,10 @@ func TestSwapDialogTabTogglesTheTarget(t *testing.T) {
 		t.Fatalf("swap from Claude defaults to %q, want codex", m.swapTo)
 	}
 	next, _ := m.updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
+	if next.(Model).swapTo != agent.Antigravity {
+		t.Error("Tab must offer Antigravity")
+	}
+	next, _ = next.(Model).updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
 	got := next.(Model)
 	if got.swapTo != agent.Claude {
 		t.Errorf("after Tab swapTo = %q, want claude", got.swapTo)

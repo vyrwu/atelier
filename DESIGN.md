@@ -45,7 +45,7 @@ atelier is **not**:
   gh-enhance) rather than drawing its own
 - a general-purpose terminal multiplexer
 
-It supports **Claude Code and Codex**, with Grok via Cursor CLI next, one agent
+It supports **Claude Code, Codex, and Antigravity CLI**, with Grok via Cursor CLI next, one agent
 live per workspace, and **one forge** (GitHub). A workspace can hand its work
 from one agent to another — when one runs out of quota, say — which is
 sequential, not orchestration. This is a design decision, not a limitation to be worked around.
@@ -62,7 +62,7 @@ Four entities. Everything in the system is one of these.
 |---|---|---|---|
 | **Workspace** | One task. A directory, a title, a tmux session, and an agent. Either **active** or **retired**. | Immutable slug (directory name) | Until deleted |
 | **Worktree** | A git worktree belonging to a workspace, living inside its directory. | `<repo>/<branch>` path under the workspace root | Until removed |
-| **Agent session** | The workspace's agent — Claude Code or Codex — in its session's `claude` window (the name predates Codex). | tmux session + window name | Until the process exits |
+| **Agent session** | The workspace's agent — Claude Code, Codex, or Antigravity CLI — in its session's `claude` window (the name predates Codex). | tmux session + window name | Until the process exits |
 | **Pull request** | A GitHub PR whose head branch matches one of the workspace's worktrees, or that the agent registered. | `owner/repo#number` | Owned by GitHub |
 
 One workspace has one agent session, N worktrees, and N pull requests. A
@@ -219,7 +219,7 @@ or complete an action, it says why and what to do. Beyond the splash's
 dependency check, there is no diagnostic subsystem.
 
 **NFR-O2 — Platforms:** macOS and Linux. Requires tmux 3.3+, git, the GitHub
-CLI, and Claude Code or Codex — whichever new workspaces start with — on `PATH`.
+CLI, and Claude Code, Codex, or Antigravity CLI — whichever new workspaces start with — on `PATH`.
 
 ---
 
@@ -232,7 +232,7 @@ architectural risk.
 
 | Surface | Hosts | Lifetime | Why |
 |---|---|---|---|
-| **Status line** | Attention badge, workspace title and agent status, create spinner, both agents' usage spent | Visible everywhere | When you need to know which session wants you or which harness has quota, you are looking at an agent pane, not a picker. The signal must be ambient, and a background create has to report back somewhere. |
+| **Status line** | Attention badge, workspace title and agent status, create spinner, agents' usage spent | Visible everywhere | When you need to know which session wants you or which harness has quota, you are looking at an agent pane, not a picker. The signal must be ambient, and a background create has to report back somewhere. |
 | **Home splash** | Keymap, version, dependency check | Persistent | Attaching lands on a real screen, not a bare shell, and `M-h` returns here from anywhere. |
 | **Overlay (popup)** | spaces · trash · new · pull requests · worktrees · confirm | Seconds | Peek and jump: an overlay is one transition, a window would be two. It runs fresh each open and captures the invoking client at once, so it never acts on a stale one. |
 | **Window** | The agent, shells, a PR's diff and checks | Hours | Survives detach, keeps scrollback and copy mode, and shows in tmux's own session list. |
@@ -274,7 +274,7 @@ Agent status is the one case where derivation genuinely fails: a running agent
 looks the same whether it is thinking or waiting for you. That state is semantic
 and must be pushed out by the agent's own lifecycle events.
 
-**Hooks live in each agent's global config** — Claude's settings, Codex's
+**Claude and Codex hooks live in global config** — Claude's settings, Codex's
 `hooks.json` — guarded so they do nothing without the workspace environment, or
 for an agent other than the one the workspace runs (Claude can start Codex on
 the side). That is more reliable than injecting settings at launch — it also
@@ -282,13 +282,18 @@ captures an agent started by hand inside a workspace — and atelier doesn't hav
 to own the launch command. Every write to Claude's config honours
 `$CLAUDE_CONFIG_DIR`, and every write to Codex's honours `$CODEX_HOME`, or it
 lands in a file the agent never reads. Codex runs a hook only once the user has
-trusted it, so its status starts after a one-time review.
+trusted it, so its status starts after a one-time review. Antigravity uses a
+session-only statusLine collector instead: its native TUI reports status and
+quota together, without installing global hooks or affecting nested agents.
 
-**Handoffs never depend on hooks.** Which conversation an agent had in a
-workspace is read off its own transcripts on disk (NFR-R2) — the newest
+**Claude/Codex handoffs never depend on hooks.** Their conversations in a
+workspace are read off native transcripts on disk (NFR-R2) — the newest
 interactive one in the workspace's directory, no older than the workspace — so
 a swap works for workspaces older than the feature and before any hook is
-trusted.
+trusted. Antigravity's main TUI reports a native transcript path through its
+status line; the space retains that pointer because the CLI's transcript and
+summary files do not reliably identify the workspace. Handing off therefore
+requires at least one status report from an Atelier-launched agy session.
 
 ### 4.3 Interfaces
 
@@ -311,9 +316,9 @@ line calls nothing; it renders options the hooks push. Users run only
 Tripwires, not sentiments. Every one exists because its absence has a
 predictable failure mode. They are enforced in review.
 
-- **Few agents, one forge, one renderer** — Claude Code and Codex (Grok via
+- **Few agents, one forge, one renderer** — Claude Code, Codex, and Antigravity CLI (Grok via
   Cursor CLI next), GitHub, Bubble Tea. An agent joins only with launch, resume,
-  handoff, hooks, and usage all working; a second forge or renderer means
+  handoff, native status events, and usage all working; a second forge or renderer means
   deleting the first.
 - **Extract an interface only when a second real implementation exists and is in
   production.** Never for a mock, never for a hypothetical.
@@ -333,7 +338,12 @@ predictable failure mode. They are enforced in review.
   CLI (about 4s of CPU) and whose sessions report their own status line. Neither fetch blocks rendering or agent
   startup. Current Claude Code has a non-interactive native `/usage` command;
   session status-line payloads are a fallback for versions without it. Cached
-  and expired observations are marked explicitly.
+  and expired observations are marked explicitly. Antigravity's session-only
+  statusLine collector supplies native agent state, quota snapshots, and a
+  conversation/transcript pointer. The pointer is kept under the space's
+  `.atelier/antigravity/`: native history omits initial prompts, and its summary
+  database can omit workspace paths. Transcript contents remain native; no
+  second conversation store or token-based quota estimate is maintained.
 - **No plugin system, ever.**
 - **Delete dead code** rather than keeping it around.
 - **A feature ships only after it has been wanted three separate times.** Open

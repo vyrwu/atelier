@@ -23,7 +23,7 @@ type Config struct {
 	// to the raw prompt). Codex uses its own default model.
 	NamingModel string `toml:"naming_model"`
 	// Agent is the coding agent new spaces start with: "claude" (default) or
-	// "codex". M-n can pick the other one per space.
+	// "codex" or "antigravity". M-n cycles the choice per space.
 	Agent string `toml:"agent"`
 }
 

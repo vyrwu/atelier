@@ -8,7 +8,7 @@ import (
 // State and config written before there was a choice of agent say nothing, and
 // mean Claude; so does anything unrecognised.
 func TestOfDefaultsToClaude(t *testing.T) {
-	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude} {
+	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude, "antigravity": Antigravity} {
 		if got := Of(name); got != want {
 			t.Errorf("Of(%q) = %q, want %q", name, got, want)
 		}
@@ -21,10 +21,10 @@ func TestOfDefaultsToClaude(t *testing.T) {
 // The prompt is user-written prose that tmux runs through a shell: quotes,
 // backticks, and semicolons in it must stay data, for either agent.
 func TestLaunchCmdQuotesPrompt(t *testing.T) {
-	for _, k := range []Kind{Claude, Codex} {
+	for _, k := range Kinds() {
 		for _, p := range []string{"it's broken", "rm -rf /; echo pwned", "use `git log` and $HOME", `say "hi"`} {
 			cmd := k.LaunchCmd(p)
-			if !strings.HasPrefix(cmd, string(k)+" ") || !strings.HasSuffix(cmd, "'") {
+			if !strings.HasPrefix(cmd, k.Bin()+" ") || !strings.HasSuffix(cmd, "'") {
 				t.Errorf("%s.LaunchCmd(%q) = %q, want the prompt single-quoted last", k, p, cmd)
 			}
 			if !strings.Contains(cmd, shellQuote(p)) {
@@ -95,5 +95,41 @@ func TestWithoutSpace(t *testing.T) {
 	got := withoutSpace([]string{"PATH=/bin", "ATELIER_SESSION=s", "ATELIER_SLUG=s", "ATELIER_AGENT=claude", "ATELIER_ROOT=/r"})
 	if strings.Join(got, " ") != "PATH=/bin ATELIER_ROOT=/r" {
 		t.Errorf("withoutSpace = %v", got)
+	}
+}
+
+func TestAgentCycle(t *testing.T) {
+	k := Claude
+	for _, want := range []Kind{Codex, Antigravity, Claude} {
+		k = k.Next()
+		if k != want {
+			t.Fatalf("cycle = %s, want %s", k, want)
+		}
+	}
+	if Antigravity.Bin() != "agy" || Antigravity.Label() != "Antigravity" || Antigravity.Other() != Claude {
+		t.Fatal("incorrect provider identity")
+	}
+}
+
+func TestAntigravityCommands(t *testing.T) {
+	for _, prompt := range []string{"", "--help", "'$(touch /tmp/no)'", "!echo no", "/usage"} {
+		for _, id := range []string{"", "convo-'$()"} {
+			cmd := Antigravity.ResumeCmd(id, prompt)
+			if !strings.HasPrefix(cmd, "agy --settings ") || strings.Contains(cmd, "--model") || strings.Contains(cmd, "--effort") || strings.Contains(cmd, "skip-permissions") {
+				t.Fatalf("unexpected overrides: %s", cmd)
+			}
+			if id != "" && (!strings.Contains(cmd, "--conversation="+shellQuote(id)) || !strings.Contains(cmd, " || agy ")) {
+				t.Errorf("resume/fallback: %s", cmd)
+			}
+			if prompt != "" {
+				want := prompt
+				if strings.HasPrefix(prompt, "/") || strings.HasPrefix(prompt, "!") {
+					want = "Task: " + prompt
+				}
+				if !strings.Contains(cmd, "--prompt-interactive="+shellQuote(want)) {
+					t.Errorf("prompt: %s", cmd)
+				}
+			}
+		}
 	}
 }

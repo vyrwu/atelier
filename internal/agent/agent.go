@@ -1,5 +1,5 @@
-// Package agent launches a space's coding agent — Claude Code or Codex — hands
-// a space from one to the other, and tracks each session's runtime status.
+// Package agent launches a space's coding agent, hands work between providers,
+// and tracks each session's runtime status.
 //
 // Status is per-session runtime state — "is this agent working, blocked on the
 // user, idle, or gone?" — stored as a tiny file under CacheDir()/agents/<session>
@@ -60,6 +60,11 @@ func RunAgent(ws core.Workspace, k Kind, cmd string) error {
 
 // Launch while holding the state lock shared with purge and restoration.
 func runAgent(ws core.Workspace, k Kind, cmd string) error {
+	if k == Antigravity {
+		if err := prepareAntigravity(ws.Root(), ws.Slug); err != nil {
+			return err
+		}
+	}
 	env := Env(ws.Slug, k)
 	_ = InstallClaudeUsage(ws.Root())
 	var err error

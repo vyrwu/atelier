@@ -54,7 +54,7 @@ func run(cmd string, args []string) error {
 		return ui.RunHome()
 	case "create": // headless background workspace builder (fired detached by M-n)
 		return createWorkspace(args)
-	case "swap": // atelier swap <slug> [--to claude|codex] — hand a space to its other agent (M-x)
+	case "swap": // atelier swap <slug> [--to claude|codex|antigravity] — hand a space to its other agent (M-x)
 		return swapAgent(args)
 	case "handoff": // atelier handoff <slug> <agent> — the swap itself, run in the space's agent window
 		return handoff(arg(args, 0), arg(args, 1), arg(args, 2))
@@ -178,7 +178,7 @@ func hook(status string) error {
 	}
 	// A turn ending (or cut off by a usage limit) is when an agent's allowance
 	// moves. Refresh it detached, so the hook never holds up the agent.
-	if session != "" && status != string(core.StatusWorking) {
+	if session != "" && status != string(core.StatusWorking) && os.Getenv("ATELIER_AGENT") != "antigravity" {
 		detach("usage", "refresh", os.Getenv("ATELIER_AGENT"))
 	}
 	return nil

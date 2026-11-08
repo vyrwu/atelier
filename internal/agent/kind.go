@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,27 +10,42 @@ import (
 	"time"
 )
 
-// Kind is a coding agent a space can run. Everything that differs between Claude
-// Code and Codex is a switch on it.
+// Kind is a coding agent a space can run. Provider-specific behavior switches on it.
 type Kind string
 
 const (
-	Claude Kind = "claude"
-	Codex  Kind = "codex"
+	Claude      Kind = "claude"
+	Codex       Kind = "codex"
+	Antigravity Kind = "antigravity"
 )
 
-// Of reads a stored or configured agent name. Anything but "codex" is Claude, so
-// state and config written before there was a choice mean Claude.
+// Of reads a stored or configured agent name. Unknown names and state written
+// before there was a choice mean Claude.
 func Of(name string) Kind {
-	if Kind(name) == Codex {
-		return Codex
+	if Kind(name) == Codex || Kind(name) == Antigravity {
+		return Kind(name)
 	}
 	return Claude
 }
 
-// Other is the agent a swap hands a space to.
-func (k Kind) Other() Kind {
+// Kinds is the order of agents in the picker.
+func Kinds() []Kind { return []Kind{Claude, Codex, Antigravity} }
+
+// Next cycles every available provider, including the current one on a swap.
+func (k Kind) Next() Kind {
+	if k == Claude {
+		return Codex
+	}
 	if k == Codex {
+		return Antigravity
+	}
+	return Claude
+}
+
+// Other is the default swap target, preserving Claude/Codex muscle memory.
+// The picker cycles all providers with Next.
+func (k Kind) Other() Kind {
+	if k == Codex || k == Antigravity {
 		return Claude
 	}
 	return Codex
@@ -37,6 +53,9 @@ func (k Kind) Other() Kind {
 
 // Label is the agent's name as the UI shows it.
 func (k Kind) Label() string {
+	if k == Antigravity {
+		return "Antigravity"
+	}
 	if k == Codex {
 		return "Codex"
 	}
@@ -44,7 +63,12 @@ func (k Kind) Label() string {
 }
 
 // Bin is the CLI that runs the agent.
-func (k Kind) Bin() string { return string(k) }
+func (k Kind) Bin() string {
+	if k == Antigravity {
+		return "agy"
+	}
+	return string(k)
+}
 
 // codexFlags go on every interactive Codex launch. Codex runs unsandboxed and
 // without approval prompts: a worktree's git data lives in its source repo,
@@ -57,6 +81,9 @@ const codexFlags = "--dangerously-bypass-approvals-and-sandbox -c check_for_upda
 // LaunchCmd is the shell command that starts the agent fresh in a space with
 // prompt as its opening message.
 func (k Kind) LaunchCmd(prompt string) string {
+	if k == Antigravity {
+		return antigravityCmd("", prompt)
+	}
 	if k == Codex {
 		return "codex " + codexFlags + codexArg(prompt)
 	}
@@ -67,6 +94,13 @@ func (k Kind) LaunchCmd(prompt string) string {
 // prompt (if any) as its next message — or, with no id or one that no longer
 // resumes, starts the agent fresh with it.
 func (k Kind) ResumeCmd(id, prompt string) string {
+	if k == Antigravity {
+		fresh := antigravityCmd("", prompt)
+		if id == "" {
+			return fresh
+		}
+		return antigravityCmd(id, prompt) + " || " + fresh
+	}
 	fresh := "claude"
 	if prompt != "" {
 		fresh += " " + shellQuote(prompt)
@@ -110,6 +144,11 @@ const askTimeout = 5 * time.Minute
 // conversation a resume picks up, and rewrite the space's status through the
 // hooks. model applies to Claude only; Codex uses its configured default.
 func (k Kind) Ask(prompt, input, model string) (string, error) {
+	// agy has no documented ephemeral, tool-free mode. Keep deterministic
+	// titles rather than starting a second agent with the user's permissions.
+	if k == Antigravity {
+		return "", fmt.Errorf("antigravity: isolated title generation unavailable")
+	}
 	dir, err := os.MkdirTemp("", "atelier-ask-")
 	if err != nil {
 		return "", err
@@ -164,6 +203,9 @@ func withoutSpace(env []string) []string {
 // Prepare readies dir for agent k: folder trust and atelier's MCP server, so it
 // starts without a trust prompt and with create_worktree and create_pr to hand.
 func (k Kind) Prepare(dir, slug string) error {
+	if k == Antigravity {
+		return prepareAntigravity(dir, slug)
+	}
 	if k == Codex {
 		return prepareCodex(dir, slug)
 	}

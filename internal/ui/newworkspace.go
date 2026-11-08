@@ -16,7 +16,7 @@ func (m Model) updateNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		return m, tea.Quit
 	case tea.KeyTab:
-		m.newAgent = m.newAgent.Other()
+		m.newAgent = m.newAgent.Next()
 		return m, nil
 	}
 	// Enter is submit; newline is Ctrl-J only (Alt+Enter is start-and-open).

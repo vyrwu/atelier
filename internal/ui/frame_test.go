@@ -51,8 +51,8 @@ func TestFrameFitsThePopup(t *testing.T) {
 
 func TestSwapFrameFitsPopup(t *testing.T) {
 	for _, size := range [][2]int{{swapDialogW, swapDialogH}, {80, 24}, {120, 40}, {60, 16}} {
-		for _, from := range []agent.Kind{agent.Claude, agent.Codex} {
-			for _, to := range []agent.Kind{agent.Claude, agent.Codex} {
+		for _, from := range agent.Kinds() {
+			for _, to := range agent.Kinds() {
 				for _, status := range []core.AgentStatus{core.StatusIdle, core.StatusWorking} {
 					m := Model{w: size[0], h: size[1], status: map[string]core.AgentStatus{"s": status}}
 					if size[0] == swapDialogW {

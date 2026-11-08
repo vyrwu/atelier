@@ -37,12 +37,16 @@ const (
 // Agent glyphs mark which agent a space runs: each brand's own icon, from the
 // Codicons block, which needs Nerd Fonts 3.5.0 or newer.
 const (
-	glyphClaude = "\uec82" // nf-cod-claude (U+EC82)
-	glyphCodex  = "\uec81" // nf-cod-openai (U+EC81)
+	glyphAntigravity = "A"      // Antigravity has no standard Nerd Font glyph.
+	glyphClaude      = "\uec82" // nf-cod-claude (U+EC82)
+	glyphCodex       = "\uec81" // nf-cod-openai (U+EC81)
 )
 
 // agentColor is agent k's brand colour.
 func agentColor(k agent.Kind) lipgloss.Color {
+	if k == agent.Antigravity {
+		return lipgloss.Color("75")
+	}
 	if k == agent.Codex {
 		return cCodex
 	}
@@ -52,6 +56,9 @@ func agentColor(k agent.Kind) lipgloss.Color {
 // agentGlyph is agent k's icon in its brand colour.
 func agentGlyph(k agent.Kind) string {
 	g := glyphClaude
+	if k == agent.Antigravity {
+		g = glyphAntigravity
+	}
 	if k == agent.Codex {
 		g = glyphCodex
 	}

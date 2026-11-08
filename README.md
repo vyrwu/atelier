@@ -34,8 +34,9 @@ own task, and tells you which one needs you. Describe a task and it becomes a
 **space**: a directory, a tmux session, and an agent already working. The pull
 requests your agents open come to you, with their diff and CI one key away.
 
-**Supported agents:** [Claude Code](https://claude.com/claude-code) and
-[Codex](https://developers.openai.com/codex). Grok via
+**Supported agents:** [Claude Code](https://claude.com/claude-code),
+[Codex](https://developers.openai.com/codex), and
+[Antigravity CLI](https://antigravity.google/docs/cli/reference/) (`agy`). Grok via
 [Cursor CLI](https://cursor.com/cli) is coming soon.
 
 ## Highlights
@@ -61,7 +62,7 @@ requests your agents open come to you, with their diff and CI one key away.
 |---|---|
 | [tmux](https://github.com/tmux/tmux) 3.3+, git | atelier runs its own tmux server |
 | [GitHub CLI](https://cli.github.com) | run `gh auth login` first |
-| Claude Code and/or Codex | at least the agent new spaces start with |
+| Claude Code, Codex, or Antigravity CLI (`agy`) | at least the agent new spaces start with |
 | A [Nerd Font](https://www.nerdfonts.com) 3.5.0+ | for the GitHub and agent icons |
 
 Optional: [diffnav](https://github.com/dlvhdr/diffnav) or
@@ -97,7 +98,7 @@ atelier install   # once: agent hooks, tmux bindings, the per-space guide
 atelier           # start, or re-attach
 ```
 
-Press `M-n`, describe a task, and press `Enter` (`Tab` picks the other agent).
+Press `M-n`, describe a task, and press `Enter` (`Tab` cycles agents).
 `M-s` lists your spaces. `M-` means `Alt` (`Option` on a Mac).
 
 Using Codex? Its first launch asks you to review new hooks: trust atelier's (the
@@ -123,8 +124,8 @@ In the overlays, type to filter, `Up`/`Down` to move, `Esc` to close.
 | Trash | `Enter` restore · `M-d` delete permanently |
 | Pull requests | `Enter` diff · `M-e` checks · `M-b` browser · `M-o` reopen or ready · `M-c` close · `M-y` copy link |
 | Worktrees | `Enter` shell in the worktree |
-| New | `Enter` start · `Alt-Enter` start and switch · `Tab` other agent · `Ctrl-j` newline |
-| Swap | `y` swap · `n` cancel · `Tab` a fresh conversation with the same agent |
+| New | `Enter` start · `Alt-Enter` start and switch · `Tab` next agent · `Ctrl-j` newline |
+| Swap | `y` swap · `n` cancel · `Tab` cycle agents (including a fresh conversation with the same agent) |
 
 In a PR's diff window, `M-e` opens its checks; in its checks window, `M-d` goes
 back to the diff.
@@ -168,7 +169,7 @@ Optional, in `~/.config/atelier/config.toml`:
 ```toml
 root         = "~/ateliers"  # where spaces live
 socket       = "atelier"     # atelier's tmux socket
-agent        = "claude"      # the agent new spaces start with: "claude" or "codex"
+agent        = "claude"      # the agent new spaces start with: "claude", "codex", or "antigravity"
 naming       = true          # let the agent title new spaces
 naming_model = "sonnet"      # the model Claude titles them with
 ```
@@ -183,22 +184,37 @@ change what they're told.
 tmux -L atelier               atelier's own server; your tmux is untouched
 ├── home                      the splash: keymap and dependency check
 └── spry-otter                one session per space
-    ├── claude                the agent (Claude Code or Codex)
+    ├── claude                the agent (Claude Code, Codex, or Antigravity)
     ├── shell                 M-c
     └── pr-atelier-128        a PR diff, opened from M-p
 ```
 
-- **Status** comes from hooks atelier installs into each agent's config. They do
-  nothing outside atelier.
+- **Status** comes from Claude/Codex hooks and Antigravity's native status-line
+  events. They do nothing outside atelier.
 - **Swapping** saves the outgoing agent's conversation to `.atelier/handoff/`
   in the space. The incoming agent starts at once with it, resuming its own
   earlier conversation there if it had one.
 - **Usage** is each provider's own reading: Codex's every minute, Claude's
-  after each turn or every 15 minutes. `~` marks a reading that may be out of
+  after each turn or every 15 minutes, and Antigravity's quota snapshots while
+  its CLI is running. `~` marks a reading that may be out of
   date; `—` means unknown.
 - **Codex runs without its sandbox and approval prompts.** A worktree's git
   data lives in its source repository, outside the space, so the sandbox
   would block every commit.
+
+Install and sign in to `agy` using [Google's CLI setup](https://antigravity.google/docs/cli/reference/),
+then choose Antigravity with `Tab` or set `agent = "antigravity"`. Atelier uses
+its native model, effort, and permission settings; select Gemini with `/model`
+and adjust reasoning with `/effort`. The integration targets CLI 1.5.3.
+
+Antigravity receives workspace-local MCP registration and an `AGENTS.md` guide.
+A session-only settings overlay captures its native status, conversation path,
+and quota without changing global settings; an existing status-line command
+keeps its output. Conversation pointers in `.atelier/antigravity/` let restore
+and swaps find the native transcript. Keep that directory when moving a space.
+Quota is unknown until the CLI reports a remaining fraction and reset time;
+absolute credits and token counts are not converted into percentages. Antigravity
+spaces use a title derived from the task text, without a separate model call.
 
 The reasoning behind all of it is in [DESIGN.md](DESIGN.md).
 
@@ -220,7 +236,7 @@ The reasoning behind all of it is in [DESIGN.md](DESIGN.md).
 
 ## Roadmap
 
-- **Grok via Cursor CLI**, as a third agent.
+- **Grok via Cursor CLI**, as another agent.
 - **Remote spaces**: run a space's agent on another host.
   ([#104](https://github.com/vyrwu/atelier/issues/104))
 - **Embedded CLI**: describe a command in a shell, get it ready to run.

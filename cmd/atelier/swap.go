@@ -23,7 +23,7 @@ const (
 )
 
 // swapAgent hands a space to its other agent, or to a new conversation with the
-// same one (M-x, or `atelier swap <slug> [--to claude|codex]`; the other agent
+// same one (M-x, or `atelier swap <slug> [--to claude|codex|antigravity]`; the other agent
 // by default). It checks the swap can happen, then puts the handoff in
 // the space's agent window in place of the agent: stopping the outgoing agent
 // first is what makes its transcript final before anything reads it. It returns
@@ -61,8 +61,8 @@ func swapAgent(args []string) error {
 	from := agent.Of(ws.Agent)
 	to := from.Other()
 	if t := flagVal(args, "--to"); t != "" {
-		if t != string(agent.Claude) && t != string(agent.Codex) {
-			return fmt.Errorf("--to %q: want claude or codex", t)
+		if agent.Of(t) != agent.Kind(t) {
+			return fmt.Errorf("--to %q: want claude, codex or antigravity", t)
 		}
 		to = agent.Of(t)
 	}

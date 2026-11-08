@@ -15,9 +15,9 @@ import (
 )
 
 // LatestSession is the id of the conversation agent k last had in the space at
-// root, or "" if it has none. It is read off the agent's own transcripts rather
-// than recorded, so it holds for spaces made before atelier knew about agents and
-// needs no hook to have fired (NFR-R2). Transcripts older than since — the
+// root, or "" if it has none. Claude/Codex are discovered from native transcripts;
+// Antigravity uses the main TUI's transcript pointers (see CaptureAntigravity).
+// Transcripts older than since — the
 // space's creation — belong to an earlier space that had the same name.
 func LatestSession(k Kind, root string, since time.Time) string {
 	id, _ := latestSession(k, root, since)
@@ -36,7 +36,7 @@ func Transcript(k Kind, root string, since time.Time) string {
 func RecentKind(root string, fallback Kind) Kind {
 	kind := fallback
 	var newest time.Time
-	for _, k := range []Kind{Claude, Codex} {
+	for _, k := range Kinds() {
 		path := Transcript(k, root, time.Time{})
 		if fi, err := os.Stat(path); err == nil && fi.ModTime().After(newest) {
 			kind, newest = k, fi.ModTime()
@@ -46,6 +46,9 @@ func RecentKind(root string, fallback Kind) Kind {
 }
 
 func latestSession(k Kind, root string, since time.Time) (id, path string) {
+	if k == Antigravity {
+		return latestAntigravitySession(root, since)
+	}
 	if k == Codex {
 		return latestCodexSession(filepath.Join(codexHome(), "sessions"), root, since)
 	}
@@ -211,9 +214,12 @@ func Export(k Kind, path string, since time.Time) (string, error) {
 	}
 	defer func() { _ = f.Close() }()
 	w := &exportWriter{agent: k.Label()}
-	if k == Codex {
+	switch k {
+	case Antigravity:
+		err = exportAntigravity(f, since, w)
+	case Codex:
 		err = exportCodex(f, since, w)
-	} else {
+	default:
 		err = exportClaude(f, since, w)
 	}
 	return w.String(), err

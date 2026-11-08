@@ -17,6 +17,10 @@ import (
 // however many turns end or status lines ask. Neither provider needs a model call or a live
 // interactive session, so both balances stay current regardless of focus.
 func RefreshUsage(k Kind) error {
+	// agy supplies structured quota snapshots through its live status line.
+	if k == Antigravity {
+		return nil
+	}
 	path := usagePath(k)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err

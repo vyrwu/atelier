@@ -16,20 +16,32 @@ import (
 )
 
 // usage is the asynchronous tmux status job, an agent's refresh after a turn
-// (see hook), or Claude's status-line capture. Rendering never waits on the
+// (see hook), or a native status-line capture. Rendering never waits on the
 // network: tmux sees the cache immediately, and fresh readings replace it when
 // the metadata fetches finish.
 func usage(args []string) error {
 	if arg(args, 0) == "refresh" { // atelier usage refresh <agent>
 		return agent.RefreshUsage(agent.Of(arg(args, 1)))
 	}
-	if arg(args, 0) == "claude" {
+	if arg(args, 0) == "claude" || arg(args, 0) == "antigravity" {
 		data, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20))
 		if err != nil {
 			return err
 		}
-		_ = agent.CaptureClaudeUsage(data, time.Now())
-		if original := arg(args, 1); original != "" {
+		original := arg(args, 1)
+		if arg(args, 0) == "antigravity" {
+			if os.Getenv("ATELIER_SESSION") == "" || os.Getenv("ATELIER_AGENT") != "antigravity" {
+				return nil
+			}
+			status, err := agent.CaptureAntigravity(data, arg(args, 1), time.Now())
+			if err == nil && status != "" {
+				_ = hook(status)
+			}
+			original = arg(args, 2)
+		} else {
+			_ = agent.CaptureClaudeUsage(data, time.Now())
+		}
+		if original != "" {
 			decoded, err := base64.StdEncoding.DecodeString(original)
 			if err != nil {
 				return err
@@ -43,7 +55,11 @@ func usage(args []string) error {
 		return nil
 	}
 	status := func() string {
-		return agent.UsageStatus(agent.LoadUsage(agent.Claude), agent.LoadUsage(agent.Codex), time.Now())
+		readings := map[agent.Kind]agent.Usage{}
+		for _, k := range agent.Kinds() {
+			readings[k] = agent.LoadUsage(k)
+		}
+		return agent.UsageStatus(readings, time.Now())
 	}
 	prior := status()
 	fmt.Println(prior)

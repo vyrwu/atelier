@@ -42,6 +42,9 @@ type UsageWindow struct {
 // CODEX_HOME (or CLAUDE_CONFIG_DIR) cannot inherit this account's percentages.
 func usagePath(k Kind) string {
 	dir := codexHome()
+	if k == Antigravity {
+		dir = antigravityDir()
+	}
 	if k == Claude {
 		dir = settingsPath()
 	}
@@ -182,12 +185,19 @@ func UsageStale(k Kind) time.Duration {
 // UsageStatus shows percentages spent, coloured by usage level.
 // Session-reported readings and readings older than UsageStale are '~'.
 // Expired data never implies an unused allowance.
-func UsageStatus(claude, codex Usage, now time.Time) string {
-	return renderUsage(Claude, claude, now) + usageDim + " · " + renderUsage(Codex, codex, now) + usageDim + " spent"
+func UsageStatus(readings map[Kind]Usage, now time.Time) string {
+	var parts []string
+	for _, k := range Kinds() {
+		parts = append(parts, renderUsage(k, readings[k], now))
+	}
+	return strings.Join(parts, usageDim+" · ") + usageDim + " spent"
 }
 
 func renderUsage(k Kind, u Usage, now time.Time) string {
 	glyph, color := "\uec82", 209
+	if k == Antigravity {
+		glyph, color = "A", 75
+	}
 	if k == Codex {
 		glyph, color = "\uec81", 39
 	}
@@ -198,7 +208,7 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 		}
 		return text + " —"
 	}
-	if (k == Claude && u.Source != "native") || now.Sub(u.Observed) > UsageStale(k)+time.Minute {
+	if ((k == Claude || k == Antigravity) && u.Source != "native") || now.Sub(u.Observed) > UsageStale(k)+time.Minute {
 		text += "~"
 	}
 	for _, b := range u.Buckets {
@@ -212,7 +222,7 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 				b.Secondary = &UsageWindow{Minutes: 10080}
 			}
 		}
-		if len(u.Buckets) > 1 {
+		if len(u.Buckets) > 1 || k == Antigravity {
 			name := b.Name
 			if name == "" {
 				name = b.ID
@@ -237,7 +247,10 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 			if w == nil {
 				continue
 			}
-			text += " " + usageDuration(w.Minutes) + " "
+			text += " "
+			if w.Minutes > 0 {
+				text += usageDuration(w.Minutes) + " "
+			}
 			if w.Used == nil || math.IsNaN(*w.Used) || math.IsInf(*w.Used, 0) || *w.Used < 0 || *w.Used > 100 || w.Reset <= now.Unix() {
 				text += "—"
 				continue

@@ -89,7 +89,7 @@ func (m splashModel) View() string {
 	deps := []string{m.depsView(), "", ""}
 	footer := []string{faintStyle.Render(plural(m.count, "workspace") + "  ·  q detach")}
 
-	// The agents come first, then the keymap, then the tools both agents share.
+	// The agents come first, then the keymap, then the tools agents share.
 	// On a short terminal the wordmark goes first, then the dependency check, so
 	// the keymap stays on screen instead of the top being cut off.
 	var block string
@@ -154,7 +154,7 @@ func (m splashModel) agentsView() string {
 	return lipgloss.JoinVertical(lipgloss.Center, faintStyle.Render("agents"), line)
 }
 
-// depsView is the rest of the dependency check, the tools both agents share:
+// depsView is the rest of the dependency check, the tools agents share:
 // what atelier needs on one line, the optional viewers it hands PRs to on the
 // next. A missing requirement is red, a missing option only faint.
 func (m splashModel) depsView() string {
@@ -220,18 +220,19 @@ type dep struct {
 var versionRe = regexp.MustCompile(`\d+\.\d+(\.\d+)?`)
 
 // checkDeps probes the external tools atelier drives and returns each one's
-// presence + version (the Doctor part of the splash). Of the two agents, the
-// configured default is required and the other optional.
+// presence + version (the Doctor part of the splash). The
+// configured default is required and the others optional.
 func checkDeps() []dep {
-	codex := core.LoadConfig().Agent == "codex"
+	defaultAgent := agent.Of(core.LoadConfig().Agent)
 	probes := []struct {
 		name     string
 		args     []string
 		optional bool
 		agent    agent.Kind
 	}{
-		{"claude", []string{"--version"}, codex, agent.Claude},
-		{"codex", []string{"--version"}, !codex, agent.Codex},
+		{"claude", []string{"--version"}, defaultAgent != agent.Claude, agent.Claude},
+		{"codex", []string{"--version"}, defaultAgent != agent.Codex, agent.Codex},
+		{"agy", []string{"--version"}, defaultAgent != agent.Antigravity, agent.Antigravity},
 		{"git", []string{"--version"}, false, ""},
 		{"gh", []string{"--version"}, false, ""},
 		{"tmux", []string{"-V"}, false, ""},

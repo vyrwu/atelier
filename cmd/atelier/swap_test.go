@@ -18,15 +18,19 @@ import (
 // seeded by exactly the same handoff note.
 func TestHandoffAgentCmdSessionChoice(t *testing.T) {
 	note := "read the exported conversation"
-	for _, from := range []agent.Kind{agent.Claude, agent.Codex} {
-		to := from.Other()
-		cross := handoffAgentCmd(from, to, "target-session", note)
-		if !strings.Contains(cross, "resume") || !strings.Contains(cross, "target-session") {
-			t.Errorf("%s → %s does not resume the target: %q", from, to, cross)
-		}
-		same := handoffAgentCmd(from, from, "old-session", note)
-		if strings.Contains(same, "resume") || strings.Contains(same, "old-session") || !strings.Contains(same, note) {
-			t.Errorf("%s → fresh %s must start from the handoff: %q", from, from, same)
+	for _, from := range agent.Kinds() {
+		for _, to := range agent.Kinds() {
+			cmd := handoffAgentCmd(from, to, "target-session", note)
+			if !strings.Contains(cmd, note) {
+				t.Errorf("%s → %s lost the handoff", from, to)
+			}
+			if from == to {
+				if strings.Contains(cmd, "target-session") {
+					t.Errorf("%s must start a fresh conversation: %s", to, cmd)
+				}
+			} else if !strings.Contains(cmd, "target-session") || (!strings.Contains(cmd, "resume") && !strings.Contains(cmd, "--conversation=")) {
+				t.Errorf("%s → %s does not resume the target: %s", from, to, cmd)
+			}
 		}
 	}
 }

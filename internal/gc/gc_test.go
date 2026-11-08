@@ -565,3 +565,26 @@ func TestSweepPrunesSourceRepos(t *testing.T) {
 		t.Errorf("worktree list after prune:\n%s", out)
 	}
 }
+
+// Only generated Antigravity MCP metadata is ignorable; skills and rules in
+// .agents can be real work and must keep automatic purge from deleting a space.
+func TestUnsavedAntigravityMetadata(t *testing.T) {
+	root := sandbox(t)
+	dir := filepath.Join(root, "antigravity", ".agents")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "mcp_config.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := core.Workspace{Slug: "antigravity"}
+	if got := Unsaved(ws); len(got) != 0 {
+		t.Fatalf("metadata counts as work: %v", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rules.md"), []byte("keep this"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := Unsaved(ws); len(got) != 1 || !strings.Contains(got[0], "rules.md") {
+		t.Fatalf("user file hidden: %v", got)
+	}
+}
