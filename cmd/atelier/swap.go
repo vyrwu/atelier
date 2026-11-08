@@ -22,8 +22,8 @@ const (
 	failMark = "#[fg=colour167]✗#[fg=colour252] "
 )
 
-// swapAgent hands a space to its other agent, or to a new conversation with the
-// same one (M-x, or `atelier swap <slug> [--to claude|codex]`; the other agent
+// swapAgent hands a space to its next agent, or to a new conversation with the
+// same one (M-x, or `atelier swap <slug> [--to claude|codex|grok|cursor]`; the next agent
 // by default). It checks the swap can happen, then puts the handoff in
 // the space's agent window in place of the agent: stopping the outgoing agent
 // first is what makes its transcript final before anything reads it. It returns
@@ -59,10 +59,10 @@ func swapAgent(args []string) error {
 		return fmt.Errorf("%s is no longer active", slug)
 	}
 	from := agent.Of(ws.Agent)
-	to := from.Other()
+	to := from.Next()
 	if t := flagVal(args, "--to"); t != "" {
-		if t != string(agent.Claude) && t != string(agent.Codex) {
-			return fmt.Errorf("--to %q: want claude or codex", t)
+		if !agent.Valid(t) {
+			return fmt.Errorf("--to %q: want claude, codex, grok, or cursor", t)
 		}
 		to = agent.Of(t)
 	}
@@ -139,7 +139,9 @@ func runHandoff(slug string, to agent.Kind, token string) error {
 	if err != nil {
 		return err
 	}
-	_ = to.Prepare(ws.Root(), slug)
+	if err := to.Prepare(ws.Root(), slug); err != nil {
+		return err
+	}
 	agent.LinkGuide(ws.Root())
 	if err := core.Update(func(s *core.State) {
 		if w := s.Find(slug); w != nil {

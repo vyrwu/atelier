@@ -16,18 +16,17 @@ import (
 
 // Tab on the new-space prompt flips which agent the space starts with, rather
 // than reaching the text.
-func TestNewSpaceTabTogglesAgent(t *testing.T) {
+func TestNewSpaceTabCyclesAgents(t *testing.T) {
 	m := Model{newAgent: agent.Claude, intent: textarea.New()}
-	next, _ := m.updateNew(tea.KeyMsg{Type: tea.KeyTab})
-	if got := next.(Model).newAgent; got != agent.Codex {
-		t.Errorf("after Tab agent = %q, want codex", got)
-	}
-	if v := ansiRe.ReplaceAllString(next.(Model).viewNew(), ""); !strings.Contains(v, "What can "+glyphCodex+" Codex do for you?") {
-		t.Errorf("prompt = %q, want it to ask Codex", v)
-	}
-	next, _ = next.(Model).updateNew(tea.KeyMsg{Type: tea.KeyTab})
-	if got := next.(Model).newAgent; got != agent.Claude {
-		t.Errorf("after Tab twice agent = %q, want claude", got)
+	for _, want := range []agent.Kind{agent.Codex, agent.Grok, agent.Cursor, agent.Claude} {
+		next, _ := m.updateNew(tea.KeyMsg{Type: tea.KeyTab})
+		m = next.(Model)
+		if m.newAgent != want {
+			t.Errorf("after Tab agent = %q, want %q", m.newAgent, want)
+		}
+		if v := ansiRe.ReplaceAllString(m.viewNew(), ""); !strings.Contains(v, want.Label()+" do for you?") {
+			t.Errorf("prompt = %q, want %s", v, want.Label())
+		}
 	}
 }
 
@@ -35,7 +34,7 @@ func TestNewSpaceTabTogglesAgent(t *testing.T) {
 // a choice runs Claude.
 func TestRowShowsTheAgent(t *testing.T) {
 	m := Model{w: 120}
-	for a, glyph := range map[string]string{"": glyphClaude, "claude": glyphClaude, "codex": glyphCodex} {
+	for a, glyph := range map[string]string{"": glyphClaude, "claude": glyphClaude, "codex": glyphCodex, "grok": glyphGrok, "cursor": glyphCursor} {
 		ws := &core.Workspace{Slug: "brave-otter", Agent: a, Created: time.Now()}
 		if line := m.renderRow(row{ws: ws}, false); !strings.Contains(line, glyph) {
 			t.Errorf("agent %q: row %q lacks %s", a, line, glyph)
@@ -54,7 +53,7 @@ func TestSwapAsksFromASpacesRow(t *testing.T) {
 	if got.screen != scrConfirm || !got.confirmSwap {
 		t.Fatalf("M-x on a row: screen %v, confirmSwap %v; want the swap confirm", got.screen, got.confirmSwap)
 	}
-	if v := ansiRe.ReplaceAllString(got.View(), ""); !strings.Contains(v, "Swap to "+glyphClaude+" Claude Code?") {
+	if v := ansiRe.ReplaceAllString(got.View(), ""); !strings.Contains(v, "Swap to "+glyphGrok+" Grok Build?") {
 		t.Errorf("confirm = %q, want it to name the agent it swaps to", v)
 	}
 	next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyEsc})
@@ -63,7 +62,7 @@ func TestSwapAsksFromASpacesRow(t *testing.T) {
 	}
 }
 
-// Tab in the swap dialog flips between the other agent and a new conversation
+// Tab in the swap dialog cycles through all agents and a fresh conversation
 // with the same one, and Enter swaps to whichever is shown.
 func TestSwapDialogTabTogglesTheTarget(t *testing.T) {
 	ws := core.Workspace{Slug: "brave-otter", Session: "brave-otter"}
@@ -74,8 +73,15 @@ func TestSwapDialogTabTogglesTheTarget(t *testing.T) {
 	}
 	next, _ := m.updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
 	got := next.(Model)
+	for _, want := range []agent.Kind{agent.Grok, agent.Cursor} {
+		if got.swapTo != want {
+			t.Fatalf("target = %s, want %s", got.swapTo, want)
+		}
+		next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
+		got = next.(Model)
+	}
 	if got.swapTo != agent.Claude {
-		t.Errorf("after Tab swapTo = %q, want claude", got.swapTo)
+		t.Errorf("after cycling swapTo = %q, want claude", got.swapTo)
 	}
 	if v := ansiRe.ReplaceAllString(got.View(), ""); !strings.Contains(v, "new Claude Code?") || !strings.Contains(v, "a new conversation") || !strings.Contains(v, "tab switch agent") {
 		t.Errorf("same-agent dialog = %q", v)
@@ -88,7 +94,7 @@ func TestSwapDialogTabTogglesTheTarget(t *testing.T) {
 	}
 	next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
 	if next.(Model).swapTo != agent.Codex {
-		t.Error("a second Tab must return to the other harness")
+		t.Error("the next Tab must return to Codex")
 	}
 }
 

@@ -8,23 +8,27 @@ import (
 // State and config written before there was a choice of agent say nothing, and
 // mean Claude; so does anything unrecognised.
 func TestOfDefaultsToClaude(t *testing.T) {
-	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude} {
+	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude, "grok": Grok, "cursor": Cursor} {
 		if got := Of(name); got != want {
 			t.Errorf("Of(%q) = %q, want %q", name, got, want)
 		}
 	}
-	if Claude.Other() != Codex || Codex.Other() != Claude {
-		t.Error("Other must flip between the two agents")
+	k := Claude
+	for _, want := range []Kind{Codex, Grok, Cursor, Claude} {
+		k = k.Next()
+		if k != want {
+			t.Fatalf("next = %s, want %s", k, want)
+		}
 	}
 }
 
 // The prompt is user-written prose that tmux runs through a shell: quotes,
 // backticks, and semicolons in it must stay data, for either agent.
 func TestLaunchCmdQuotesPrompt(t *testing.T) {
-	for _, k := range []Kind{Claude, Codex} {
+	for _, k := range Kinds() {
 		for _, p := range []string{"it's broken", "rm -rf /; echo pwned", "use `git log` and $HOME", `say "hi"`} {
 			cmd := k.LaunchCmd(p)
-			if !strings.HasPrefix(cmd, string(k)+" ") || !strings.HasSuffix(cmd, "'") {
+			if !strings.HasPrefix(cmd, k.Bin()+" ") || !strings.HasSuffix(cmd, "'") {
 				t.Errorf("%s.LaunchCmd(%q) = %q, want the prompt single-quoted last", k, p, cmd)
 			}
 			if !strings.Contains(cmd, shellQuote(p)) {
@@ -79,6 +83,9 @@ func TestResumeCmd(t *testing.T) {
 		{Claude, "", "go", "claude 'go'"},
 		{Claude, "abc", "", "claude --resume 'abc' || claude"},
 		{Claude, "abc", "go", "claude --resume 'abc' 'go' || claude 'go'"},
+		{Grok, "", "", "grok --trust"},
+		{Grok, "abc", "go", "grok --trust --resume 'abc' -- 'go' || grok --trust -- 'go'"},
+		{Cursor, "abc", "go", "cursor-agent --trust --approve-mcps --resume 'abc' -- 'go' || cursor-agent --trust --approve-mcps -- 'go'"},
 		{Codex, "", "", "codex " + codexFlags},
 		{Codex, "abc", "go", "codex resume " + codexFlags + " 'abc' -- 'go' || codex " + codexFlags + " -- 'go'"},
 	}

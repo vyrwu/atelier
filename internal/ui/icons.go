@@ -34,17 +34,24 @@ const (
 	iconReviewPending  = "" // nf-oct-eye (U+F441)
 )
 
-// Agent glyphs mark which agent a space runs: each brand's own icon, from the
-// Codicons block, which needs Nerd Fonts 3.5.0 or newer.
+// Agent glyphs mark which agent a space runs. Claude and Codex use Codicons
+// (Nerd Fonts 3.5.0+); Grok and Cursor use distinct letters.
 const (
 	glyphClaude = "\uec82" // nf-cod-claude (U+EC82)
+	glyphGrok   = "G"
+	glyphCursor = "C"
 	glyphCodex  = "\uec81" // nf-cod-openai (U+EC81)
 )
 
 // agentColor is agent k's brand colour.
 func agentColor(k agent.Kind) lipgloss.Color {
-	if k == agent.Codex {
+	switch k {
+	case agent.Codex:
 		return cCodex
+	case agent.Grok:
+		return cText
+	case agent.Cursor:
+		return cAccent
 	}
 	return cClaude
 }
@@ -52,8 +59,13 @@ func agentColor(k agent.Kind) lipgloss.Color {
 // agentGlyph is agent k's icon in its brand colour.
 func agentGlyph(k agent.Kind) string {
 	g := glyphClaude
-	if k == agent.Codex {
+	switch k {
+	case agent.Codex:
 		g = glyphCodex
+	case agent.Grok:
+		g = glyphGrok
+	case agent.Cursor:
+		g = glyphCursor
 	}
 	return lipgloss.NewStyle().Foreground(agentColor(k)).Render(g)
 }

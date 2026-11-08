@@ -80,7 +80,7 @@ type Model struct {
 
 	// new screen
 	intent   textarea.Model
-	newAgent agent.Kind // the agent the new space starts with (Tab toggles)
+	newAgent agent.Kind // the agent the new space starts with (Tab cycles)
 
 	// prs / worktrees / confirm screens
 	focusWS      *core.Workspace // set transiently when confirming a delete
@@ -91,7 +91,7 @@ type Model struct {
 	spin         spinner.Model   // the one activity indicator, shared by the views
 	confirm      string          // the confirmation prompt
 	confirmSwap  bool            // the confirm is for a swap of focusWS, not a delete
-	swapTo       agent.Kind      // the agent the swap hands focusWS to (Tab toggles)
+	swapTo       agent.Kind      // the agent the swap hands focusWS to (Tab cycles)
 	prPending    map[string]bool // PRs (repo#num) with a state change in flight
 
 	err  string
@@ -596,10 +596,10 @@ func (m Model) beginCreate(intent string, switchIn bool) (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// askSwap puts up the confirm for handing w to its other agent.
+// askSwap puts up the confirm for handing w to another agent.
 func (m *Model) askSwap(w *core.Workspace) {
 	m.focusWS = w
-	m.swapTo = agent.Of(w.Agent).Other()
+	m.swapTo = agent.Of(w.Agent).Next()
 	m.confirmSwap = true
 	m.screen = scrConfirm
 }

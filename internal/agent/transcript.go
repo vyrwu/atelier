@@ -36,7 +36,7 @@ func Transcript(k Kind, root string, since time.Time) string {
 func RecentKind(root string, fallback Kind) Kind {
 	kind := fallback
 	var newest time.Time
-	for _, k := range []Kind{Claude, Codex} {
+	for _, k := range Kinds() {
 		path := Transcript(k, root, time.Time{})
 		if fi, err := os.Stat(path); err == nil && fi.ModTime().After(newest) {
 			kind, newest = k, fi.ModTime()
@@ -46,6 +46,12 @@ func RecentKind(root string, fallback Kind) Kind {
 }
 
 func latestSession(k Kind, root string, since time.Time) (id, path string) {
+	if k == Grok {
+		return latestGrokSession(filepath.Join(grokHome(), "sessions"), root, since)
+	}
+	if k == Cursor {
+		return latestCursorSession(filepath.Join(cursorDir(true), "projects"), root, since)
+	}
 	if k == Codex {
 		return latestCodexSession(filepath.Join(codexHome(), "sessions"), root, since)
 	}
@@ -211,9 +217,14 @@ func Export(k Kind, path string, since time.Time) (string, error) {
 	}
 	defer func() { _ = f.Close() }()
 	w := &exportWriter{agent: k.Label()}
-	if k == Codex {
+	switch k {
+	case Codex:
 		err = exportCodex(f, since, w)
-	} else {
+	case Grok:
+		err = exportGrok(f, since, w)
+	case Cursor:
+		err = exportMessages(f, since, w, true)
+	default:
 		err = exportClaude(f, since, w)
 	}
 	return w.String(), err
@@ -258,6 +269,10 @@ func (w *exportWriter) tool(name, input string) {
 // tags, and are skipped; a compaction summary is kept, since it stands in for
 // everything before it.
 func exportClaude(r io.Reader, since time.Time, w *exportWriter) error {
+	return exportMessages(r, since, w, false)
+}
+
+func exportMessages(r io.Reader, since time.Time, w *exportWriter, cursor bool) error {
 	type block struct {
 		Type  string          `json:"type"`
 		Text  string          `json:"text"`
@@ -268,6 +283,7 @@ func exportClaude(r io.Reader, since time.Time, w *exportWriter) error {
 	for {
 		var rec struct {
 			Type             string    `json:"type"`
+			Role             string    `json:"role"`
 			Timestamp        time.Time `json:"timestamp"`
 			IsMeta           bool      `json:"isMeta"`
 			IsSidechain      bool      `json:"isSidechain"`
@@ -282,7 +298,10 @@ func exportClaude(r io.Reader, since time.Time, w *exportWriter) error {
 		} else if err != nil {
 			return err
 		}
-		if (rec.Type != "user" && rec.Type != "assistant") || rec.Timestamp.Before(since) ||
+		if cursor {
+			rec.Type = rec.Role
+		}
+		if (rec.Type != "user" && rec.Type != "assistant") || (!cursor && rec.Timestamp.Before(since)) ||
 			rec.IsMeta || rec.IsSidechain || rec.IsAPIError {
 			continue
 		}
@@ -300,6 +319,12 @@ func exportClaude(r io.Reader, since time.Time, w *exportWriter) error {
 				if b.Type == "text" {
 					text += b.Text
 				}
+			}
+			// Cursor's JSONL has no per-message timestamps. The last handoff
+			// marker separates this tenure from earlier conversation history.
+			if cursor && !since.IsZero() && strings.HasPrefix(strings.TrimSpace(text), HandoffMark) {
+				w.Reset()
+				w.last = ""
 			}
 			if rec.IsCompactSummary || !syntheticClaudeText(text) {
 				w.say(who, text)

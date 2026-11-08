@@ -386,7 +386,7 @@ func apply(s *core.State, root string, r *Report, live map[string]bool, dry bool
 		w.Agent = string(agent.RecentKind(w.Root(), agent.Of(core.LoadConfig().Agent)))
 		if live[slug] {
 			if out, err := tmux.Run("show-options", "-t", slug, "-qv", "@atelier_agent"); err == nil {
-				for _, k := range []agent.Kind{agent.Claude, agent.Codex} {
+				for _, k := range agent.Kinds() {
 					if strings.TrimSpace(string(out)) == k.Label() {
 						w.Agent = string(k)
 					}

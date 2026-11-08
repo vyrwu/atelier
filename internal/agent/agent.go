@@ -1,4 +1,4 @@
-// Package agent launches a space's coding agent — Claude Code or Codex — hands
+// Package agent launches a space's coding agent, hands
 // a space from one to the other, and tracks each session's runtime status.
 //
 // Status is per-session runtime state — "is this agent working, blocked on the
@@ -84,6 +84,12 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 // git identity so it commits as them.
 func Env(slug string, k Kind) map[string]string {
 	env := map[string]string{"ATELIER_SESSION": slug, "ATELIER_SLUG": slug, "ATELIER_AGENT": string(k)}
+	if k == Grok {
+		env["GROK_HOME"] = grokHome()
+	}
+	if k == Cursor {
+		env["CURSOR_CONFIG_DIR"], env["CURSOR_DATA_DIR"] = cursorDir(false), cursorDir(true)
+	}
 	if g := GitConfigGlobal(); g != "" {
 		env["GIT_CONFIG_GLOBAL"] = g
 	}

@@ -220,18 +220,20 @@ type dep struct {
 var versionRe = regexp.MustCompile(`\d+\.\d+(\.\d+)?`)
 
 // checkDeps probes the external tools atelier drives and returns each one's
-// presence + version (the Doctor part of the splash). Of the two agents, the
-// configured default is required and the other optional.
+// presence + version (the Doctor part of the splash). The configured default
+// agent is required; all other agents are optional.
 func checkDeps() []dep {
-	codex := core.LoadConfig().Agent == "codex"
+	selected := agent.Of(core.LoadConfig().Agent)
 	probes := []struct {
 		name     string
 		args     []string
 		optional bool
 		agent    agent.Kind
 	}{
-		{"claude", []string{"--version"}, codex, agent.Claude},
-		{"codex", []string{"--version"}, !codex, agent.Codex},
+		{"claude", []string{"--version"}, selected != agent.Claude, agent.Claude},
+		{"codex", []string{"--version"}, selected != agent.Codex, agent.Codex},
+		{"grok", []string{"--version"}, selected != agent.Grok, agent.Grok},
+		{"cursor-agent", []string{"--version"}, selected != agent.Cursor, agent.Cursor},
 		{"git", []string{"--version"}, false, ""},
 		{"gh", []string{"--version"}, false, ""},
 		{"tmux", []string{"-V"}, false, ""},

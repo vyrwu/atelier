@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,7 +55,7 @@ func run(cmd string, args []string) error {
 		return ui.RunHome()
 	case "create": // headless background workspace builder (fired detached by M-n)
 		return createWorkspace(args)
-	case "swap": // atelier swap <slug> [--to claude|codex] — hand a space to its other agent (M-x)
+	case "swap": // atelier swap <slug> [--to <agent>] — hand a space to another agent (M-x)
 		return swapAgent(args)
 	case "handoff": // atelier handoff <slug> <agent> — the swap itself, run in the space's agent window
 		return handoff(arg(args, 0), arg(args, 1), arg(args, 2))
@@ -161,6 +162,20 @@ func insideOwnServer() bool {
 // status is not refreshed here: the agent only registers PRs (via the MCP
 // tools); their status comes from the poll status job.
 func hook(status string) error {
+	if status == "cursor" || status == "grok" {
+		k := agent.Kind(status)
+		if os.Getenv("ATELIER_SESSION") == "" || os.Getenv("ATELIER_AGENT") != status {
+			return nil
+		}
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20))
+		if err != nil {
+			return err
+		}
+		status = agent.CLIHookStatus(k, data)
+		if status == "" {
+			return nil
+		}
+	}
 	session := os.Getenv("ATELIER_SESSION")
 	// Read the prior status before recording, so we redraw only on a transition
 	// (a busy agent fires PreToolUse/PostToolUse constantly — no need to flicker
@@ -368,7 +383,7 @@ bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 # included. M-c is the workspace base shell. Both toast (no-op) when pressed off
 # a workspace, e.g. the splash.
 bind -n M-a run-shell "%[1]s win '#{session_name}' agent"
-# M-x hands the space to its other agent (Claude <-> Codex), behind a confirm
+# M-x hands the space to another agent, behind a confirm
 # whose popup is sized to the dialog (ui.swapDialogW x swapDialogH).
 bind -n M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 46 -h 11 -E "%[1]s open --swap"
 # A PR's two windows swap in place: M-e in its diff (pr-*) opens its checks,
@@ -473,6 +488,9 @@ func createWorkspace(args []string) error {
 	cfg := core.LoadConfig()
 	k := agent.Of(cfg.Agent)
 	if a := flagVal(args, "--agent"); a != "" {
+		if !agent.Valid(a) {
+			return fmt.Errorf("--agent %q: want claude, codex, grok, or cursor", a)
+		}
 		k = agent.Of(a)
 	}
 	if _, err := exec.LookPath(k.Bin()); err != nil {
@@ -496,7 +514,10 @@ func createWorkspace(args []string) error {
 		_ = core.RemoveWorkspace(slug)
 		return err
 	}
-	_ = k.Prepare(root, slug)
+	if err := k.Prepare(root, slug); err != nil {
+		_ = core.RemoveWorkspace(slug)
+		return err
+	}
 	agent.LinkGuide(root)
 	if err := agent.RunAgent(w, k, k.LaunchCmd(intent)); err != nil {
 		_ = core.RemoveWorkspace(slug)

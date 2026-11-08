@@ -33,9 +33,9 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.focusWS = nil
 	case "tab":
-		// The other agent, or a new conversation with the same one.
+		// Cycle through agents, including a new conversation with the same one.
 		if m.confirmSwap {
-			m.swapTo = m.swapTo.Other()
+			m.swapTo = m.swapTo.Next()
 		}
 	case "n", "esc":
 		if m.returnScreen == scrConfirm { // opened on the confirm (M-x): close
@@ -53,7 +53,7 @@ const (
 	swapDialogH = 11
 )
 
-// swapDialog is the small confirm for handing focusWS to its other agent, w by
+// swapDialog is the small confirm for handing focusWS to another agent, w by
 // h cells, border included.
 func (m Model) swapDialog(w, h int) string {
 	from := agent.Of(m.focusWS.Agent)
