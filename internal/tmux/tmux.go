@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -32,11 +33,17 @@ func socket() string {
 // a wedged server as a bug rather than hanging the UI (attach blocks legitimately
 // and goes through execTmux/syscall.Exec, never here).
 func Run(args ...string) ([]byte, error) {
+	return runInput(nil, args...)
+}
+
+func runInput(input io.Reader, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	full := append([]string{"-L", socket()}, args...)
 	// #nosec G204 G702 -- Fixed tmux binary and argument array; shell commands are quoted by their builders.
-	out, err := exec.CommandContext(ctx, "tmux", full...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, Binary(), full...)
+	cmd.Stdin = input
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("tmux %s: %w (%s)",
 			strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -297,7 +304,7 @@ func Flash(msg string, seconds int) error {
 		return err
 	}
 	_ = RefreshStatus()
-	clear := fmt.Sprintf("tmux -L %s set -g @atelier_spin ''; tmux -L %s refresh-client -S", socket(), socket())
+	clear := fmt.Sprintf("%s -L %s set -g @atelier_spin ''; %s -L %s refresh-client -S", shquote(Binary()), shquote(socket()), shquote(Binary()), shquote(socket()))
 	_, err := Run("run-shell", "-b", "-d", fmt.Sprintf("%d", seconds), clear)
 	return err
 }
@@ -400,5 +407,39 @@ func RestartHome(cwd, cmd string) error {
 	// "=home:" — the session's current window and pane; a bare "=home" does not
 	// resolve as a pane target.
 	_, err := Run("respawn-pane", "-k", "-c", cwd, "-t", "="+HomeSession+":", wrap(nil, cmd))
+	return err
+}
+
+// CapturePane joins wrapped lines and includes the requested scrollback.
+func CapturePane(target string, scrollback int) (string, error) {
+	out, err := Run("capture-pane", "-p", "-J", "-t", target, "-S", fmt.Sprintf("-%d", scrollback))
+	return string(out), err
+}
+
+// SendLiteral uses tmux's paste protocol, not synthetic typing. Bracketed paste
+// keeps multiline prompts in one input, and stdin keeps text out of tmux's
+// argument/command parser (including flags, semicolons and large messages).
+func SendLiteral(target, text string) error {
+	buffer := fmt.Sprintf("atelier-input-%d-%d", os.Getpid(), time.Now().UnixNano())
+	if _, err := runInput(strings.NewReader(text), "load-buffer", "-b", buffer, "-"); err != nil {
+		return err
+	}
+	defer func() { _, _ = Run("delete-buffer", "-b", buffer) }()
+	_, err := Run("paste-buffer", "-d", "-p", "-r", "-b", buffer, "-t", target)
+	return err
+}
+
+func SendKeys(target string, keys ...string) error {
+	_, err := Run(append([]string{"send-keys", "-t", target, "--"}, keys...)...)
+	return err
+}
+
+func DetachSession(session string) error {
+	_, err := Run("detach-client", "-s", "="+session)
+	return err
+}
+
+func SetSessionOption(session, name, value string) error {
+	_, err := Run("set-option", "-t", session, name, value)
 	return err
 }

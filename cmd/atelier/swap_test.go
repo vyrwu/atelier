@@ -162,6 +162,28 @@ func TestHandoffNoteExportsOrFails(t *testing.T) {
 	}
 }
 
+func TestRestartInvalidatesExpiredSwapLaunch(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	token, release, err := reserveSwap(core.MaitreSlug)
+	if err != nil || token == "" {
+		t.Fatal(token, err)
+	}
+	release()
+	old := time.Now().Add(-2 * swapLaunchTimeout)
+	if err := os.Chtimes(swapPending(core.MaitreSlug), old, old); err != nil {
+		t.Fatal(err)
+	}
+	release, err = takeSwap(core.MaitreSlug, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if release, err := takeSwap(core.MaitreSlug, token); err == nil {
+		release()
+		t.Fatal("expired handoff took over after restart")
+	}
+}
+
 // CLI slugs must never turn the swap reservation into a path outside its cache.
 func TestSwapPathsStayInLockDirectory(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

@@ -123,6 +123,7 @@ func TestGrokIdleReminderPreservesFailure(t *testing.T) {
 }
 
 func TestProviderConfigPathsAndEnvironment(t *testing.T) {
+	t.Setenv("ATELIER_TMUX", "/pinned/tmux")
 	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/claude")
 	t.Setenv("CODEX_HOME", "/custom/codex")
 	t.Setenv("GROK_HOME", "/custom/grok")
@@ -130,7 +131,7 @@ func TestProviderConfigPathsAndEnvironment(t *testing.T) {
 		env := Env("space", k)
 		for key, want := range map[string]string{
 			"CLAUDE_CONFIG_DIR": "/custom/claude", "CODEX_HOME": "/custom/codex",
-			"GROK_HOME": "/custom/grok",
+			"GROK_HOME": "/custom/grok", "ATELIER_TMUX": "/pinned/tmux",
 		} {
 			if env[key] != want {
 				t.Errorf("swap to %s lost %s: %q, want %q", k, key, env[key], want)

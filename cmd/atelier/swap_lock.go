@@ -63,6 +63,13 @@ func takeSwap(slug, token string) (func(), error) {
 			unlock()
 			return nil, fmt.Errorf("%s is already swapping", slug)
 		}
+		// Restart/manual handoff supersedes an expired launch too: its late
+		// child must not take over after this owner releases the lock.
+		// #nosec G703 -- swapLock URL-escapes the slug so it cannot introduce path separators.
+		if err := os.Remove(swapPending(slug)); err != nil && !os.IsNotExist(err) {
+			unlock()
+			return nil, err
+		}
 		return unlock, nil
 	}
 	// #nosec G703 -- swapLock URL-escapes the slug so it cannot introduce path separators.

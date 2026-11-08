@@ -31,11 +31,25 @@ const Window = "claude"
 // window if you exited the agent but left other windows (shells) open — so M-a
 // always brings it back. It resumes the space's conversation with its agent.
 func EnsureAgent(ws core.Workspace) error {
-	if tmux.HasSession(ws.Session) && tmux.HasWindow(ws.Session, Window) {
-		return nil
+	var launchErr error
+	err := core.Update(func(s *core.State) {
+		current := s.Find(ws.Slug)
+		if current == nil || current.Retired {
+			launchErr = fmt.Errorf("space %q is no longer active", ws.Slug)
+			return
+		}
+		// Check and revive under the launch lock. Two concurrent openers
+		// must not respawn the agent that the first one just started.
+		if tmux.HasSession(current.Session) && tmux.HasWindow(current.Session, Window) {
+			return
+		}
+		k := Of(current.Agent)
+		launchErr = runAgent(*current, k, k.ResumeCmd(LatestSession(k, current.Root(), current.Created), ""))
+	})
+	if err != nil {
+		return err
 	}
-	k := Of(ws.Agent)
-	return RunAgent(ws, k, k.ResumeCmd(LatestSession(k, ws.Root(), ws.Created), ""))
+	return launchErr
 }
 
 // RunAgent runs cmd as the space's agent k: in a new session if the space has
@@ -82,7 +96,7 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 	// Popups and future windows inherit the session environment, not the
 	// exports wrapped around the current agent command. A swap needs both
 	// providers' histories even when the server predates these overrides.
-	for key, value := range runtimePaths() {
+	for key, value := range env {
 		if err := tmux.SetSessionEnv(ws.Session, key, value); err != nil {
 			return err
 		}
@@ -95,6 +109,9 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 // git identity so it commits as them.
 func Env(slug string, k Kind) map[string]string {
 	env := runtimePaths()
+	if slug == core.MaitreSlug {
+		env["MCP_TOOL_TIMEOUT"] = "600000"
+	}
 	env["ATELIER_WORKSPACE"] = filepath.Join(core.AteliersRoot(), slug)
 	env["ATELIER_SESSION"], env["ATELIER_SLUG"], env["ATELIER_AGENT"] = slug, slug, string(k)
 	if g := GitConfigGlobal(); g != "" {
@@ -112,6 +129,7 @@ func runtimePaths() map[string]string {
 	env["XDG_CONFIG_HOME"] = filepath.Dir(filepath.Dir(core.ConfigPath()))
 	env["ATELIER_ROOT"] = core.AteliersRoot()
 	env["ATELIER_SOCKET"] = core.LoadConfig().Socket
+	env["ATELIER_TMUX"] = os.Getenv("ATELIER_TMUX")
 	return env
 }
 
@@ -318,4 +336,15 @@ func RefreshAttention() {
 // is safe as a single argument in a /bin/sh command line.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// RefreshTitle backfills a live session from current state while holding the
+// same lock as rename/naming. A stale UI or restore snapshot must not publish
+// its old title after an operator's newer choice.
+func RefreshTitle(session string) {
+	_ = core.Update(func(s *core.State) {
+		if w := s.FindBySession(session); w != nil {
+			_ = tmux.SetTitle(session, w.Title)
+		}
+	})
 }

@@ -17,15 +17,45 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/agent` — the coding agents (Claude Code, Codex, Grok Build): launch/resume, finding
   and exporting their conversations for a handoff, per-session status, hooks,
   their config (trust + MCP registration), the per-workspace guide
-- `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
-- `internal/ui` — the Bubble Tea overlay + the home splash (the only UI)
+- `internal/mcp` — stdio MCP server: three space tools, or twelve operator tools with `--maitre`
+- `internal/operator` — space lifecycle, listing, screen I/O, waiting, focus and destructive confirmation
+- `internal/ui` — Bubble Tea overlays, the home splash, and the embedded Maître terminal
 - `internal/gc` — deleting spaces (one, or all older than an age) and sweeping
   up what deleted spaces leave behind
 - `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
   `handoff` / `win` / `hook` / `usage` / `poll` / `mcp` / `install` / `ls` /
-  `purge` / `gc` / `version`
+  `purge` / `gc` / `spaces` / `read` / `send` / `wait` / `focus` /
+  `rename` / `retire` / `restore` / `delete` / `maitre` / `version`
 
 ## Model & bindings
+
+- Maître is the reserved `maitre` space: one meta-session per instance, hidden
+  from ordinary listings and cleanup, still counted in attention. `M-m`
+  attaches a nested popup client; hiding it leaves the agent running. Its
+  `maitre` key table binds `Esc`/`M-m` close, `M-r` restart and `M-x` swap.
+  The 70% popup runs Bubble Tea and uses the same frame and footer functions
+  as other overlays. `internal/ui/maitre.go` embeds the native tmux client
+  through a PTY and `x/vt`; its session status line is off.
+  `@atelier_maitre_outer` retains the real outer client when the swap overlay
+  updates `@atelier_outer`. Operator tools refuse to target Maître itself;
+  its own swap/restart controls deliberately use the ordinary launch path.
+  `ATELIER_SESSION=maitre` gates CLI destruction: no bypass flags, an attached
+  human client must confirm the tmux menu, hidden/timeout/dismissal means no.
+  MCP config pins the instance socket and all provider directories, and agent
+  identity is also pinned in the tmux session environment. `ATELIER_TMUX` pins
+  a compatible tmux executable across agent/MCP PATH changes.
+  Missing Maître records recover the provider from live session metadata or
+  transcripts without imposing a new conversation cutoff. MCP waits have
+  request contexts and run alongside other requests; tool mutations remain
+  serial. Screen text uses tmux bracketed paste, with the payload on stdin.
+  Restart shares the handoff lock and respects its pending reservation. Opening
+  Maître acknowledges its attention; CLI retire/delete refuse their enclosing
+  space so session shutdown cannot interrupt cleanup or state persistence.
+  MCP purge cancellation interrupts its CLI child cooperatively, clearing the
+  confirmation and checking cancellation under the state lock before deletion.
+  Cleanup already started for one space finishes with its state write.
+  Restore checks retired state under the state lock before changing status;
+  revival checks current provider and session existence under the launch lock.
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
   `claude` window runs the agent — the selected agent, `Workspace.Agent` (""

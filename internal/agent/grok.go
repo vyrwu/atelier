@@ -46,7 +46,9 @@ func prepareGrok(dir, slug string) error {
 		}
 		servers = map[string]any{}
 	}
-	servers["atelier"] = map[string]any{"command": selfPath(), "args": []string{"mcp"}, "env": mcpEnv(slug)}
+	env := mcpEnv(slug)
+	env["ATELIER_AGENT"] = string(Grok)
+	servers["atelier"] = map[string]any{"command": selfPath(), "args": mcpArgs(slug), "env": env}
 	cfg["mcp_servers"] = servers
 	var b bytes.Buffer
 	if err := toml.NewEncoder(&b).Encode(cfg); err != nil {

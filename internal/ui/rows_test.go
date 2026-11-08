@@ -218,3 +218,16 @@ func TestBadgeColumnsLineUpAcrossCounts(t *testing.T) {
 		t.Errorf("worktree icon at %d vs %d — counts of different width shift the column", a, b)
 	}
 }
+
+func TestMaitreNeverAppearsInSpacesOrTrash(t *testing.T) {
+	for _, screen := range []screen{scrActive, scrTrash} {
+		m := Model{screen: screen, all: []core.Workspace{{Slug: core.MaitreSlug, Retired: screen == scrTrash}, {Slug: "ordinary", Retired: screen == scrTrash}}, status: map[string]core.AgentStatus{}}
+		m.rebuild()
+		if len(m.rows) != 1 || m.rows[0].ws.Slug != "ordinary" {
+			t.Fatal(m.rows)
+		}
+		if spaceCount(m.all) != 1 {
+			t.Fatal("Maître in splash count")
+		}
+	}
+}

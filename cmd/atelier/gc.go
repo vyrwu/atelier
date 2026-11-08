@@ -2,14 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/gc"
 	"github.com/vyrwu/atelier/internal/git"
+	"github.com/vyrwu/atelier/internal/operator"
 	"github.com/vyrwu/atelier/internal/tmux"
 )
 
@@ -73,7 +77,7 @@ func list(args []string) error {
 	now := time.Now()
 	var spaces []core.Workspace
 	for _, w := range st.Workspaces {
-		if (!trash || w.Retired) && now.Sub(gc.LastActive(w)) >= time.Duration(age) {
+		if !w.IsMaitre() && (!trash || w.Retired) && now.Sub(gc.LastActive(w)) >= time.Duration(age) {
 			spaces = append(spaces, w)
 		}
 	}
@@ -102,6 +106,12 @@ func state(w core.Workspace) string {
 // purge deletes spaces untouched for a while, behind a confirm:
 // atelier purge [--older-than AGE] [--all] [--force] [--dry-run] [--yes].
 func purge(args []string) error {
+	ctx := context.Background()
+	if operator.FromMaitre() {
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
 	var age ageFlag
 	var p gc.Policy
 	var dry, yes bool
@@ -115,7 +125,10 @@ func purge(args []string) error {
 	}); !ok {
 		return err
 	}
-	if !dry && !yes && !isatty.IsTerminal(os.Stdin.Fd()) { // /dev/null is a character device too
+	if operator.FromMaitre() {
+		p.Force = false
+	}
+	if !operator.FromMaitre() && !dry && !yes && !isatty.IsTerminal(os.Stdin.Fd()) { // /dev/null is a character device too
 		return fmt.Errorf("not a terminal: pass --yes to purge, or --dry-run to look")
 	}
 	p.Age = time.Duration(age)
@@ -128,6 +141,9 @@ func purge(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var doomed, kept []gc.Candidate
 	for _, c := range plan {
 		if (c.Running || len(c.Unsaved) > 0) && !p.Force {
@@ -137,7 +153,11 @@ func purge(args []string) error {
 		}
 	}
 	if len(kept) > 0 {
-		fmt.Printf("Keeping %d with running sessions or unsaved work (--force deletes them too):\n", len(kept))
+		hint := "--force deletes them too"
+		if operator.FromMaitre() {
+			hint = "retire running spaces and save their work first"
+		}
+		fmt.Printf("Keeping %d with running sessions or unsaved work (%s):\n", len(kept), hint)
 		for _, c := range kept {
 			if c.Running {
 				c.Unsaved = append(c.Unsaved, "session is running; retire first")
@@ -162,16 +182,24 @@ func purge(args []string) error {
 	if dry {
 		return nil
 	}
-	if !yes {
-		ok, err := confirm(os.Stdin, fmt.Sprintf("Delete %d space(s) permanently? [y/N] ", len(doomed)))
-		if err != nil || !ok {
-			return err
-		}
+	slugs := []string{}
+	for _, c := range doomed[:min(5, len(doomed))] {
+		slugs = append(slugs, c.Slug)
+	}
+	if len(doomed) > 5 {
+		slugs = append(slugs, "…")
+	}
+	prompt := fmt.Sprintf("Purge %d spaces: %s?", len(doomed), strings.Join(slugs, ", "))
+	maitreConfirm := func(prompt string) error { return operator.ConfirmDestroy(ctx, prompt) }
+	if err := destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, maitreConfirm)(prompt); err != nil {
+		return err
 	}
 	failed := 0
 	for _, c := range doomed {
-		skipped, err := p.Purge(c.Slug, time.Now())
+		skipped, err := p.Purge(ctx, c.Slug, time.Now())
 		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
 		case err != nil:
 			failed++
 			fmt.Printf("%s: %v\n", c.Slug, err)
@@ -190,7 +218,15 @@ func purge(args []string) error {
 
 // Protect the enclosing space and cwd independently: a shell in A can cd to B.
 func currentSpaces(st *core.State) []string {
-	spaces := []string{os.Getenv("ATELIER_SLUG"), cwdSpace()}
+	return append(enclosingSpaces(st), cwdSpace())
+}
+
+// Session identity survives cd; plain tmux shells may only have TMUX_PANE.
+func enclosingSpaces(st *core.State) []string {
+	spaces := []string{os.Getenv("ATELIER_SLUG")}
+	if w := st.FindBySession(os.Getenv("ATELIER_SESSION")); w != nil {
+		spaces = append(spaces, w.Slug)
+	}
 	if pane := os.Getenv("TMUX_PANE"); pane != "" && insideOwnServer() {
 		if out, err := tmux.Run("display-message", "-t", pane, "-p", "#{session_name}"); err == nil {
 			if w := st.FindBySession(strings.TrimSpace(string(out))); w != nil {
@@ -285,15 +321,7 @@ func since(now, t time.Time) string {
 	return days(now.Sub(t))
 }
 
-func days(d time.Duration) string {
-	switch {
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
-}
+func days(d time.Duration) string { return operator.FormatAge(d) }
 
 // clip cuts s to n runes.
 func clip(s string, n int) string {

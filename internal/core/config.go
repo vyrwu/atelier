@@ -25,6 +25,8 @@ type Config struct {
 	// Agent is the coding agent new spaces start with: "claude" (default) or
 	// "codex" or "grok". M-n can choose per space.
 	Agent string `toml:"agent"`
+	// MaitreAgent defaults to Agent when empty.
+	MaitreAgent string `toml:"maitre_agent"`
 }
 
 // LoadConfig reads config.toml (missing file → defaults) and applies ATELIER_ROOT

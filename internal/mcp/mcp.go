@@ -12,10 +12,14 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/vyrwu/atelier/internal/core"
 )
@@ -44,33 +48,100 @@ type rpcError struct {
 // Serve runs the stdio MCP server: it reads newline-delimited JSON-RPC 2.0
 // requests from stdin, dispatches the MCP methods, and writes responses to
 // stdout. It runs until stdin closes.
-func Serve() error {
-	sc := bufio.NewScanner(os.Stdin)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	enc := json.NewEncoder(os.Stdout)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var req request
-		if json.Unmarshal([]byte(line), &req) != nil {
-			continue
-		}
-		resp, ok := dispatch(req)
-		if !ok {
-			continue // notification: no reply
-		}
-		if err := enc.Encode(resp); err != nil {
-			return err
-		}
+func Serve(maitre bool) error {
+	if maitre && os.Getenv("ATELIER_SESSION") != core.MaitreSlug {
+		return fmt.Errorf("operator tools require the Maître session")
 	}
-	return sc.Err()
+	// Mutations remain serial; a long status wait must not hold up other tools.
+	var operations sync.Mutex
+	return serve(os.Stdin, os.Stdout, func(ctx context.Context, req request) (response, bool) {
+		var p callEnvelope
+		waiting := maitre && req.Method == "tools/call" && json.Unmarshal(req.Params, &p) == nil && p.Name == "wait_for_change"
+		if req.Method == "tools/call" && !waiting {
+			operations.Lock()
+			defer operations.Unlock()
+		}
+		if ctx.Err() != nil {
+			return response{}, false
+		}
+		return dispatch(ctx, req, maitre)
+	})
+}
+
+// serve keeps reading while tools run, so the client can cancel a wait or
+// disconnect. Replies share one encoder; request contexts belong to their IDs.
+func serve(in io.Reader, out io.Writer, handle func(context.Context, request) (response, bool)) error {
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	var workers sync.WaitGroup
+	var pendingMu, writeMu sync.Mutex
+	pending := map[string]context.CancelFunc{}
+	var writeErr error
+	enc := json.NewEncoder(out)
+	sc := bufio.NewScanner(in)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		var req request
+		if json.Unmarshal(sc.Bytes(), &req) != nil {
+			continue
+		}
+		if req.Method == "notifications/cancelled" {
+			var p struct {
+				RequestID json.RawMessage `json:"requestId"`
+			}
+			if json.Unmarshal(req.Params, &p) == nil {
+				pendingMu.Lock()
+				if cancel := pending[string(p.RequestID)]; cancel != nil {
+					cancel()
+				}
+				pendingMu.Unlock()
+			}
+			continue
+		}
+		if len(req.ID) == 0 {
+			continue
+		}
+		callCtx, cancel := context.WithCancel(ctx)
+		id := string(req.ID)
+		pendingMu.Lock()
+		if _, exists := pending[id]; exists {
+			pendingMu.Unlock()
+			cancel()
+			continue
+		}
+		pending[id] = cancel
+		pendingMu.Unlock()
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			defer cancel()
+			resp, ok := handle(callCtx, req)
+			if ok && callCtx.Err() == nil {
+				writeMu.Lock()
+				if writeErr == nil {
+					writeErr = enc.Encode(resp)
+					if writeErr != nil {
+						stop()
+						if closer, ok := in.(io.Closer); ok {
+							_ = closer.Close()
+						}
+					}
+				}
+				writeMu.Unlock()
+			}
+			pendingMu.Lock()
+			delete(pending, id)
+			pendingMu.Unlock()
+		}()
+	}
+	stop()
+	workers.Wait()
+	return errors.Join(sc.Err(), writeErr)
 }
 
 // dispatch handles one request, returning the response and whether to send it
 // (false for notifications, which have no id and get no reply).
-func dispatch(req request) (response, bool) {
+func dispatch(ctx context.Context, req request, maitre bool) (response, bool) {
 	if len(req.ID) == 0 {
 		return response{}, false
 	}
@@ -82,12 +153,25 @@ func dispatch(req request) (response, bool) {
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 			"serverInfo":      map[string]interface{}{"name": "atelier", "version": "1"},
 		}
+	case "ping":
+		resp.Result = map[string]interface{}{}
 	case "tools/list":
-		resp.Result = map[string]interface{}{"tools": []interface{}{
-			registerPRSpec(), createWorktreeSpec(), createPRSpec(),
-		}}
+		tools := []interface{}{registerPRSpec(), createWorktreeSpec(), createPRSpec()}
+		if maitre {
+			tools = maitreTools()
+		}
+		resp.Result = map[string]interface{}{"tools": tools}
 	case "tools/call":
-		resp.Result = callTool(req.Params)
+		if maitre {
+			var p callEnvelope
+			if json.Unmarshal(req.Params, &p) != nil {
+				resp.Result = textResult("invalid tool call params", true)
+			} else {
+				resp.Result = callMaitreTool(ctx, p)
+			}
+		} else {
+			resp.Result = callTool(req.Params)
+		}
 	default:
 		resp.Error = &rpcError{Code: -32601, Message: "method not found: " + req.Method}
 	}

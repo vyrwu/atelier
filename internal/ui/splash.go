@@ -32,11 +32,12 @@ type keyGroup struct {
 // the keys work.
 var splashKeys = []keyGroup{
 	{"anywhere", [][2]string{
-		{"M-n", "new space"}, {"M-s", "spaces"}, {"M-t", "trash"}, {"M-h", "home"}, {"M-q", "detach"},
+		{"M-m", "maître"}, {"M-n", "new space"}, {"M-s", "spaces"}, {"M-t", "trash"}, {"M-h", "home"}, {"M-q", "detach"},
 	}},
 	{"in a space", [][2]string{
 		{"M-a", "agent"}, {"M-x", "swap agent"}, {"M-c", "command line"}, {"M-p", "pull requests"}, {"M-w", "worktrees"},
 	}},
+	{"in maître", [][2]string{{"esc", "close"}, {"M-r", "restart"}, {"M-x", "swap agent"}}},
 }
 
 // RunHome shows the landing splash: the wordmark, which external tools are
@@ -44,7 +45,7 @@ var splashKeys = []keyGroup{
 // attaching to atelier lands on a real screen, not a bare shell, and M-h brings
 // you back to it from anywhere.
 func RunHome() error {
-	m := splashModel{count: len(core.Load().Workspaces), deps: checkDeps()}
+	m := splashModel{count: spaceCount(core.Load().Workspaces), deps: checkDeps()}
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
@@ -68,7 +69,7 @@ func (m splashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the workspaces stay live for the next attach.
 			_ = tmux.DetachClient()
 		case "r":
-			m.count = len(core.Load().Workspaces)
+			m.count = spaceCount(core.Load().Workspaces)
 			m.deps = checkDeps()
 		}
 	}
@@ -282,4 +283,14 @@ func found(bin string) bool {
 	}
 	b, _ := exec.Command("gh", "extension", "list").Output()
 	return strings.Contains(string(b), "gh-enhance")
+}
+
+func spaceCount(ws []core.Workspace) int {
+	n := 0
+	for _, w := range ws {
+		if !w.IsMaitre() {
+			n++
+		}
+	}
+	return n
 }

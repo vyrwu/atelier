@@ -9,13 +9,12 @@
 package ui
 
 import (
-	"fmt"
+	"context"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -27,6 +26,7 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/gc"
 	"github.com/vyrwu/atelier/internal/git"
+	"github.com/vyrwu/atelier/internal/operator"
 	"github.com/vyrwu/atelier/internal/tmux"
 )
 
@@ -173,7 +173,7 @@ func newModel(outer string) Model {
 	m.curWS = m.bySession(tmux.ClientSession(outer))
 	m.loadCurrentWorktrees()
 	// First-run / empty: go straight to the new-workspace prompt.
-	if len(m.all) == 0 {
+	if spaceCount(m.all) == 0 {
 		m.screen = scrNew
 	}
 	return m
@@ -216,6 +216,9 @@ func (m *Model) rebuild() {
 	m.rows = m.rows[:0]
 	for i := range m.all {
 		w := &m.all[i]
+		if w.IsMaitre() {
+			continue
+		}
 		// Spaces shows the working set; Trash shows only retired.
 		if m.screen == scrActive && w.Retired {
 			continue
@@ -481,20 +484,23 @@ func (m Model) View() string {
 	case scrConfirm:
 		body = m.viewConfirm()
 	}
-	footer := m.screenFooter()
+	return overlayFrame(m.w, m.h, body, m.screenFooter())
+}
+
+func overlayFrame(w, h int, body, footer string) string {
 	// Fixed-size frame with the footer pinned to the bottom. The rounded frame is
 	// the only border — the tmux popup border is disabled (-B).
-	contentW := m.w - 4
-	innerH := m.h - 2
+	contentW := w - 4
+	innerH := h - 2
 	if footer == "" {
 		inner := lipgloss.NewStyle().Width(contentW).Height(innerH).Render(body)
-		return frameStyle.Width(m.w - 2).Height(innerH).Render(inner)
+		return frameStyle.Width(w - 2).Height(innerH).Render(inner)
 	}
 	footer = lipgloss.NewStyle().Width(contentW).Render(footer)
 	fh := lipgloss.Height(footer)
 	bodyBox := lipgloss.NewStyle().Width(contentW).Height(innerH - fh - 1).Render(body)
 	inner := bodyBox + "\n" + dimStyle.Render(strings.Repeat("─", contentW)) + "\n" + footer
-	return frameStyle.Width(m.w - 2).Height(innerH).Render(inner)
+	return frameStyle.Width(w - 2).Height(innerH).Render(inner)
 }
 
 // screenFooter is the shortcut bar under the current screen. The lists size
@@ -522,6 +528,10 @@ func (m Model) screenFooter() string {
 // its own legend and nothing more.
 func (m Model) footer(verb string, extras ...string) string {
 	parts := append([]string{"↵ " + verb}, extras...)
+	return shortcutFooter(parts...)
+}
+
+func shortcutFooter(parts ...string) string {
 	return hintStyle.Render(strings.Join(parts, "  ·  "))
 }
 
@@ -550,7 +560,7 @@ func (m Model) goHome() (tea.Model, tea.Cmd) {
 func (m Model) switchTo(session string) (tea.Model, tea.Cmd) {
 	if ws := m.bySession(session); ws != nil {
 		_ = agent.EnsureAgent(*ws)
-		_ = tmux.SetTitle(session, ws.Title) // keep the status line correct (survives revive)
+		agent.RefreshTitle(session) // keep the status line correct (survives revive)
 		_ = tmux.SetAgentName(session, agent.Of(ws.Agent).Label())
 		// Entering a blocked workspace acknowledges it: clear the attention so the
 		// badge is "used up" the moment you land (the agent re-flags via its next
@@ -608,8 +618,7 @@ func (m *Model) askSwap(w *core.Workspace) {
 // disk, restorable from Trash, M-t), and refresh the list.
 func (m *Model) deactivate(w core.Workspace) {
 	m.moveOuterOff(w.Session)
-	_ = tmux.KillSession(w.Session)
-	if err := setRetired(w.Slug, true); err != nil {
+	if err := operator.Retire(w.Slug); err != nil {
 		m.err = err.Error()
 	}
 	agent.RefreshAttention() // a killed session may have been blocked
@@ -636,7 +645,7 @@ func (m Model) moveOuterOff(session string) {
 func (m Model) fallbackSession(exclude string) string {
 	for i := range m.all {
 		w := &m.all[i]
-		if w.Session == exclude || w.Retired {
+		if w.Session == exclude || w.Retired || w.IsMaitre() {
 			continue
 		}
 		if m.status[w.Session] != core.StatusGone {
@@ -648,7 +657,7 @@ func (m Model) fallbackSession(exclude string) string {
 
 // reactivate restores a retired workspace and switches into it (resuming its agent).
 func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
-	if err := setRetired(w.Slug, false); err != nil {
+	if err := operator.SetRetired(w.Slug, false); err != nil {
 		m.err = err.Error()
 		m.load()
 		return m, nil
@@ -656,42 +665,11 @@ func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
 	return m.switchTo(w.Session)
 }
 
-func setRetired(slug string, retired bool) error {
-	found := false
-	var statusErr error
-	err := core.Update(func(s *core.State) {
-		if w := s.Find(slug); w != nil {
-			found = true
-			if !retired {
-				if statusErr = agent.SetStatus(w.Session, core.StatusIdle); statusErr != nil {
-					return
-				}
-			}
-			w.Retired = retired
-			if retired {
-				w.RetiredAt = time.Now()
-			} else {
-				w.RetiredAt = time.Time{}
-			}
-		}
-	})
-	if err != nil {
-		return err
-	}
-	if statusErr != nil {
-		return statusErr
-	}
-	if !found {
-		return fmt.Errorf("space %q no longer exists", slug)
-	}
-	return nil
-}
-
 // deleteWorkspace deletes w for good (gc.Delete), then refreshes the list in
 // place.
 func (m *Model) deleteWorkspace(w core.Workspace) {
 	m.moveOuterOff(w.Session)
-	if err := gc.Delete(w); err != nil {
+	if err := gc.Delete(context.Background(), w); err != nil {
 		m.err = "delete " + w.Slug + ": " + err.Error()
 	}
 	agent.RefreshAttention() // a deleted session may have been blocked

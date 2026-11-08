@@ -4,6 +4,7 @@
 package gc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -133,20 +134,25 @@ func Unsaved(w core.Workspace) []string {
 // source repository keeps a record of a checkout that's gone), its directory,
 // and its record. The record goes last, so a space that fails to delete stays
 // listed and can be deleted again.
-func Delete(w core.Workspace) error {
+func Delete(ctx context.Context, w core.Workspace) error {
 	var deleteErr error
 	err := core.Update(func(s *core.State) {
 		if current := s.Find(w.Slug); current != nil {
 			w = *current
 		}
-		deleteErr = deleteWorkspace(s, w)
+		deleteErr = deleteWorkspace(ctx, s, w)
 	})
 	return errors.Join(deleteErr, err)
 }
 
 // deleteWorkspace runs with the state lock held, which also serializes Trash
 // restoration. Drop the record only after all files are removed successfully.
-func deleteWorkspace(s *core.State, w core.Workspace) error {
+func deleteWorkspace(ctx context.Context, s *core.State, w core.Workspace) error {
+	// Check under the state lock, immediately before any destructive work.
+	// Once started, finish this space's cleanup and persist its state together.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !core.ValidSpaceName(w.Slug) {
 		return fmt.Errorf("refusing to delete %q: not a space's directory name", w.Slug)
 	}
@@ -220,16 +226,19 @@ func (p Policy) Plan(s *core.State, now time.Time) ([]Candidate, error) {
 }
 
 func (p Policy) selects(w core.Workspace, now time.Time) bool {
-	return !slices.Contains(p.Keep, w.Slug) && (w.Retired || p.Active) && now.Sub(LastActive(w)) >= p.Age
+	return !w.IsMaitre() && !slices.Contains(p.Keep, w.Slug) && (w.Retired || p.Active) && now.Sub(LastActive(w)) >= p.Age
 }
 
 // Purge deletes the space slug if p still selects it. Its record and worktrees
 // are read again first, since either may have changed since the plan was shown:
 // the space restored, or work added. The state lock spans the final checks and
 // deletion, so restoration cannot interleave. skipped says why it was left.
-func (p Policy) Purge(slug string, now time.Time) (skipped string, err error) {
+func (p Policy) Purge(ctx context.Context, slug string, now time.Time) (skipped string, err error) {
 	var deleteErr error
 	err = core.Update(func(s *core.State) {
+		if deleteErr = ctx.Err(); deleteErr != nil {
+			return
+		}
 		w := s.Find(slug)
 		switch {
 		case w == nil:
@@ -252,7 +261,7 @@ func (p Policy) Purge(slug string, now time.Time) (skipped string, err error) {
 			skipped = "unsaved work: " + strings.Join(u, ", ")
 			return
 		}
-		deleteErr = deleteWorkspace(s, *w)
+		deleteErr = deleteWorkspace(ctx, s, *w)
 	})
 	return skipped, errors.Join(deleteErr, err)
 }
@@ -335,7 +344,7 @@ func triage(s *core.State, root string, rootOK bool, live map[string]bool, now t
 		if rootOK && !live[w.Session] && now.Sub(w.Created) > grace && !exists(w.Root()) {
 			records = append(records, w.Slug)
 		}
-		if w.Retired && live[w.Session] {
+		if !w.IsMaitre() && w.Retired && live[w.Session] {
 			sessions = append(sessions, w.Slug)
 		}
 	}
@@ -344,7 +353,7 @@ func triage(s *core.State, root string, rootOK bool, live map[string]bool, now t
 	}
 	entries, _ := os.ReadDir(root)
 	for _, e := range entries {
-		if e.IsDir() && core.ValidSpaceName(e.Name()) && s.Find(e.Name()) == nil && isSpaceDir(filepath.Join(root, e.Name())) {
+		if e.Name() != core.MaitreSlug && e.IsDir() && core.ValidSpaceName(e.Name()) && s.Find(e.Name()) == nil && isSpaceDir(filepath.Join(root, e.Name())) {
 			adopted = append(adopted, e.Name())
 		}
 	}

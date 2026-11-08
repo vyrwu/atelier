@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // stateVersion is bumped only when the on-disk shape changes incompatibly.
@@ -209,4 +210,24 @@ func TryLockFile(path string) (unlock func(), ok bool, err error) {
 		return nil, false, nil
 	}
 	return func() { _ = funlock(f); _ = f.Close() }, true, nil
+}
+
+// EnsureMaitre creates the one operator record under the state lock. Reopening
+// preserves its selected agent and conversation, even if the default changed.
+func EnsureMaitre(agent string) (Workspace, error) {
+	var w Workspace
+	err := Update(func(s *State) {
+		if existing := s.Find(MaitreSlug); existing != nil {
+			w = *existing
+			return
+		}
+		w = Workspace{Slug: MaitreSlug, Session: MaitreSlug, Title: MaitreTitle, Agent: agent, Created: time.Now()}
+		// A missing index record must not make existing transcripts too old
+		// to resume. As in GC adoption, the original creation time is unknown.
+		if fi, err := os.Stat(w.Root()); err == nil && fi.IsDir() {
+			w.Created = time.Time{}
+		}
+		s.Workspaces = append(s.Workspaces, w)
+	})
+	return w, err
 }

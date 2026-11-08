@@ -81,3 +81,9 @@ func TestStatusJobPinsStatePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestDueSpacesExcludesMaitre(t *testing.T) {
+	if got := dueSpaces([]core.Workspace{{Slug: core.MaitreSlug, Session: core.MaitreSlug}}, core.MaitreSlug, time.Now()); len(got) != 0 {
+		t.Fatal(got)
+	}
+}

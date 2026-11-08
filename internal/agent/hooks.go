@@ -27,6 +27,11 @@ import (
 // prompt or an unregistered tool, never a corrupt file (atomic write).
 func PrepareProject(dir, slug string) error {
 	_ = InstallClaudeUsage(dir)
+	if slug == core.MaitreSlug {
+		if err := allowMaitreTools(dir); err != nil {
+			return err
+		}
+	}
 	path := claudeConfigJSON()
 	unlock, err := lockConfig(path)
 	if err != nil {
@@ -131,7 +136,7 @@ func atelierMCPServer(slug string) map[string]any {
 	return map[string]any{
 		"type":    "stdio",
 		"command": selfPath(),
-		"args":    []string{"mcp"},
+		"args":    mcpArgs(slug),
 		"env":     mcpEnv(slug),
 	}
 }
@@ -141,12 +146,10 @@ func atelierMCPServer(slug string) map[string]any {
 // path-controlling env that is active now, so the server reads the same state,
 // config, and ateliers root — critical under `make dev`, which relocates them.
 func mcpEnv(slug string) map[string]string {
-	env := map[string]string{"ATELIER_SESSION": slug}
-	for _, k := range []string{"ATELIER_ROOT", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"} {
-		if v := os.Getenv(k); v != "" {
-			env[k] = v
-		}
-	}
+	env := runtimePaths()
+	env["ATELIER_SESSION"], env["ATELIER_SLUG"] = slug, slug
+	env["ATELIER_WORKSPACE"] = filepath.Join(core.AteliersRoot(), slug)
+
 	return env
 }
 

@@ -28,6 +28,7 @@ var version = "dev"
 
 func main() {
 	core.LoadConfig() // applies ATELIER_ROOT; harmless everywhere
+	_ = os.Setenv("ATELIER_TMUX", tmux.Binary())
 	ui.Version = version
 	args := os.Args[1:]
 	cmd := ""
@@ -68,6 +69,20 @@ func run(cmd string, args []string) error {
 		return usage(args)
 	case "poll": // atelier poll <session> — tmux's PR status job; prints nothing
 		return poll(args)
+	case "read":
+		return readCmd(args)
+	case "send":
+		return sendCmd(args)
+	case "wait":
+		return waitCmd(args)
+	case "delete":
+		return deleteCmd(args)
+	case "focus", "rename", "retire", "restore":
+		return lifecycleCmd(cmd, args)
+	case "maitre":
+		return maitreCmd(args)
+	case "spaces":
+		return spacesCmd(args)
 	case "ls": // atelier ls [--trash] [--older-than AGE] — the spaces, stalest first
 		return list(args)
 	case "purge": // atelier purge [--older-than AGE] [--all] [--force] [--dry-run] [--yes]
@@ -75,7 +90,7 @@ func run(cmd string, args []string) error {
 	case "gc": // atelier gc [--dry-run] — sweep up what deleted spaces left behind
 		return collect(args)
 	case "mcp":
-		return mcp.Serve()
+		return mcp.Serve(hasFlag(args, "--maitre"))
 	case "install":
 		return install()
 	case "version", "--version", "-v":
@@ -237,7 +252,7 @@ func install() error {
 	if _, err := exec.LookPath("codex"); err == nil {
 		fmt.Println("Codex runs hooks only once you trust them: on the first Codex launch, review the hooks and trust atelier's (the ones running `atelier hook`).")
 	}
-	fmt.Println("Run `atelier` to start. Inside: M-s spaces · M-p PRs · M-w worktrees · M-t trash · M-n new · M-a agent · M-x swap agent · M-c shell · M-h home · M-q detach.")
+	fmt.Println("Run `atelier` to start. Inside: M-s spaces · M-p PRs · M-w worktrees · M-t trash · M-n new · M-m maître · M-a agent · M-x swap agent · M-c shell · M-h home · M-q detach.")
 	return nil
 }
 
@@ -376,6 +391,15 @@ bind -n M-p set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 bind -n M-w set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --worktrees"
 bind -n M-t set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --trash"
 bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --new"
+# Maître is one background session, viewed through a nested popup client.
+# Keep its opener separate from @atelier_outer, which its swap popup replaces.
+bind -n M-m set-option -gF @atelier_maitre_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s maitre"
+# Replace this owned table so upgrades remove obsolete bindings as well.
+unbind -q -a -T maitre
+bind -T maitre M-m detach-client
+bind -T maitre Escape detach-client
+bind -T maitre M-r run-shell -b "%[1]s maitre --restart"
+bind -T maitre M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 46 -h 11 -E "%[1]s open --swap"
 # Intra-workspace window nav (run-shell DOES expand #{session_name}). M-a brings
 # the agent back, respawning it if you exited it — everywhere, a PR's windows
 # included. M-c is the workspace base shell. Both toast (no-op) when pressed off
@@ -399,7 +423,7 @@ bind -n M-q detach-client
 }
 
 func execTmux(args ...string) error {
-	bin, err := exec.LookPath("tmux")
+	bin, err := exec.LookPath(tmux.Binary())
 	if err != nil {
 		return err
 	}
@@ -524,9 +548,10 @@ func createWorkspace(args []string) error {
 	if gitCfg := agent.GitConfigGlobal(); gitCfg != "" {
 		_ = tmux.SetSessionEnv(slug, "GIT_CONFIG_GLOBAL", gitCfg) // future windows too
 	}
-	_ = tmux.SetTitle(slug, w.Title)                                       // placeholder title on the status line
+	agent.RefreshTitle(slug)                                               // placeholder title on the status line
 	_ = tmux.SetStatusMarker(slug, agent.StatusMarker(core.StatusWorking)) // it's launching — show working at once
 
+	fmt.Println(slug) // publish only after the initial display is ready
 	outer := flagVal(args, "--outer")
 	if hasFlag(args, "--switch") {
 		_ = tmux.SelectWindow(slug, agent.Window)
@@ -537,14 +562,17 @@ func createWorkspace(args []string) error {
 	title := w.Title
 	if cfg.Naming {
 		if ttl := agent.GenerateTitle(k, intent, cfg.NamingModel); ttl != "" {
-			title = ttl
-			_ = core.Update(func(s *core.State) {
-				if x := s.FindBySession(slug); x != nil {
-					x.Title = ttl
+			changed := false
+			err := core.Update(func(s *core.State) {
+				changed = setGeneratedTitle(s, slug, w.Title, ttl)
+				if changed {
+					_ = tmux.SetTitle(slug, ttl)
 				}
 			})
-			_ = tmux.SetTitle(slug, ttl)
-			_ = tmux.RefreshStatus()
+			if err == nil && changed {
+				title = ttl
+				_ = tmux.RefreshStatus()
+			}
 		}
 	}
 	// Resolve the spinner into a green check-mark with the final name, held in the
@@ -667,4 +695,13 @@ func deterministicTitle(intent string) string {
 		s = strings.TrimSpace(string(r[:60])) + "…"
 	}
 	return s
+}
+
+// A rename while async naming runs is intentional and must win over its result.
+func setGeneratedTitle(s *core.State, slug, expected, title string) bool {
+	if w := s.Find(slug); w != nil && w.Title == expected {
+		w.Title = title
+		return true
+	}
+	return false
 }

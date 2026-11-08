@@ -39,6 +39,10 @@ requests your agents open come to you, with their diff and CI one key away.
 
 ## Highlights
 
+- **Maître runs the workshop for you.** `M-m`, ask it to start, check on,
+  answer, or tidy spaces. One persistent operator session spans the whole
+  instance and asks before deleting anything.
+
 - **Start in the background.** `M-n`, describe the task, keep working. A
   status-line spinner says when the space is ready.
 - **One signal for attention.** A space waiting on you is marked in the status
@@ -125,11 +129,18 @@ The splash (`M-h`) lists them all.
 
 | Anywhere | | In a space | |
 |---|---|---|---|
+| `M-m` | Maître | | |
 | `M-n` | new space | `M-a` | the agent (restarts it if you exited) |
 | `M-s` | spaces | `M-x` | swap agent |
 | `M-t` | trash | `M-c` | command line |
 | `M-h` | home | `M-p` | pull requests |
 | `M-q` | detach | `M-w` | worktrees |
+
+Maître runs in a Bubble Tea popup using the same frame and shortcut legend
+as the other overlays. `Esc` or `M-m` hides it while the agent keeps
+working, `M-r` starts a fresh conversation, and `M-x` swaps agents. Other
+atelier shortcuts pass through to the agent. Ask Maître to take you to a space
+to leave the popup and focus it.
 
 In the overlays, type to filter, `Up`/`Down` to move, `Esc` to close.
 
@@ -144,6 +155,46 @@ In the overlays, type to filter, `Up`/`Down` to move, `Esc` to close.
 
 In a PR's diff window, `M-e` opens its checks; in its checks window, `M-d` goes
 back to the diff.
+
+## Operator CLI
+
+Maître uses these same commands through `atelier mcp --maitre`. Ordinary space
+agents keep their existing worktree and PR tools.
+
+```sh
+atelier spaces --json                    # active spaces, status and cached PRs
+atelier spaces --trash                   # retired spaces
+atelier create "Fix the API tests" --agent codex  # prints the new slug before naming finishes
+atelier read spry-otter --lines 60        # agent screen and scrollback
+atelier send spry-otter "Use the existing fixture"
+atelier send spry-otter --no-enter -- "--version"  # literal text starting with --
+atelier send spry-otter --key Down --key Enter
+atelier wait --timeout 5m --json          # newly blocked or idle spaces; [] on timeout
+atelier rename spry-otter "Fix API tests"
+atelier retire spry-otter
+atelier restore spry-otter
+atelier focus spry-otter                  # move the client that opened Maître
+atelier delete spry-otter                 # permanent; asks first
+```
+
+`send` pastes text literally and submits it; multiline text stays in one paste,
+and `--no-enter` leaves it unsubmitted. Put flag-like text after `--`.
+Named keys are `Enter`, `Escape`, `Up`, `Down`, `Tab`, `1`–`9`, and `C-c`.
+`wait` ignores spaces already idle when called; its default is five minutes
+(50 seconds under Grok), capped at 30 minutes. Maître's Claude and Codex tool
+connections allow ten minutes per call, so keep MCP waits below that limit.
+MCP waits accept cancellation and leave the connection free for other requests.
+
+Deletion and purge invoked by Maître always ask through atelier's menu on a
+client viewing Maître. Hidden, dismissed, and unanswered requests are refused;
+the confirmation expires after 60 seconds. In Maître, `--yes` never bypasses
+this question and purge ignores `--force`, keeping running or unsaved spaces.
+Grok's own tool approval prompts still apply.
+CLI `retire` and `delete` refuse to stop the space containing their own process;
+run them from Home or another space.
+Canceling an MCP delete or purge invalidates its pending confirmation. Purge
+stops before the next deletion; cleanup already started for a space finishes
+before the command exits.
 
 ## Cleaning up
 
@@ -185,13 +236,15 @@ Optional, in `~/.config/atelier/config.toml`:
 root         = "~/ateliers"  # where spaces live
 socket       = "atelier"     # atelier's tmux socket
 agent        = "claude"      # "claude", "codex", or "grok"
+maitre_agent = "codex"       # optional; otherwise uses agent
 naming       = true          # let the agent title new spaces
 naming_model = "sonnet"      # the model Claude titles them with
 ```
 
 `ATELIER_ROOT` and `ATELIER_SOCKET` override `root` and `socket`. Every agent
 reads one shared guide, `~/.config/atelier/WORKSPACE_CLAUDE.md`; edit it to
-change what they're told. `GROK_HOME` is respected for Grok config,
+change what they're told. Maître has its own user-editable guide,
+`~/.config/atelier/MAITRE.md`, created on first use. `GROK_HOME` is respected for Grok config,
 login, and transcript discovery.
 
 ## How it works
@@ -199,12 +252,16 @@ login, and transcript discovery.
 ```
 tmux -L atelier               atelier's own server; your tmux is untouched
 ├── home                      the splash: keymap and dependency check
+├── maitre                    one operator session, shown through the M-m popup
 └── spry-otter                one session per space
     ├── claude                the selected coding agent
     ├── shell                 M-c
     └── pr-atelier-128        a PR diff, opened from M-p
 ```
 
+- **Maître** is an ordinary agent using your subscriptions and atelier's operator
+  commands. Its conversation persists independently of the popup; it stays out
+  of space lists and cleanup, but counts in the attention badge when blocked.
 - **Status** comes from hooks atelier installs into each agent's config. They do
   nothing outside atelier.
 - **Swapping** saves the outgoing agent's conversation to `.atelier/handoff/`

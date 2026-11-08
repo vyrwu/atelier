@@ -1,7 +1,9 @@
 package gc
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +39,26 @@ func sandbox(t *testing.T) (root string) {
 		t.Setenv(k, v)
 	}
 	return root
+}
+
+func TestCancelledPurgeKeepsSpace(t *testing.T) {
+	sandbox(t)
+	w := core.Workspace{Slug: "keep", Session: "keep", Retired: true}
+	if err := os.MkdirAll(w.Root(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	put(t, w)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := (Policy{Force: true}).Purge(ctx, w.Slug, time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if core.Load().Find(w.Slug) == nil {
+		t.Fatal("cancelled purge removed state")
+	}
+	if _, err := os.Stat(w.Root()); err != nil {
+		t.Fatal("cancelled purge removed directory", err)
+	}
 }
 
 func put(t *testing.T, ws ...core.Workspace) {
@@ -275,13 +297,13 @@ func TestPurge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if why, err := p.Purge("restored", time.Now()); err != nil || why == "" {
+	if why, err := p.Purge(context.Background(), "restored", time.Now()); err != nil || why == "" {
 		t.Errorf("restored space: skipped=%q err=%v, want kept", why, err)
 	}
-	if why, err := p.Purge("busy", time.Now()); err != nil || !strings.Contains(why, "unsaved") {
+	if why, err := p.Purge(context.Background(), "busy", time.Now()); err != nil || !strings.Contains(why, "unsaved") {
 		t.Errorf("busy space: skipped=%q err=%v, want kept for unsaved work", why, err)
 	}
-	if why, err := p.Purge("gone", time.Now()); err != nil || why != "" {
+	if why, err := p.Purge(context.Background(), "gone", time.Now()); err != nil || why != "" {
 		t.Fatalf("stale space: skipped=%q err=%v", why, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "gone")); !os.IsNotExist(err) {
@@ -297,12 +319,12 @@ func TestPurge(t *testing.T) {
 	if out := run(t, src, "worktree", "list"); strings.Contains(out, "b-gone") {
 		t.Errorf("source repo still lists the worktree:\n%s", out)
 	}
-	if why, _ := p.Purge("gone", time.Now()); why != "already gone" {
+	if why, _ := p.Purge(context.Background(), "gone", time.Now()); why != "already gone" {
 		t.Errorf("purging twice: %q", why)
 	}
 
 	p.Force = true
-	if why, err := p.Purge("busy", time.Now()); err != nil || why != "" {
+	if why, err := p.Purge(context.Background(), "busy", time.Now()); err != nil || why != "" {
 		t.Errorf("--force: skipped=%q err=%v", why, err)
 	}
 }
@@ -331,7 +353,7 @@ func TestPurgeWaitsForRestore(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		skipped, err := (Policy{}).Purge(w.Slug, time.Now())
+		skipped, err := (Policy{}).Purge(context.Background(), w.Slug, time.Now())
 		done <- result{skipped, err}
 	}()
 	// Give the competing purge an opportunity to reach its destructive step.
@@ -372,7 +394,7 @@ func TestDeleteRefusesBadSlugs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, slug := range []string{"", ".", "..", "../x", "a/b", ".hidden"} {
-		if err := Delete(core.Workspace{Slug: slug}); err == nil {
+		if err := Delete(context.Background(), core.Workspace{Slug: slug}); err == nil {
 			t.Errorf("Delete(%q) went ahead", slug)
 		}
 	}
@@ -396,7 +418,7 @@ func TestDeleteRefusesBadSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, session := range []string{"../sentinel", "", ".", "..", "a/b"} {
-		if err := Delete(core.Workspace{Slug: "keep", Session: session}); err == nil {
+		if err := Delete(context.Background(), core.Workspace{Slug: "keep", Session: session}); err == nil {
 			t.Errorf("Delete with session %q went ahead", session)
 		}
 	}
@@ -584,5 +606,34 @@ func TestSweepPrunesSourceRepos(t *testing.T) {
 	}
 	if out := run(t, src, "worktree", "list"); strings.Contains(out, "/dead/") || !strings.Contains(out, "/live/") {
 		t.Errorf("worktree list after prune:\n%s", out)
+	}
+}
+
+func TestPolicyNeverSelectsMaitre(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	p := Policy{Active: true, Force: true}
+	if p.selects(core.Workspace{Slug: core.MaitreSlug, Session: core.MaitreSlug}, time.Now()) {
+		t.Fatal("selected Maître")
+	}
+	if !p.selects(core.Workspace{Slug: "ordinary", Session: "ordinary"}, time.Now()) {
+		t.Fatal("did not select ordinary space")
+	}
+}
+
+func TestTriageDoesNotAdoptMaitreDir(t *testing.T) {
+	root := sandbox(t)
+	for _, slug := range []string{core.MaitreSlug, "spry-otter"} {
+		dir := filepath.Join(root, slug)
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// Even an accidentally replaced guide must not make Maître an ordinary space.
+		if err := os.Symlink(core.WorkspaceGuidePath(), filepath.Join(dir, "CLAUDE.md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, adopted, _ := triage(&core.State{}, root, true, nil, time.Now())
+	if len(adopted) != 1 || adopted[0] != "spry-otter" {
+		t.Fatalf("adopted: %v", adopted)
 	}
 }
