@@ -87,7 +87,7 @@ func run(cmd string, args []string) error {
 	case "gc": // atelier gc [--dry-run] — sweep up what deleted spaces left behind
 		return collect(args)
 	case "mcp":
-		return mcp.Serve()
+		return mcp.Serve(hasFlag(args, "--maitre"))
 	case "install":
 		return install()
 	case "version", "--version", "-v":

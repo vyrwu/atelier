@@ -44,7 +44,10 @@ type rpcError struct {
 // Serve runs the stdio MCP server: it reads newline-delimited JSON-RPC 2.0
 // requests from stdin, dispatches the MCP methods, and writes responses to
 // stdout. It runs until stdin closes.
-func Serve() error {
+func Serve(maitre bool) error {
+	if maitre && os.Getenv("ATELIER_SESSION") != core.MaitreSlug {
+		return fmt.Errorf("operator tools require the Maître session")
+	}
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	enc := json.NewEncoder(os.Stdout)
@@ -57,7 +60,7 @@ func Serve() error {
 		if json.Unmarshal([]byte(line), &req) != nil {
 			continue
 		}
-		resp, ok := dispatch(req)
+		resp, ok := dispatch(req, maitre)
 		if !ok {
 			continue // notification: no reply
 		}
@@ -70,7 +73,7 @@ func Serve() error {
 
 // dispatch handles one request, returning the response and whether to send it
 // (false for notifications, which have no id and get no reply).
-func dispatch(req request) (response, bool) {
+func dispatch(req request, maitre bool) (response, bool) {
 	if len(req.ID) == 0 {
 		return response{}, false
 	}
@@ -83,11 +86,22 @@ func dispatch(req request) (response, bool) {
 			"serverInfo":      map[string]interface{}{"name": "atelier", "version": "1"},
 		}
 	case "tools/list":
-		resp.Result = map[string]interface{}{"tools": []interface{}{
-			registerPRSpec(), createWorktreeSpec(), createPRSpec(),
-		}}
+		tools := []interface{}{registerPRSpec(), createWorktreeSpec(), createPRSpec()}
+		if maitre {
+			tools = maitreTools()
+		}
+		resp.Result = map[string]interface{}{"tools": tools}
 	case "tools/call":
-		resp.Result = callTool(req.Params)
+		if maitre {
+			var p callEnvelope
+			if json.Unmarshal(req.Params, &p) != nil {
+				resp.Result = textResult("invalid tool call params", true)
+			} else {
+				resp.Result = callMaitreTool(p)
+			}
+		} else {
+			resp.Result = callTool(req.Params)
+		}
 	default:
 		resp.Error = &rpcError{Code: -32601, Message: "method not found: " + req.Method}
 	}
