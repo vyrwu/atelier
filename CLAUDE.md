@@ -46,6 +46,8 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   binary through `$ATELIER_BIN`. Launches pin the instance paths and socket,
   and repeat provider preparation on restore. Grok titles use the deterministic
   fallback; its CLI cannot isolate all config for an auxiliary title call.
+  Grok launches set GROK_THEME=terminal and GROK_TERMINAL_THEME=1 so the TUI
+  inherits the terminal canvas instead of painting its own dark background.
 - Allowances: `atelier usage` is tmux's asynchronous status job. It renders
   cached account quotas immediately and refetches stale readings
   (`UsageStale`: Codex 1 min, Claude 15 min — its `/usage` boots the CLI);

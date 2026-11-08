@@ -73,11 +73,14 @@ func (k Kind) Bin() string { return string(k) }
 // environment, which has no ATELIER_SESSION.
 const codexFlags = "--dangerously-bypass-approvals-and-sandbox -c check_for_update_on_startup=false"
 
+// Grok's terminal theme leaves the operator's canvas and cursor colors intact.
+const grokCommand = "env GROK_TERMINAL_THEME=1 GROK_THEME=terminal grok --trust"
+
 // LaunchCmd is the shell command that starts the agent fresh in a space with
 // prompt as its opening message.
 func (k Kind) LaunchCmd(prompt string) string {
 	if k == Grok {
-		return "grok --trust" + codexArg(prompt)
+		return grokCommand + codexArg(prompt)
 	}
 	if k == Codex {
 		return "codex " + codexFlags + codexArg(prompt)

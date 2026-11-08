@@ -31,7 +31,11 @@ func TestLaunchCmdQuotesPrompt(t *testing.T) {
 	for _, k := range Kinds() {
 		for _, p := range []string{"it's broken", "rm -rf /; echo pwned", "use `git log` and $HOME", `say "hi"`} {
 			cmd := k.LaunchCmd(p)
-			if !strings.HasPrefix(cmd, k.Bin()+" ") || !strings.HasSuffix(cmd, "'") {
+			prefix := k.Bin() + " "
+			if k == Grok {
+				prefix = grokCommand + " "
+			}
+			if !strings.HasPrefix(cmd, prefix) || !strings.HasSuffix(cmd, "'") {
 				t.Errorf("%s.LaunchCmd(%q) = %q, want the prompt single-quoted last", k, p, cmd)
 			}
 			if !strings.Contains(cmd, shellQuote(p)) {
@@ -86,8 +90,8 @@ func TestResumeCmd(t *testing.T) {
 		{Claude, "", "go", "claude 'go'"},
 		{Claude, "abc", "", "claude --resume 'abc' || claude"},
 		{Claude, "abc", "go", "claude --resume 'abc' 'go' || claude 'go'"},
-		{Grok, "", "", "grok --trust"},
-		{Grok, "abc", "go", "grok --trust --resume 'abc' -- 'go' || grok --trust -- 'go'"},
+		{Grok, "", "", grokCommand},
+		{Grok, "abc", "go", grokCommand + " --resume 'abc' -- 'go' || " + grokCommand + " -- 'go'"},
 		{Codex, "", "", "codex " + codexFlags},
 		{Codex, "abc", "go", "codex resume " + codexFlags + " 'abc' -- 'go' || codex " + codexFlags + " -- 'go'"},
 	}

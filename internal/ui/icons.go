@@ -35,11 +35,11 @@ const (
 )
 
 // Agent glyphs mark which agent a space runs. Claude and Codex use Codicons
-// (Nerd Fonts 3.5.0+); Grok uses its initial.
+// (Nerd Fonts 3.5.0+); Grok uses the Atelier Logos fallback font.
 const (
-	glyphClaude = "\uec82" // nf-cod-claude (U+EC82)
-	glyphGrok   = "G"
-	glyphCodex  = "\uec81" // nf-cod-openai (U+EC81)
+	glyphClaude = "\uec82"     // nf-cod-claude (U+EC82)
+	glyphGrok   = "\U00100001" // Atelier Logos: Grok, supplementary PUA-B
+	glyphCodex  = "\uec81"     // nf-cod-openai (U+EC81)
 )
 
 // agentColor is agent k's brand colour.

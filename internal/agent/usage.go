@@ -201,7 +201,7 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 	case Codex:
 		glyph, color = "\uec81", 39
 	case Grok:
-		glyph, color = "G", 252
+		glyph, color = "\U00100001", 252 // Atelier Logos: Grok (U+100001)
 	}
 	text := fmt.Sprintf("#[fg=colour%d]%s", color, glyph) + usageDim
 	if len(u.Buckets) == 0 {
