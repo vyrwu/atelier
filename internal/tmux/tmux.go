@@ -422,3 +422,8 @@ func SendKeys(target string, keys ...string) error {
 	_, err := Run(append([]string{"send-keys", "-t", target, "--"}, keys...)...)
 	return err
 }
+
+func DetachSession(session string) error {
+	_, err := Run("detach-client", "-s", "="+session)
+	return err
+}

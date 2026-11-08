@@ -76,6 +76,8 @@ func run(cmd string, args []string) error {
 		return waitCmd(args)
 	case "delete":
 		return deleteCmd(args)
+	case "focus", "rename", "retire", "restore":
+		return lifecycleCmd(cmd, args)
 	case "spaces":
 		return spacesCmd(args)
 	case "ls": // atelier ls [--trash] [--older-than AGE] — the spaces, stalest first
@@ -531,6 +533,7 @@ func createWorkspace(args []string) error {
 		_ = core.RemoveWorkspace(slug)
 		return err
 	}
+	fmt.Println(slug) // the builder continues naming after its caller gets the handle
 	if gitCfg := agent.GitConfigGlobal(); gitCfg != "" {
 		_ = tmux.SetSessionEnv(slug, "GIT_CONFIG_GLOBAL", gitCfg) // future windows too
 	}

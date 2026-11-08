@@ -125,3 +125,24 @@ func deleteCmd(args []string) error {
 	}
 	return operator.Delete(args[0], destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, operator.ConfirmDestroy))
 }
+
+func lifecycleCmd(verb string, args []string) error {
+	n := 1
+	if verb == "rename" {
+		n = 2
+	}
+	if len(args) != n {
+		return fmt.Errorf("usage: atelier %s <space>%s", verb, map[bool]string{true: " <title>"}[n == 2])
+	}
+	switch verb {
+	case "rename":
+		return operator.Rename(args[0], args[1])
+	case "retire":
+		return operator.Retire(args[0])
+	case "restore":
+		return operator.Restore(args[0])
+	case "focus":
+		return operator.Focus(args[0])
+	}
+	return fmt.Errorf("unknown operator command %q", verb)
+}
