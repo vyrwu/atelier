@@ -172,7 +172,7 @@ func newModel(outer string) Model {
 	m.curWS = m.bySession(tmux.ClientSession(outer))
 	m.loadCurrentWorktrees()
 	// First-run / empty: go straight to the new-workspace prompt.
-	if len(m.all) == 0 {
+	if spaceCount(m.all) == 0 {
 		m.screen = scrNew
 	}
 	return m

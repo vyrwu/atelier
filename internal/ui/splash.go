@@ -32,11 +32,12 @@ type keyGroup struct {
 // the keys work.
 var splashKeys = []keyGroup{
 	{"anywhere", [][2]string{
-		{"M-n", "new space"}, {"M-s", "spaces"}, {"M-t", "trash"}, {"M-h", "home"}, {"M-q", "detach"},
+		{"M-m", "maître"}, {"M-n", "new space"}, {"M-s", "spaces"}, {"M-t", "trash"}, {"M-h", "home"}, {"M-q", "detach"},
 	}},
 	{"in a space", [][2]string{
 		{"M-a", "agent"}, {"M-x", "swap agent"}, {"M-c", "command line"}, {"M-p", "pull requests"}, {"M-w", "worktrees"},
 	}},
+	{"in maître", [][2]string{{"M-m", "close"}, {"M-r", "restart"}, {"M-x", "swap agent"}}},
 }
 
 // RunHome shows the landing splash: the wordmark, which external tools are

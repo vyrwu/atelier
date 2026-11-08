@@ -251,7 +251,7 @@ func install() error {
 	if _, err := exec.LookPath("codex"); err == nil {
 		fmt.Println("Codex runs hooks only once you trust them: on the first Codex launch, review the hooks and trust atelier's (the ones running `atelier hook`).")
 	}
-	fmt.Println("Run `atelier` to start. Inside: M-s spaces · M-p PRs · M-w worktrees · M-t trash · M-n new · M-a agent · M-x swap agent · M-c shell · M-h home · M-q detach.")
+	fmt.Println("Run `atelier` to start. Inside: M-s spaces · M-p PRs · M-w worktrees · M-t trash · M-n new · M-m maître · M-a agent · M-x swap agent · M-c shell · M-h home · M-q detach.")
 	return nil
 }
 
@@ -390,6 +390,12 @@ bind -n M-p set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 bind -n M-w set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --worktrees"
 bind -n M-t set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --trash"
 bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --new"
+# Maître is one background session, viewed through a nested popup client.
+# Keep its opener separate from @atelier_outer, which its swap popup replaces.
+bind -n M-m set-option -gF @atelier_maitre_outer "#{client_name}" \; display-popup -w 80%% -h 80%% -T " Maître " -E "%[1]s maitre"
+bind -T maitre M-m detach-client
+bind -T maitre M-r run-shell -b "%[1]s maitre --restart"
+bind -T maitre M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 46 -h 11 -E "%[1]s open --swap"
 # Intra-workspace window nav (run-shell DOES expand #{session_name}). M-a brings
 # the agent back, respawning it if you exited it — everywhere, a PR's windows
 # included. M-c is the workspace base shell. Both toast (no-op) when pressed off

@@ -429,6 +429,6 @@ func DetachSession(session string) error {
 }
 
 func SetSessionOption(session, name, value string) error {
-	_, err := Run("set-option", "-t", "="+session, name, value)
+	_, err := Run("set-option", "-t", session, name, value)
 	return err
 }
