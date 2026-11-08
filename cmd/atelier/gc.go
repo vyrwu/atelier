@@ -19,6 +19,7 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/gc"
 	"github.com/vyrwu/atelier/internal/git"
+	"github.com/vyrwu/atelier/internal/operator"
 	"github.com/vyrwu/atelier/internal/tmux"
 )
 
@@ -115,7 +116,10 @@ func purge(args []string) error {
 	}); !ok {
 		return err
 	}
-	if !dry && !yes && !isatty.IsTerminal(os.Stdin.Fd()) { // /dev/null is a character device too
+	if operator.FromMaitre() {
+		p.Force = false
+	}
+	if !operator.FromMaitre() && !dry && !yes && !isatty.IsTerminal(os.Stdin.Fd()) { // /dev/null is a character device too
 		return fmt.Errorf("not a terminal: pass --yes to purge, or --dry-run to look")
 	}
 	p.Age = time.Duration(age)
@@ -162,11 +166,16 @@ func purge(args []string) error {
 	if dry {
 		return nil
 	}
-	if !yes {
-		ok, err := confirm(os.Stdin, fmt.Sprintf("Delete %d space(s) permanently? [y/N] ", len(doomed)))
-		if err != nil || !ok {
-			return err
-		}
+	slugs := []string{}
+	for _, c := range doomed[:min(5, len(doomed))] {
+		slugs = append(slugs, c.Slug)
+	}
+	if len(doomed) > 5 {
+		slugs = append(slugs, "…")
+	}
+	prompt := fmt.Sprintf("Purge %d spaces: %s?", len(doomed), strings.Join(slugs, ", "))
+	if err := destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, operator.ConfirmDestroy)(prompt); err != nil {
+		return err
 	}
 	failed := 0
 	for _, c := range doomed {

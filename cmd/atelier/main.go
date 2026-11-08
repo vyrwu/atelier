@@ -74,6 +74,8 @@ func run(cmd string, args []string) error {
 		return sendCmd(args)
 	case "wait":
 		return waitCmd(args)
+	case "delete":
+		return deleteCmd(args)
 	case "spaces":
 		return spacesCmd(args)
 	case "ls": // atelier ls [--trash] [--older-than AGE] — the spaces, stalest first

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/mattn/go-isatty"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -87,4 +89,39 @@ func waitCmd(args []string) error {
 		return err
 	}
 	return printSpaces(spaces, asJSON)
+}
+
+// A Maître caller always goes through the human's tmux client, regardless of
+// command-line bypass flags or whether the agent itself asks for approvals.
+func destroyGate(fromMaitre, yes, tty bool, in io.Reader, maitre func(string) error) func(string) error {
+	return func(prompt string) error {
+		if fromMaitre {
+			return maitre(prompt)
+		}
+		if yes {
+			return nil
+		}
+		if !tty {
+			return fmt.Errorf("not a terminal: pass --yes to delete, or --dry-run to look")
+		}
+		ok, err := confirm(in, prompt+" [y/N] ")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("cancelled")
+		}
+		return nil
+	}
+}
+
+func deleteCmd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: atelier delete <space> [--yes]")
+	}
+	var yes bool
+	if ok, err := flags("delete", args[1:], func(fs *flag.FlagSet) { fs.BoolVar(&yes, "yes", false, "don't ask (except in Maître)") }); !ok {
+		return err
+	}
+	return operator.Delete(args[0], destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, operator.ConfirmDestroy))
 }
