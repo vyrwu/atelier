@@ -42,7 +42,10 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   lock; abandoned launches expire after 30 seconds. Exports are owner-only.
   Codex runs with `--dangerously-bypass-approvals-and-sandbox` and always a
   `-c` (without one it can attach to an app-server daemon lacking the space's
-  env). Each agent's hooks are guarded on `$ATELIER_AGENT`.
+  env). Each agent's hooks are guarded on `$ATELIER_AGENT` and use the launching
+  binary through `$ATELIER_BIN`. Launches pin the instance paths and socket,
+  and repeat provider preparation on restore. Grok titles use the deterministic
+  fallback; its CLI cannot isolate all config for an auxiliary title call.
 - Allowances: `atelier usage` is tmux's asynchronous status job. It renders
   cached account quotas immediately and refetches stale readings
   (`UsageStale`: Codex 1 min, Claude 15 min — its `/usage` boots the CLI);

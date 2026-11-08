@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,8 +39,11 @@ func prepareGrok(dir, slug string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	servers, _ := cfg["mcp_servers"].(map[string]any)
-	if servers == nil {
+	servers, ok := cfg["mcp_servers"].(map[string]any)
+	if !ok {
+		if _, exists := cfg["mcp_servers"]; exists {
+			return fmt.Errorf("%s: mcp_servers must be a table", path)
+		}
 		servers = map[string]any{}
 	}
 	servers["atelier"] = map[string]any{"command": selfPath(), "args": []string{"mcp"}, "env": mcpEnv(slug)}

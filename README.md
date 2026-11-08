@@ -109,6 +109,7 @@ no API key is required in atelier.
 Choose Grok Build with `Tab` in the new-space or swap dialog, or use
 `atelier create "Fix the tests" --agent grok` and `atelier swap <space> --to grok`.
 Grok receives project-local hooks and atelier's MCP tools automatically.
+Its space titles use the task text without an extra model call.
 Its normal tool approval and sandbox settings still apply; allow access to the
 source repository's git directory when committing from a worktree.
 

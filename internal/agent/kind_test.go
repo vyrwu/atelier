@@ -106,3 +106,28 @@ func TestWithoutSpace(t *testing.T) {
 		t.Errorf("withoutSpace = %v", got)
 	}
 }
+
+func TestGrokTitleFallsBackWithoutLaunching(t *testing.T) {
+	if title := GenerateTitle(Grok, "Fix the status collector", ""); title != "" {
+		t.Fatalf("unexpected model title: %s", title)
+	}
+}
+
+func TestRuntimePathsPinInstance(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "/test/cache")
+	t.Setenv("XDG_STATE_HOME", "/test/state")
+	t.Setenv("XDG_CONFIG_HOME", "/test/config")
+	t.Setenv("ATELIER_ROOT", "/test/spaces")
+	t.Setenv("ATELIER_SOCKET", "test-socket")
+	env := Env("test-space", Grok)
+	for key, want := range map[string]string{
+		"ATELIER_BIN": selfPath(), "ATELIER_WORKSPACE": "/test/spaces/test-space",
+		"XDG_CACHE_HOME": "/test/cache", "XDG_STATE_HOME": "/test/state",
+		"XDG_CONFIG_HOME": "/test/config", "ATELIER_ROOT": "/test/spaces",
+		"ATELIER_SOCKET": "test-socket", "ATELIER_AGENT": "grok",
+	} {
+		if env[key] != want {
+			t.Errorf("%s = %q, want %q", key, env[key], want)
+		}
+	}
+}

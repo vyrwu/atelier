@@ -197,7 +197,7 @@ func LinkGuide(root string) {
 // before there was a choice have no $ATELIER_AGENT, and run Claude. It prints
 // nothing: both agents add what some hooks print to the model's context.
 func hookCommand(status string, k Kind) string {
-	return `[ -n "$ATELIER_SESSION" ] && [ "${ATELIER_AGENT:-claude}" = ` + string(k) + ` ] && atelier hook ` + status + " || true"
+	return `[ -n "$ATELIER_SESSION" ] && [ "${ATELIER_AGENT:-claude}" = ` + string(k) + ` ] && "${ATELIER_BIN:-atelier}" hook ` + status + " || true"
 }
 
 // atelierHook is one lifecycle event atelier listens to: the status it records,
@@ -354,7 +354,7 @@ func groupHasAtelierHook(group any) bool {
 		if !ok {
 			continue
 		}
-		if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "atelier hook ") {
+		if cmd, ok := hm["command"].(string); ok && (strings.Contains(cmd, "atelier hook ") || strings.Contains(cmd, `"${ATELIER_BIN:-atelier}" hook `)) {
 			return true
 		}
 	}

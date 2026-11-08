@@ -23,6 +23,10 @@ func TestGrokQuotaFailsClosed(t *testing.T) {
 	if got := renderUsage(Grok, u, now); !strings.Contains(got, "7d ") || !strings.Contains(got, "25%") {
 		t.Fatal(got)
 	}
+	u.Buckets[0].Primary.Minutes = 0
+	if got := renderUsage(Grok, u, now); strings.Contains(got, "0m") || !strings.Contains(got, "25%") {
+		t.Fatalf("unknown duration rendered incorrectly: %s", got)
+	}
 }
 
 func TestGrokQuotaCachesAreSeparate(t *testing.T) {

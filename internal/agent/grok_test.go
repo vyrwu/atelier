@@ -37,7 +37,7 @@ func TestPrepareGrokProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(data), "atelier hook grok") != 9 {
+	if strings.Count(string(data), "hook grok") != 9 {
 		t.Fatalf("missing or duplicate hooks: %s", data)
 	}
 	if len(servers) != 2 {
@@ -56,6 +56,7 @@ func TestPrepareGrokRejectsMalformedConfig(t *testing.T) {
 		path, body string
 	}{
 		{".grok/config.toml", "[broken"},
+		{".grok/config.toml", "mcp_servers = 'invalid'"},
 		{".grok/hooks/atelier.json", "null"},
 	} {
 		dir := t.TempDir()

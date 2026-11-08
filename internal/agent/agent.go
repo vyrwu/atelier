@@ -60,6 +60,9 @@ func RunAgent(ws core.Workspace, k Kind, cmd string) error {
 
 // Launch while holding the state lock shared with purge and restoration.
 func runAgent(ws core.Workspace, k Kind, cmd string) error {
+	if err := k.Prepare(ws.Root(), ws.Slug); err != nil {
+		return fmt.Errorf("prepare %s: %w", k.Label(), err)
+	}
 	env := Env(ws.Slug, k)
 	_ = InstallClaudeUsage(ws.Root())
 	var err error
@@ -79,7 +82,7 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 	// Popups and future windows inherit the session environment, not the
 	// exports wrapped around the current agent command. A swap needs both
 	// providers' histories even when the server predates these overrides.
-	for key, value := range providerPaths() {
+	for key, value := range runtimePaths() {
 		if err := tmux.SetSessionEnv(ws.Session, key, value); err != nil {
 			return err
 		}
@@ -91,11 +94,24 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 // and MCP server key on, which agent it is (see hookCommand), and the operator's
 // git identity so it commits as them.
 func Env(slug string, k Kind) map[string]string {
-	env := providerPaths()
+	env := runtimePaths()
+	env["ATELIER_WORKSPACE"] = filepath.Join(core.AteliersRoot(), slug)
 	env["ATELIER_SESSION"], env["ATELIER_SLUG"], env["ATELIER_AGENT"] = slug, slug, string(k)
 	if g := GitConfigGlobal(); g != "" {
 		env["GIT_CONFIG_GLOBAL"] = g
 	}
+	return env
+}
+
+// Runtime paths are explicit because the tmux server may predate this instance.
+func runtimePaths() map[string]string {
+	env := providerPaths()
+	env["ATELIER_BIN"] = selfPath()
+	env["XDG_CACHE_HOME"] = filepath.Dir(core.CacheDir())
+	env["XDG_STATE_HOME"] = filepath.Dir(filepath.Dir(core.StatePath()))
+	env["XDG_CONFIG_HOME"] = filepath.Dir(filepath.Dir(core.ConfigPath()))
+	env["ATELIER_ROOT"] = core.AteliersRoot()
+	env["ATELIER_SOCKET"] = core.LoadConfig().Socket
 	return env
 }
 

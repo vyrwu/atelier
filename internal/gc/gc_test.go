@@ -202,6 +202,10 @@ func TestGrokMetadataDoesNotBlockPurge(t *testing.T) {
 	if reasons := Unsaved(w); len(reasons) != 1 || !strings.HasPrefix(reasons[0], "notes.txt:") {
 		t.Fatalf("ordinary workspace files must still prevent cleanup: %v", reasons)
 	}
+	touch(t, filepath.Join(w.Root(), ".grok", "rules.md"), time.Now())
+	if reasons := Unsaved(w); len(reasons) == 0 || !strings.Contains(strings.Join(reasons, " "), ".grok/rules.md") {
+		t.Fatalf("user-authored provider files must prevent cleanup: %v", reasons)
+	}
 }
 
 func TestUnsaved(t *testing.T) {

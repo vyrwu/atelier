@@ -249,7 +249,10 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 			if w == nil {
 				continue
 			}
-			text += " " + usageDuration(w.Minutes) + " "
+			text += " "
+			if w.Minutes > 0 {
+				text += usageDuration(w.Minutes) + " "
+			}
 			if w.Used == nil || math.IsNaN(*w.Used) || math.IsInf(*w.Used, 0) || *w.Used < 0 || *w.Used > 100 || w.Reset <= now.Unix() {
 				text += "—"
 				continue
