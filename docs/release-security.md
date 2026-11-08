@@ -84,14 +84,13 @@ in the tag ruleset synchronized with `RELEASE_APP_ID` if the App is replaced.
 
 ## Release signing keys
 
-This table is updated by `packaging/signing/new-keys.sh`; production signing is
-not ready while these fingerprints are absent. Compare downloaded keys against
-the reviewed table before trusting them.
+This table is updated by `packaging/signing/new-keys.sh`. Compare downloaded
+keys against the reviewed fingerprints before trusting them.
 
 | Key | Signs | Fingerprint |
 | --- | --- | --- |
-| `atelier.asc` | `.rpm`, `.deb`, `checksums.txt` | `not generated yet` |
-| `atelier.rsa.pub` | `.apk` | SHA-256 `not generated yet` |
+| `atelier.asc` | `.rpm`, `.deb`, `checksums.txt` | `70A2553E9D05AAE5EE4AE0FD8946100349BDF034` |
+| `atelier.rsa.pub` | `.apk` | SHA-256 `924b2c7196f8aa9f5ec08711691215a9e829eb4d377c0f538506e5f8f9d8c128` |
 
 Rotate before the OpenPGP key's two-year expiry with
 `packaging/signing/new-keys.sh --rotate`, then commit the new public keys and
