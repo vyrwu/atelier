@@ -427,3 +427,8 @@ func DetachSession(session string) error {
 	_, err := Run("detach-client", "-s", "="+session)
 	return err
 }
+
+func SetSessionOption(session, name, value string) error {
+	_, err := Run("set-option", "-t", "="+session, name, value)
+	return err
+}

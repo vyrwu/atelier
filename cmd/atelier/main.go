@@ -78,6 +78,8 @@ func run(cmd string, args []string) error {
 		return deleteCmd(args)
 	case "focus", "rename", "retire", "restore":
 		return lifecycleCmd(cmd, args)
+	case "maitre":
+		return maitreCmd(args)
 	case "spaces":
 		return spacesCmd(args)
 	case "ls": // atelier ls [--trash] [--older-than AGE] — the spaces, stalest first

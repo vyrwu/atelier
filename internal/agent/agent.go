@@ -82,7 +82,7 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 	// Popups and future windows inherit the session environment, not the
 	// exports wrapped around the current agent command. A swap needs both
 	// providers' histories even when the server predates these overrides.
-	for key, value := range runtimePaths() {
+	for key, value := range env {
 		if err := tmux.SetSessionEnv(ws.Session, key, value); err != nil {
 			return err
 		}
@@ -95,6 +95,9 @@ func runAgent(ws core.Workspace, k Kind, cmd string) error {
 // git identity so it commits as them.
 func Env(slug string, k Kind) map[string]string {
 	env := runtimePaths()
+	if slug == core.MaitreSlug {
+		env["MCP_TOOL_TIMEOUT"] = "600000"
+	}
 	env["ATELIER_WORKSPACE"] = filepath.Join(core.AteliersRoot(), slug)
 	env["ATELIER_SESSION"], env["ATELIER_SLUG"], env["ATELIER_AGENT"] = slug, slug, string(k)
 	if g := GitConfigGlobal(); g != "" {

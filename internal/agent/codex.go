@@ -2,6 +2,8 @@ package agent
 
 import (
 	"bytes"
+	"fmt"
+	"github.com/vyrwu/atelier/internal/core"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,31 +122,51 @@ var codexForwardEnv = []string{
 // .codex/config.toml. Its tools run without an approval prompt: they only act on
 // the space.
 type codexMCPServer struct {
-	Command  string            `toml:"command"`
-	Args     []string          `toml:"args"`
-	EnvVars  []string          `toml:"env_vars"`
-	Approval string            `toml:"default_tools_approval_mode"`
-	Env      map[string]string `toml:"env"`
+	ToolTimeout int               `toml:"tool_timeout_sec,omitzero"`
+	Command     string            `toml:"command"`
+	Args        []string          `toml:"args"`
+	EnvVars     []string          `toml:"env_vars"`
+	Approval    string            `toml:"default_tools_approval_mode"`
+	Env         map[string]string `toml:"env"`
 }
 
-// writeCodexProject writes dir/.codex/config.toml, which Codex loads for a
-// trusted project. atelier owns the file and rewrites it whole.
+// writeCodexProject merges atelier's server into the trusted project config.
 func writeCodexProject(dir, slug string) error {
-	cfg := map[string]map[string]codexMCPServer{"mcp_servers": {"atelier": {
-		Command:  selfPath(),
-		Args:     []string{"mcp"},
-		EnvVars:  codexForwardEnv,
-		Approval: "approve",
-		Env:      mcpEnv(slug),
-	}}}
-	var b bytes.Buffer
-	b.WriteString("# Written by atelier: its MCP server for this space.\n")
-	if err := toml.NewEncoder(&b).Encode(cfg); err != nil {
-		return err
-	}
 	path := filepath.Join(dir, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, b.Bytes(), 0o600)
+	unlock, err := lockConfig(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg := map[string]any{}
+	// #nosec G304 -- Reads the owner-controlled project config to preserve other settings.
+	if data, err := os.ReadFile(path); err == nil {
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	servers, ok := cfg["mcp_servers"].(map[string]any)
+	if !ok {
+		if _, exists := cfg["mcp_servers"]; exists {
+			return fmt.Errorf("mcp_servers must be a table")
+		}
+		servers = map[string]any{}
+	}
+	server := codexMCPServer{Command: selfPath(), Args: mcpArgs(slug), EnvVars: codexForwardEnv, Approval: "approve", Env: mcpEnv(slug)}
+	server.Env["ATELIER_AGENT"] = string(Codex)
+	if slug == core.MaitreSlug {
+		server.ToolTimeout = int(MaitreToolTimeout.Seconds())
+	}
+	servers["atelier"] = server
+	cfg["mcp_servers"] = servers
+	var b bytes.Buffer
+	if err := toml.NewEncoder(&b).Encode(cfg); err != nil {
+		return err
+	}
+	return writeConfig(path, b.Bytes(), 0o600)
 }
