@@ -1,6 +1,6 @@
 # Maître — design
 
-Status: draft for review · 2026-11-08 · sub-project 1 of 2 (2: demo sandbox +
+Status: implemented · 2026-11-08 · sub-project 1 of 2 (2: demo sandbox +
 README pitch, specified separately once this ships)
 
 ## Intent
@@ -70,7 +70,7 @@ package); CLI prints text by default and JSON with `--json`, MCP returns JSON.
 | Verb | Behaviour |
 |---|---|
 | `spaces [--trash] [--json]` | Active (or retired) spaces: slug, title, intent, agent, status (`working`/`blocked`/`idle`/`gone`), worktrees, cached PRs (state, CI, review, queued), idle time. Extends `ls`; never queries GitHub (reads the PR cache). Excludes Maître. |
-| `create <intent> [--agent A]` | Builds a space and returns its slug once the agent is launched; titling continues detached. `createWorkspace` is split into build (returns slug) and name (detached) so `M-n` keeps its current behaviour. |
+| `create <intent> [--agent A]` | Builds a space and prints its slug once the agent launches. The CLI finishes after naming; the MCP caller returns on the slug and leaves the builder running detached, preserving `M-n` behaviour. |
 | `rename <space> <title>` | Sets the title in state and on the status line. Slug never changes. |
 | `retire <space>` / `restore <space>` | Moves to Trash / back with resume. The logic in `internal/ui` (`setRetired` and restore) moves to a shared package so UI, CLI, and MCP call one implementation. |
 | `delete <space>` | `gc.Delete`, behind an operator confirm (below) whose prompt names any unsaved work (`gc.Unsaved`). |

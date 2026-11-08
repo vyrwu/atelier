@@ -22,7 +22,7 @@ work: finds the repositories, creates the worktrees, writes the code, opens the
 pull requests. atelier's job is to let you run several of these at once and
 always know which one wants you.
 
-Four things, and nothing else:
+Five things:
 
 1. **Start work** — one prompt, one keystroke, an agent running in a directory,
    started in the background so kicking off work never breaks your focus.
@@ -33,13 +33,16 @@ Four things, and nothing else:
 4. **Review in place** — a pull request's diff and CI are one key away, in the
    same terminal the work happened in.
 
+5. **Delegate the driving** — Maître is one agent per instance, operating all
+   spaces through the same verbs as the human. It delegates coding to spaces.
+
 ### Non-goals
 
 atelier is **not**:
 
 - a tmux distribution, configuration framework, or theme
 - a tool launcher, plugin host, or registry
-- a multi-agent orchestrator
+- a built-in planner or coordinator: Maître is an agent using atelier's operator verbs
 - a git porcelain, or a replacement for GitHub's review and CI tooling — it
   opens a PR's diff and checks in tools built for them (a diff pager,
   gh-enhance) rather than drawing its own
@@ -68,6 +71,12 @@ Four entities. Everything in the system is one of these.
 One workspace has one agent session, N worktrees, and N pull requests. A
 worktree belongs to exactly one workspace. A pull request is associated with a
 workspace by branch, not by ownership.
+
+The reserved `maitre` workspace record represents the single operator for the
+whole instance. Its directory is `<root>/maitre`, its session is `maitre`, and
+its guide is `MAITRE.md`. It reuses launch, resume, swap, status and attention,
+but is excluded from space lists, Trash, purge, GC adoption and PR polling.
+The next open recreates a missing record; no separate entity or daemon is needed.
 
 **Retire is soft, delete is hard.** Retiring kills a workspace's processes but
 keeps its directory, worktrees, and agent conversation, so restoring resumes
@@ -238,8 +247,9 @@ architectural risk.
 | **Overlay (popup)** | spaces · trash · new · pull requests · worktrees · confirm | Seconds | Peek and jump: an overlay is one transition, a window would be two. It runs fresh each open and captures the invoking client at once, so it never acts on a stale one. |
 | **Window** | The agent, shells, a PR's diff and checks | Hours | Survives detach, keeps scrollback and copy mode, and shows in tmux's own session list. |
 
-**Agent sessions are windows, never overlays.** An overlay is bound to a client
-and does not survive detaching; a session you live in for hours must.
+**Agent processes live in windows.** Maître's popup attaches a nested client to
+its persistent session; closing that viewport detaches the client while the
+agent keeps running. Other overlays are short-lived Bubble Tea programs.
 
 **Programs in windows aren't atelier's UI.** The agent, a shell, a diff pager,
 and gh-enhance run in windows atelier opens; atelier draws none of them. That is
@@ -313,7 +323,7 @@ estimates an account balance, and credentials remain owned by the provider CLI.
 The CLI exists so hooks and bindings have something fast to call. The status
 line calls nothing; it renders options the hooks push. Users run only
 `atelier`, `atelier install`, `atelier version`, and the housekeeping trio:
-`ls`, `purge`, and `gc`.
+`ls`, `purge`, and `gc`, plus the operator verbs documented in the README.
 
 ---
 
@@ -362,7 +372,7 @@ Deferred deliberately. Each needs the three-times rule to return.
   more)
 - CI failure triage (atelier opens a PR's logs in gh-enhance; it does not read
   them)
-- Workspace rename, tagging, or grouping
+- Workspace directory rename, tagging, or grouping (display titles may change)
 - Any summary or recap of what an agent did
 - Repository indexing, caching, or search
 - Concurrent agents in one workspace, or multi-forge support
@@ -426,3 +436,17 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
     deliberately starts a fresh conversation seeded by the export. Codex runs with its sandbox
     and approval prompts off: a worktree's git data lives in its source
     repository, outside the workspace, so the sandbox would stop every commit.
+
+11. **Maître is a single meta-session.** The popup is only a viewport. `M-m`
+    hides it, `M-r` starts fresh, and `M-x` reuses the existing handoff. A
+    session-specific key table leaves other shortcuts to the agent. The outer
+    client is kept separately from the swap popup's client.
+12. **Agents communicate through their screens.** Operator commands capture
+    the agent window and send literal text or a bounded set of keys. No model
+    backend or harness-specific message transport is built into atelier.
+    `wait` observes local status transitions only while a caller is waiting.
+13. **Atelier owns destructive confirmation.** Maître's delete and purge calls,
+    including CLI calls with bypass flags, need a human viewing its popup.
+    A native tmux menu belongs to that human client, times out after 60 seconds,
+    and treats dismissal as refusal. This narrow menu is the exception to the
+    Bubble Tea renderer rule; it must run independently of the agent's approvals.

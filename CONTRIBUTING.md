@@ -85,7 +85,8 @@ Give it the same format.
 | `internal/git` | worktree derivation and git queries |
 | `internal/forge` | GitHub: the PR query and PR state changes |
 | `internal/agent` | Claude Code, Codex, and Grok Build: launch and resume, handoff export, status, hooks, project setup |
-| `internal/mcp` | the stdio MCP server agents use: `create_worktree`, `create_pr`, `register_pr` |
+| `internal/mcp` | the space tools, or Maître operator tools with `--maitre` |
+| `internal/operator` | shared space operations for the UI, CLI and Maître |
 | `internal/gc` | deleting spaces, by hand or by age, and sweeping up after them |
 | `internal/ui` | the overlay and the splash |
 

@@ -17,15 +17,29 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/agent` — the coding agents (Claude Code, Codex, Grok Build): launch/resume, finding
   and exporting their conversations for a handoff, per-session status, hooks,
   their config (trust + MCP registration), the per-workspace guide
-- `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
+- `internal/mcp` — stdio MCP server: three space tools, or twelve operator tools with `--maitre`
+- `internal/operator` — space lifecycle, listing, screen I/O, waiting, focus and destructive confirmation
 - `internal/ui` — the Bubble Tea overlay + the home splash (the only UI)
 - `internal/gc` — deleting spaces (one, or all older than an age) and sweeping
   up what deleted spaces leave behind
 - `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
   `handoff` / `win` / `hook` / `usage` / `poll` / `mcp` / `install` / `ls` /
-  `purge` / `gc` / `version`
+  `purge` / `gc` / `spaces` / `read` / `send` / `wait` / `focus` /
+  `rename` / `retire` / `restore` / `delete` / `maitre` / `version`
 
 ## Model & bindings
+
+- Maître is the reserved `maitre` space: one meta-session per instance, hidden
+  from ordinary listings and cleanup, still counted in attention. `M-m`
+  attaches a nested popup client; hiding it leaves the agent running. Its
+  `maitre` key table binds only `M-m` close, `M-r` restart and `M-x` swap.
+  `@atelier_maitre_outer` retains the real outer client when the swap overlay
+  updates `@atelier_outer`. Operator tools refuse to target Maître itself;
+  its own swap/restart controls deliberately use the ordinary launch path.
+  `ATELIER_SESSION=maitre` gates CLI destruction: no bypass flags, an attached
+  human client must confirm the tmux menu, hidden/timeout/dismissal means no.
+  MCP config pins the instance socket and all provider directories, and agent
+  identity is also pinned in the tmux session environment.
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
   `claude` window runs the agent — the selected agent, `Workspace.Agent` (""
