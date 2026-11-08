@@ -93,7 +93,7 @@ func Unsaved(w core.Workspace) []string {
 		rel, _ := filepath.Rel(root, path)
 		if filepath.Dir(path) == root {
 			switch d.Name() {
-			case ".atelier", ".claude", ".codex", "CLAUDE.md", "AGENTS.md":
+			case ".atelier", ".claude", ".codex", ".grok", ".cursor", "CLAUDE.md", "AGENTS.md":
 				if d.IsDir() {
 					return filepath.SkipDir
 				}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 )
 
@@ -28,6 +29,9 @@ func sandbox(t *testing.T) (root string) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(base, "claude"))
 	t.Setenv("CODEX_HOME", filepath.Join(base, "codex"))
+	t.Setenv("GROK_HOME", filepath.Join(base, "grok"))
+	t.Setenv("CURSOR_CONFIG_DIR", filepath.Join(base, "cursor-config"))
+	t.Setenv("CURSOR_DATA_DIR", filepath.Join(base, "cursor-data"))
 	for k, v := range map[string]string{
 		"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
 		"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
@@ -187,6 +191,25 @@ func TestPlan(t *testing.T) {
 
 // Unsaved is what stands between a purge and lost work, so it errs toward
 // keeping: anything not on a remote, or in a pull request, counts.
+func TestProviderMetadataDoesNotBlockPurge(t *testing.T) {
+	for _, k := range []agent.Kind{agent.Grok, agent.Cursor} {
+		t.Run(string(k), func(t *testing.T) {
+			sandbox(t)
+			w := core.Workspace{Slug: "clean", Agent: string(k)}
+			if err := k.Prepare(w.Root(), w.Slug); err != nil {
+				t.Fatal(err)
+			}
+			if reasons := Unsaved(w); len(reasons) != 0 {
+				t.Errorf("generated %s metadata prevents cleanup: %v", k, reasons)
+			}
+			touch(t, filepath.Join(w.Root(), "notes.txt"), time.Now())
+			if reasons := Unsaved(w); len(reasons) != 1 || !strings.HasPrefix(reasons[0], "notes.txt:") {
+				t.Fatalf("ordinary workspace files must still prevent cleanup: %v", reasons)
+			}
+		})
+	}
+}
+
 func TestUnsaved(t *testing.T) {
 	root := sandbox(t)
 	src := repo(t)
