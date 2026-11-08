@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/operator"
 )
 
@@ -124,6 +125,9 @@ func deleteCmd(args []string) error {
 	if ok, err := flags("delete", args[1:], func(fs *flag.FlagSet) { fs.BoolVar(&yes, "yes", false, "don't ask (except in Maître)") }); !ok {
 		return err
 	}
+	if err := refuseEnclosingSpace("delete", args[0]); err != nil {
+		return err
+	}
 	return operator.Delete(args[0], destroyGate(operator.FromMaitre(), yes, isatty.IsTerminal(os.Stdin.Fd()), os.Stdin, confirmMaitreDestroy))
 }
 
@@ -139,6 +143,9 @@ func lifecycleCmd(verb string, args []string) error {
 	case "rename":
 		return operator.Rename(args[0], args[1])
 	case "retire":
+		if err := refuseEnclosingSpace(verb, args[0]); err != nil {
+			return err
+		}
 		return operator.Retire(args[0])
 	case "restore":
 		return operator.Restore(args[0])
@@ -146,6 +153,19 @@ func lifecycleCmd(verb string, args []string) error {
 		return operator.Focus(args[0])
 	}
 	return fmt.Errorf("unknown operator command %q", verb)
+}
+
+// Killing the CLI's own session can deliver SIGHUP before it finishes disk
+// cleanup or persists retirement. The caller must run from another session.
+func refuseEnclosingSpace(verb, slug string) error {
+	state, err := core.Read()
+	if err != nil {
+		return err
+	}
+	if slices.Contains(enclosingSpaces(state), slug) {
+		return fmt.Errorf("cannot %s enclosing space %q; run from Home or another space", verb, slug)
+	}
+	return nil
 }
 
 func confirmMaitreDestroy(prompt string) error {

@@ -44,6 +44,9 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   transcripts without imposing a new conversation cutoff. MCP waits have
   request contexts and run alongside other requests; tool mutations remain
   serial. Screen text uses tmux bracketed paste, with the payload on stdin.
+  Restart shares the handoff lock and respects its pending reservation. Opening
+  Maître acknowledges its attention; CLI retire/delete refuse their enclosing
+  space so session shutdown cannot interrupt cleanup or state persistence.
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
   `claude` window runs the agent — the selected agent, `Workspace.Agent` (""

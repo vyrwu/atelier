@@ -80,3 +80,29 @@ func TestSplitSendText(t *testing.T) {
 		}
 	}
 }
+
+func TestCLIRefusesToStopItsOwnSession(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("TMUX_PANE", "")
+	if err := core.Update(func(s *core.State) {
+		s.Workspaces = []core.Workspace{{Slug: "own", Session: "own-session"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, identity := range []struct{ slug, session string }{{"own", ""}, {"", "own-session"}} {
+		t.Setenv("ATELIER_SLUG", identity.slug)
+		t.Setenv("ATELIER_SESSION", identity.session)
+		for _, verb := range []string{"retire", "delete"} {
+			args := []string{"own"}
+			if verb == "delete" {
+				args = append(args, "--yes")
+			}
+			if err := run(verb, args); err == nil || !strings.Contains(err.Error(), "enclosing space") {
+				t.Fatalf("%s accepted self-stop with %+v: %v", verb, identity, err)
+			}
+		}
+	}
+	if w := core.Load().Find("own"); w == nil || w.Retired {
+		t.Fatalf("refused operation changed state: %+v", w)
+	}
+}

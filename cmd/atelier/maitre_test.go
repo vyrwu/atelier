@@ -28,3 +28,29 @@ func TestFragmentBindsMaitre(t *testing.T) {
 		t.Fatal("M-r captured outside Maître")
 	}
 }
+
+func TestMaitreRestartRespectsHandoff(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	token, releaseLaunch, err := reserveSwap(core.MaitreSlug)
+	if err != nil || token == "" {
+		t.Fatal(token, err)
+	}
+	releaseLaunch()
+	check := func() {
+		t.Helper()
+		if err := prepareMaitre(true); err == nil || !strings.Contains(err.Error(), "already swapping") {
+			t.Fatalf("restart did not reject the swap: %v", err)
+		}
+		if core.Load().Find(core.MaitreSlug) != nil {
+			t.Fatal("restart touched state before checking the handoff")
+		}
+	}
+	check() // pending launcher, before its child takes the lock
+	releaseHandoff, err := takeSwap(core.MaitreSlug, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseHandoff()
+	check() // active handoff, after consuming the reservation
+}

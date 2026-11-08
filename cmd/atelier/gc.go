@@ -203,7 +203,15 @@ func purge(args []string) error {
 
 // Protect the enclosing space and cwd independently: a shell in A can cd to B.
 func currentSpaces(st *core.State) []string {
-	spaces := []string{os.Getenv("ATELIER_SLUG"), cwdSpace()}
+	return append(enclosingSpaces(st), cwdSpace())
+}
+
+// Session identity survives cd; plain tmux shells may only have TMUX_PANE.
+func enclosingSpaces(st *core.State) []string {
+	spaces := []string{os.Getenv("ATELIER_SLUG")}
+	if w := st.FindBySession(os.Getenv("ATELIER_SESSION")); w != nil {
+		spaces = append(spaces, w.Slug)
+	}
 	if pane := os.Getenv("TMUX_PANE"); pane != "" && insideOwnServer() {
 		if out, err := tmux.Run("display-message", "-t", pane, "-p", "#{session_name}"); err == nil {
 			if w := st.FindBySession(strings.TrimSpace(string(out))); w != nil {

@@ -25,6 +25,15 @@ func prepareMaitre(restart bool) error {
 		return err
 	}
 	defer unlock()
+	if restart {
+		// Hold the handoff lock before reading the provider; a reserved launch
+		// is already a swap even before its child acquires that lock.
+		unlockSwap, err := takeSwap(core.MaitreSlug, "")
+		if err != nil {
+			return err
+		}
+		defer unlockSwap()
+	}
 	state, err := core.Read()
 	if err != nil {
 		return err
@@ -81,6 +90,10 @@ func maitreCmd(args []string) error {
 		return err
 	}
 	refreshBindings()
+	if agent.Status(core.MaitreSlug, true) == core.StatusBlocked {
+		_ = agent.SetStatus(core.MaitreSlug, core.StatusIdle)
+		agent.RefreshAttention()
+	}
 	if restart {
 		return nil
 	}

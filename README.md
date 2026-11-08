@@ -189,6 +189,8 @@ client viewing Maître. Hidden, dismissed, and unanswered requests are refused;
 the confirmation expires after 60 seconds. In Maître, `--yes` never bypasses
 this question and purge ignores `--force`, keeping running or unsaved spaces.
 Grok's own tool approval prompts still apply.
+CLI `retire` and `delete` refuse to stop the space containing their own process;
+run them from Home or another space.
 
 ## Cleaning up
 
