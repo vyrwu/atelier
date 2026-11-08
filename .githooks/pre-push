@@ -1,0 +1,3 @@
+#!/bin/sh
+# Installed by `mise run hooks`. Skip in an emergency with git push --no-verify.
+exec mise run ci

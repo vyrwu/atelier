@@ -6,12 +6,14 @@ below before writing code; they are enforced in review.
 
 ## Setting up
 
-You need Go (the version in `go.mod`), tmux 3.3+, git, the GitHub CLI, and
+Install [mise](https://mise.jdx.dev) for the pinned toolchain in `mise.toml`.
+You also need tmux 3.3+, git, the GitHub CLI, and
 Claude Code and/or Codex.
 
 ```sh
 git clone https://github.com/vyrwu/atelier && cd atelier
-make dev    # build and run an isolated instance
+mise install
+mise exec -- make dev    # build and run an isolated instance
 ```
 
 `make dev` runs the freshly built binary with its own tmux socket, state,
@@ -21,12 +23,20 @@ real atelier. `make dev-clean` removes it.
 ## Before you open a pull request
 
 ```sh
-make test               # go test ./...
-go vet ./...
-golangci-lint run ./...
+mise run ci        # formatting, vet, race tests, lint/security scans, build/config checks
+mise run snapshot  # unsigned archives, Linux packages and Homebrew cask
+mise run signing-test # sign/verify a snapshot with disposable keys (GnuPG + OpenSSL)
+mise run hooks     # optional: run CI before each push
 ```
 
-CI runs the same checks on Linux and macOS, plus `gofmt` and a goreleaser check.
+CI runs the same pinned checks on Linux and macOS, including release PRs. It
+also builds and checks the release archives on both and installs the generated
+Homebrew cask on macOS. Linux CI also builds with throwaway signing keys and
+verifies/installs RPM, APK and DEB packages with their native tools. `mise.lock`
+pins tool download checksums; regenerate it when changing tool versions.
+The release workflow reruns these checks on the exact
+tagged commit. See [release security](docs/release-security.md) for repository
+setup, automated updates and release retry instructions.
 
 ## The rules
 

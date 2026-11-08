@@ -120,6 +120,7 @@ func (k Kind) Ask(prompt, input, model string) (string, error) {
 	answer := filepath.Join(dir, "answer.md")
 	var cmd *exec.Cmd
 	if k == Codex {
+		// #nosec G204 G702 -- Runs a fixed agent binary with separate arguments in a private scratch directory.
 		cmd = exec.CommandContext(ctx, "codex", "exec", "-C", dir, "--skip-git-repo-check", "--ephemeral",
 			"--ignore-user-config", "--ignore-rules", "-s", "read-only", "--disable", "hooks", "-o", answer, prompt)
 	} else {
@@ -128,6 +129,7 @@ func (k Kind) Ask(prompt, input, model string) (string, error) {
 		if model != "" {
 			args = append(args, "--model", model)
 		}
+		// #nosec G204 G702 -- Runs a fixed agent binary with separate arguments in a private scratch directory.
 		cmd = exec.CommandContext(ctx, "claude", append(args, prompt)...)
 	}
 	cmd.Dir = dir
@@ -138,6 +140,7 @@ func (k Kind) Ask(prompt, input, model string) (string, error) {
 		return "", err
 	}
 	if k == Codex {
+		// #nosec G304 -- answer is inside the private directory created by os.MkdirTemp above.
 		if out, err = os.ReadFile(answer); err != nil {
 			return "", err
 		}

@@ -245,6 +245,7 @@ func checkDeps() []dep {
 			continue
 		}
 		v := ""
+		// #nosec G204 G702 -- Probe binaries and arguments come from the fixed table above.
 		if b, err := exec.Command(p.name, p.args...).Output(); err == nil {
 			v = versionRe.FindString(string(b))
 		}

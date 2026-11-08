@@ -2,10 +2,6 @@ version: 2
 
 project_name: atelier
 
-before:
-  hooks:
-    - go mod tidy
-
 # One binary: the UI, the CLI, and the MCP server (NFR-S2).
 builds:
   - id: atelier
@@ -14,6 +10,8 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [linux, darwin]
     goarch: [amd64, arm64]
+    flags: [-trimpath, -mod=readonly]
+    mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -42,7 +40,9 @@ homebrew_casks:
     repository:
       owner: vyrwu
       name: homebrew-tap
-      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    # The release workflow publishes this in a separate job with a tap-only
+    # App token, after every archive has signed build provenance.
+    skip_upload: true
     directory: Casks
     homepage: https://github.com/vyrwu/atelier
     description: A workshop for parallel coding agents — one binary, tmux + Bubble Tea
@@ -52,13 +52,65 @@ homebrew_casks:
       - formula: gh
     hooks:
       post:
-        install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/atelier"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/atelier"]
           end
+
+# Native Linux packages. The executable is the same statically linked binary
+# shipped in the archives; users install runtime tools separately.
+nfpms:
+  - id: atelier
+    ids: [atelier]
+    package_name: atelier
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: Atelier
+    homepage: https://github.com/vyrwu/atelier
+    maintainer: Atelier releases <releases@users.noreply.github.com>
+    description: A workshop for parallel coding agents — tmux and Bubble Tea
+    license: MIT
+    section: utils
+    formats: [deb, rpm, apk]
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/atelier/LICENSE
+        file_info:
+          mode: 0644
+    rpm:
+      signature:
+        key_file: &gpg_key_file '{{ if .IsSnapshot }}{{ envOrDefault "ATELIER_SIGNING_GPG_KEY_FILE" "" }}{{ else }}{{ .Env.ATELIER_SIGNING_GPG_KEY_FILE }}{{ end }}'
+    deb:
+      signature:
+        key_file: *gpg_key_file
+        type: origin
+    apk:
+      signature:
+        key_file: '{{ if .IsSnapshot }}{{ envOrDefault "ATELIER_SIGNING_APK_KEY_FILE" "" }}{{ else }}{{ .Env.ATELIER_SIGNING_APK_KEY_FILE }}{{ end }}'
+        key_name: atelier
 
 checksum:
   name_template: 'atelier_{{ .Version }}_checksums.txt'
+  # A glob allows unsigned snapshots before key provisioning. Production
+  # with-keys.sh requires both exact public keys before building anything.
+  extra_files:
+    - glob: packaging/keys/atelier.{asc,rsa.pub}
+
+# Passphrases go through stdin; never place them on the command line.
+signs:
+  - artifacts: checksum
+    args:
+      - --batch
+      - --pinentry-mode
+      - loopback
+      - --passphrase-fd
+      - "0"
+      - --local-user
+      - "{{ .Env.ATELIER_SIGNING_GPG_FINGERPRINT }}"
+      - --output
+      - ${signature}
+      - --detach-sign
+      - ${artifact}
+    stdin: "{{ .Env.NFPM_ATELIER_PASSPHRASE }}"
 
 snapshot:
   version_template: "{{ .Tag }}-next"
@@ -87,6 +139,11 @@ changelog:
       - typo
 
 release:
+  # Retries of the same validated commit must recover after partial uploads or
+  # failed attestation. release-guard.sh rejects moved, deleted and stale tags.
+  replace_existing_artifacts: true
+  extra_files:
+    - glob: packaging/keys/atelier.{asc,rsa.pub}
   github:
     owner: vyrwu
     name: atelier
@@ -108,3 +165,9 @@ release:
     4. Launch (from a plain terminal): `atelier`
 
     Requires `tmux`, `git`, and `gh`. Checksums: `atelier_{{ .Version }}_checksums.txt`.
+
+    Verify the downloaded archive or Linux package before installing it:
+    `gh attestation verify <file> --repo vyrwu/atelier --signer-workflow vyrwu/atelier/.github/workflows/release.yml --source-ref refs/tags/{{ .Tag }} --deny-self-hosted-runners`
+
+    Linux packages and the checksum manifest are also signed with Atelier release
+    keys. See the [verification and installation guide](https://github.com/vyrwu/atelier/blob/{{ .Tag }}/docs/release-security.md#verify-and-install-downloads).

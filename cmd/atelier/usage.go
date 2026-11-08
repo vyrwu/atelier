@@ -34,6 +34,7 @@ func usage(args []string) error {
 			if err != nil {
 				return err
 			}
+			// #nosec G204 G702 -- Intentionally runs the owner's existing statusLine command, passed by the installed hook.
 			cmd := exec.Command("/bin/sh", "-c", string(decoded))
 			cmd.Stdin = bytes.NewReader(data)
 			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

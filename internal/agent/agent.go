@@ -140,9 +140,11 @@ func GitConfigGlobal() string {
 // *replaces* the global config chain (not augments it), a wrong pick would strand
 // the agent with no identity.
 func hasGitEmail(path string) bool {
+	// #nosec G703 -- The owner chooses their git config path through GIT_CONFIG_GLOBAL or their home directory.
 	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
 		return false
 	}
+	// #nosec G204 G702 -- Fixed git subcommand; the owner's config path is a separate --file argument.
 	out, err := exec.Command("git", "config", "--file", path, "--get", "user.email").Output()
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }
@@ -159,11 +161,11 @@ func SetStatus(session string, st core.AgentStatus) error {
 		return fmt.Errorf("invalid session name %q", session)
 	}
 	path := statusFile(session)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	body := fmt.Sprintf("%s\n%d\n", st, time.Now().Unix())
-	return os.WriteFile(path, []byte(body), 0o644)
+	return os.WriteFile(path, []byte(body), 0o600)
 }
 
 // LastEvent is when session's agent last reported anything — the status file's

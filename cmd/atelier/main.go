@@ -186,6 +186,7 @@ func hook(status string) error {
 
 // detach runs this binary with args in its own session, outliving the caller.
 func detach(args ...string) {
+	// #nosec G204 G702 -- Executes this binary or tmux with separate arguments, never an interpolated shell command.
 	c := exec.Command(self(), args...)
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	_ = c.Start()
@@ -293,10 +294,10 @@ func writeBindings(force bool) error {
 		return nil
 	}
 	path := filepath.Join(filepath.Dir(core.ConfigPath()), "atelier.tmux")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(frag), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(frag), 0o600); err != nil {
 		return err
 	}
 	// Best-effort source: a session-less server has already exited (install with
@@ -393,6 +394,7 @@ func execTmux(args ...string) error {
 	// Strip $TMUX/$TMUX_PANE so attaching works even when launched from inside
 	// another tmux (e.g. `make dev` from your real atelier) — tmux otherwise
 	// refuses to attach a nested session.
+	// #nosec G204 G702 -- Executes this binary or tmux with separate arguments, never an interpolated shell command.
 	return syscall.Exec(bin, argv, envWithout("TMUX", "TMUX_PANE"))
 }
 
@@ -490,7 +492,7 @@ func createWorkspace(args []string) error {
 	finish := startSpinner("creating " + slug)
 	defer finish("") // safety net: clear the spinner on any early return
 	root := filepath.Join(core.AteliersRoot(), slug)
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o700); err != nil {
 		_ = core.RemoveWorkspace(slug)
 		return err
 	}

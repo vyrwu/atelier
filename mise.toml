@@ -1,0 +1,76 @@
+[tools]
+go = "1.27.3"
+goreleaser = "2.20.0"
+golangci-lint = "2.15.0"
+actionlint = "1.7.12"
+zizmor = "1.32.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
+
+# `mise run ci` is exactly what CI runs on every pull request. Run it before you push;
+# `mise run hooks` makes git do that for you.
+
+[tasks.fmt]
+description = "Check gofmt formatting"
+run = '''
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+  echo "These files need gofmt -w:"
+  echo "$unformatted"
+  exit 1
+fi
+'''
+
+[tasks.lint]
+description = "Lint, including gosec security checks"
+run = "golangci-lint run"
+
+[tasks.test]
+description = "Test the headless core with the race detector"
+run = "go test -race ./..."
+
+[tasks.actions]
+description = "Lint GitHub Actions workflows and scan them for security issues"
+run = ["actionlint", "zizmor --offline .github/workflows"]
+
+[tasks.vuln]
+description = "Scan dependencies and the standard library for known vulnerabilities"
+run = "govulncheck ./..."
+
+[tasks.release-check]
+description = "Validate release configuration and provisioned public-key fingerprints"
+run = '''
+goreleaser check
+# Bootstrap CI uses throwaway keys; once either production key exists, require
+# both public keys and their published fingerprints to agree.
+if [ -e packaging/keys/atelier.asc ] || [ -e packaging/keys/atelier.rsa.pub ]; then
+  packaging/signing/fingerprints.sh --check
+fi
+'''
+
+[tasks.verify]
+description = "Verify module checksums and vet the code"
+run = ["go mod verify", "go vet ./..."]
+
+[tasks.build]
+description = "Build the binary"
+run = "make build"
+
+[tasks.snapshot]
+description = "Build unsigned archives, Linux packages and Homebrew cask without publishing"
+run = "goreleaser release --config .goreleaser.yaml --snapshot --clean --skip=sign"
+
+[tasks.signing-test]
+description = "Build and verify packages with throwaway signing keys"
+run = "packaging/signing/test-signing.sh"
+
+[tasks.release-policy]
+description = "Exercise release guards and security setup without GitHub mutations"
+run = ["scripts/test-release-guard.sh", "scripts/test-security-setup.sh"]
+
+[tasks.ci]
+description = "Everything CI runs, in parallel"
+depends = ["fmt", "lint", "test", "vuln", "actions", "release-check", "verify", "build", "release-policy"]
+
+[tasks.hooks]
+description = "Run `mise run ci` before every git push"
+run = "git config core.hooksPath .githooks"

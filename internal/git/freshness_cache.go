@@ -36,7 +36,7 @@ func freshnessFile(path string) string {
 
 // writeFreshness records "ahead behind ok unix-ts" for path (best-effort).
 func writeFreshness(path string, ahead, behind int, ok bool) {
-	if err := os.MkdirAll(filepath.Dir(freshnessFile(path)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(freshnessFile(path)), 0o700); err != nil {
 		return
 	}
 	oki := 0
@@ -44,7 +44,7 @@ func writeFreshness(path string, ahead, behind int, ok bool) {
 		oki = 1
 	}
 	body := fmt.Sprintf("%d %d %d %d", ahead, behind, oki, time.Now().Unix())
-	_ = os.WriteFile(freshnessFile(path), []byte(body), 0o644)
+	_ = os.WriteFile(freshnessFile(path), []byte(body), 0o600)
 }
 
 // readFreshness parses a cached "ahead behind ok unix-ts"; found is false when

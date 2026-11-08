@@ -74,7 +74,21 @@ go install github.com/vyrwu/atelier/cmd/atelier@latest
 ```
 
 Or download a binary from [releases](https://github.com/vyrwu/atelier/releases),
-or run `make install` from a clone.
+or run `make install` from a clone. For releases built with the provenance
+workflow, verify the downloaded archive before extracting it:
+
+```sh
+gh attestation verify <archive.tar.gz> --repo vyrwu/atelier \
+  --signer-workflow vyrwu/atelier/.github/workflows/release.yml \
+  --source-ref refs/tags/vX.Y.Z --deny-self-hosted-runners
+```
+
+Replace `vX.Y.Z` with the downloaded release's tag. Signed `.deb`, `.rpm` and
+`.apk` packages are also built for amd64 and arm64, with a signed checksum
+manifest and public keys. Follow the [verification and native installation
+guide](docs/release-security.md#verify-and-install-downloads) before installing.
+The [release security guide](docs/release-security.md) describes the build checks
+and required setup. Public signing-key fingerprints are listed below.
 
 ## Quick start
 
@@ -227,3 +241,14 @@ pull request.
 ## License
 
 [MIT](LICENSE) © vyrwu
+
+## Release signing keys
+
+These fingerprints identify the public keys distributed with signed releases.
+Compare them before trusting a downloaded key. Private keys are stored only in
+the protected `release` environment; key rotation updates this table.
+
+| Key | Signs | Fingerprint |
+| --- | --- | --- |
+| `atelier.asc` | `.rpm`, `.deb`, `checksums.txt` | `70A2553E9D05AAE5EE4AE0FD8946100349BDF034` |
+| `atelier.rsa.pub` | `.apk` | SHA-256 `924b2c7196f8aa9f5ec08711691215a9e829eb4d377c0f538506e5f8f9d8c128` |
