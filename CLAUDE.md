@@ -50,6 +50,8 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   MCP purge cancellation interrupts its CLI child cooperatively, clearing the
   confirmation and checking cancellation under the state lock before deletion.
   Cleanup already started for one space finishes with its state write.
+  Restore checks retired state under the state lock before changing status;
+  revival checks current provider and session existence under the launch lock.
 
 - A workspace ("space") = a dir under `~/ateliers/<slug>/` + a tmux session whose
   `claude` window runs the agent — the selected agent, `Workspace.Agent` (""

@@ -54,7 +54,11 @@ func find(slug string, state want) (core.Workspace, error) {
 func SetRetired(slug string, retired bool) error {
 	var actionErr error
 	err := core.Update(func(s *core.State) {
-		w, err := target(s, slug, wantAny)
+		wanted := wantAny
+		if !retired {
+			wanted = wantRetired
+		}
+		w, err := target(s, slug, wanted)
 		if err != nil {
 			actionErr = err
 			return
@@ -97,9 +101,6 @@ func Retire(slug string) error {
 }
 
 func Restore(slug string) error {
-	if _, err := find(slug, wantRetired); err != nil {
-		return err
-	}
 	if err := SetRetired(slug, false); err != nil {
 		return err
 	}

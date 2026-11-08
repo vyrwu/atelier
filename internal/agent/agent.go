@@ -31,11 +31,25 @@ const Window = "claude"
 // window if you exited the agent but left other windows (shells) open — so M-a
 // always brings it back. It resumes the space's conversation with its agent.
 func EnsureAgent(ws core.Workspace) error {
-	if tmux.HasSession(ws.Session) && tmux.HasWindow(ws.Session, Window) {
-		return nil
+	var launchErr error
+	err := core.Update(func(s *core.State) {
+		current := s.Find(ws.Slug)
+		if current == nil || current.Retired {
+			launchErr = fmt.Errorf("space %q is no longer active", ws.Slug)
+			return
+		}
+		// Check and revive under the launch lock. Two concurrent openers
+		// must not respawn the agent that the first one just started.
+		if tmux.HasSession(current.Session) && tmux.HasWindow(current.Session, Window) {
+			return
+		}
+		k := Of(current.Agent)
+		launchErr = runAgent(*current, k, k.ResumeCmd(LatestSession(k, current.Root(), current.Created), ""))
+	})
+	if err != nil {
+		return err
 	}
-	k := Of(ws.Agent)
-	return RunAgent(ws, k, k.ResumeCmd(LatestSession(k, ws.Root(), ws.Created), ""))
+	return launchErr
 }
 
 // RunAgent runs cmd as the space's agent k: in a new session if the space has

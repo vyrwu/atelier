@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyrwu/atelier/internal/agent"
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/gc"
 )
@@ -32,6 +33,27 @@ func TestRestoreUpdatesActivityAndRejectsDeletedSpace(t *testing.T) {
 	}
 	if err := SetRetired(w.Slug, false); err == nil {
 		t.Fatal("restoring a concurrently deleted space succeeded")
+	}
+}
+
+func TestRestoreDoesNotResetAnAlreadyActiveAgent(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	w := core.Workspace{Slug: "restore", Session: "restore", Retired: true}
+	if err := core.Update(func(s *core.State) { s.Workspaces = []core.Workspace{w} }); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRetired(w.Slug, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SetStatus(w.Session, core.StatusWorking); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRetired(w.Slug, false); err == nil {
+		t.Fatal("a stale second restore was accepted")
+	}
+	if got := agent.Status(w.Session, true); got != core.StatusWorking {
+		t.Fatalf("second restore falsely signaled completion: %s", got)
 	}
 }
 
