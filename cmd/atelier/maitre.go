@@ -73,7 +73,7 @@ func prepareMaitre(restart bool) error {
 	if err != nil {
 		return err
 	}
-	if err := ui.ConfigureMaitreView(); err != nil {
+	if err := tmux.SetSessionOption(core.MaitreSlug, "status", "off"); err != nil {
 		return err
 	}
 	if err := tmux.SetSessionOption(core.MaitreSlug, "key-table", "maitre"); err != nil {
@@ -98,5 +98,5 @@ func maitreCmd(args []string) error {
 	if restart {
 		return nil
 	}
-	return execTmux("attach", "-t", "="+core.MaitreSlug)
+	return ui.RunMaitre()
 }

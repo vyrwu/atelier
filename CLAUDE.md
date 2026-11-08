@@ -19,7 +19,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   their config (trust + MCP registration), the per-workspace guide
 - `internal/mcp` — stdio MCP server: three space tools, or twelve operator tools with `--maitre`
 - `internal/operator` — space lifecycle, listing, screen I/O, waiting, focus and destructive confirmation
-- `internal/ui` — Bubble Tea overlays, the home splash, and shared native Maître styling
+- `internal/ui` — Bubble Tea overlays, the home splash, and the embedded Maître terminal
 - `internal/gc` — deleting spaces (one, or all older than an age) and sweeping
   up what deleted spaces leave behind
 - `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
@@ -33,16 +33,17 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   from ordinary listings and cleanup, still counted in attention. `M-m`
   attaches a nested popup client; hiding it leaves the agent running. Its
   `maitre` key table binds `Esc`/`M-m` close, `M-r` restart and `M-x` swap.
-  The viewport shares the 70% size and
-  rounded grey frame of the overlays; `internal/ui/maitre.go` uses the shared
-  palette for its native border and persistent bottom shortcut legend.
+  The 70% popup runs Bubble Tea and uses the same frame and footer functions
+  as other overlays. `internal/ui/maitre.go` embeds the native tmux client
+  through a PTY and `x/vt`; its session status line is off.
   `@atelier_maitre_outer` retains the real outer client when the swap overlay
   updates `@atelier_outer`. Operator tools refuse to target Maître itself;
   its own swap/restart controls deliberately use the ordinary launch path.
   `ATELIER_SESSION=maitre` gates CLI destruction: no bypass flags, an attached
   human client must confirm the tmux menu, hidden/timeout/dismissal means no.
   MCP config pins the instance socket and all provider directories, and agent
-  identity is also pinned in the tmux session environment.
+  identity is also pinned in the tmux session environment. `ATELIER_TMUX` pins
+  a compatible tmux executable across agent/MCP PATH changes.
   Missing Maître records recover the provider from live session metadata or
   transcripts without imposing a new conversation cutoff. MCP waits have
   request contexts and run alongside other requests; tool mutations remain

@@ -219,9 +219,10 @@ alone, regenerating them from the binary so an upgrade can't leave dead keys. It
 never generates, rewrites, or takes authority over the user's tmux
 configuration.
 
-**NFR-S5 — One renderer.** Application screens use Bubble Tea. Maître's native
-agent viewport and human confirmation menu use the existing tmux host, with
-shared overlay styling. No additional UI technology or external picker binary.
+**NFR-S5 — One renderer.** Application screens use Bubble Tea. Maître embeds
+a native terminal through a PTY and terminal emulator, with the same frame and
+legend functions as the other screens. Its human confirmation menu remains a
+native tmux overlay, independent of the agent's approvals.
 
 ### Operability
 
@@ -248,11 +249,11 @@ architectural risk.
 | **Overlay (popup)** | spaces · trash · new · pull requests · worktrees · confirm | Seconds | Peek and jump: an overlay is one transition, a window would be two. It runs fresh each open and captures the invoking client at once, so it never acts on a stale one. |
 | **Window** | The agent, shells, a PR's diff and checks | Hours | Survives detach, keeps scrollback and copy mode, and shows in tmux's own session list. |
 
-**Agent processes live in windows.** Maître's popup attaches a nested client to
-its persistent session; closing that viewport detaches the client while the
-agent keeps running. The viewport shares the other overlays' 70% size, rounded
-frame and quiet palette. Its shortcut footer is outside the agent pane, so the
-agent cannot erase it. Other overlays are short-lived Bubble Tea programs.
+**Agent processes live in windows.** Maître's Bubble Tea popup embeds a nested
+tmux client through a PTY. Closing the viewport detaches only that client while
+the agent keeps running. All overlays use the same frame and shortcut footer
+functions. The terminal emulator keeps the agent's redraws inside the body;
+input, resize and terminal replies pass through to the native client.
 
 **Programs in windows aren't atelier's UI.** The agent, a shell, a diff pager,
 and gh-enhance run in windows atelier opens; atelier draws none of them. That is
@@ -340,10 +341,9 @@ predictable failure mode. They are enforced in review.
   deleting the first.
 - **Extract an interface only when a second real implementation exists and is in
   production.** Never for a mock, never for a hypothetical.
-- **Application screens use Bubble Tea**, in `internal/ui`. The persistent
-  native Maître viewport and its confirmation menu use tmux; its frame and
-  shortcut footer share the overlay palette from `internal/ui`. No additional
-  renderer or terminal emulator.
+- **Application screens use Bubble Tea**, in `internal/ui`. Maître's terminal
+  adapter uses `x/vt` and a PTY inside the shared frame, preserving the native
+  agent and tmux confirmation menu. No separate model API or chat renderer.
 - **No process spawn per screen.** The overlay's screens are states of one
   process (NFR-P4).
 - **State lives in one JSON file, never in tmux**, and it is a cache and an
@@ -453,5 +453,10 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
 13. **Atelier owns destructive confirmation.** Maître's delete and purge calls,
     including CLI calls with bypass flags, need a human viewing its popup.
     A native tmux menu belongs to that human client, times out after 60 seconds,
-    and treats dismissal as refusal. Like the native viewport, this menu uses
-    tmux; it must run independently of the agent's approvals.
+    and treats dismissal as refusal. The native client renders this menu within
+    Maître's terminal viewport, independently of the agent's approvals.
+
+14. **Pin the tmux client.** Agents and MCP processes inherit `ATELIER_TMUX`,
+    because login shells and harnesses can reorder PATH. On older instances
+    without a pin, try other installed clients only when the first cannot
+    contact the server. These probes cannot start or restart a server.

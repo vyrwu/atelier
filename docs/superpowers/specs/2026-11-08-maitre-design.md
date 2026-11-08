@@ -130,11 +130,11 @@ approvals, because the guard lives in atelier, not in the agent.
 ### Popup and keys
 
 - `M-m` (global): records the opening client in `@atelier_maitre_outer`, then
-  opens a 70% popup with the same rounded grey frame as the Bubble Tea overlays.
-  `atelier maitre` ensures the record and session, then execs `tmux attach -t
-  maitre` with `TMUX` unset (a nested client of the same server). Maître's
-  session reserves a bottom separator and shortcut legend outside the native
-  agent pane, using the shared overlay palette from `internal/ui`.
+  opens a borderless 70% tmux popup running Bubble Tea. `atelier maitre`
+  ensures the record and session, then `ui.RunMaitre` embeds `tmux attach`
+  through a PTY and terminal emulator. Bubble Tea renders the shared frame,
+  title, separator and legend. Maître's tmux status line is off; the native
+  terminal occupies only the body. Closing the PTY detaches the client.
 - `Esc` or `M-m` inside Maître (the client's session is `maitre`): `detach-client`,
   which closes the popup. Maître keeps running.
 - `M-r` inside Maître: `atelier maitre --restart` respawns its agent window with

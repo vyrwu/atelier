@@ -28,6 +28,7 @@ var version = "dev"
 
 func main() {
 	core.LoadConfig() // applies ATELIER_ROOT; harmless everywhere
+	_ = os.Setenv("ATELIER_TMUX", tmux.Binary())
 	ui.Version = version
 	args := os.Args[1:]
 	cmd := ""
@@ -392,7 +393,7 @@ bind -n M-t set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s open --new"
 # Maître is one background session, viewed through a nested popup client.
 # Keep its opener separate from @atelier_outer, which its swap popup replaces.
-bind -n M-m set-option -gF @atelier_maitre_outer "#{client_name}" \; display-popup -b rounded -S "%[6]s" -s "bg=default" -w 70%% -h 70%% -T " Maître " -E "%[1]s maitre"
+bind -n M-m set-option -gF @atelier_maitre_outer "#{client_name}" \; display-popup -B -w 70%% -h 70%% -E "%[1]s maitre"
 # Replace this owned table so upgrades remove obsolete bindings as well.
 unbind -q -a -T maitre
 bind -T maitre M-m detach-client
@@ -418,11 +419,11 @@ bind -n M-c run-shell "%[1]s win '#{session_name}' shell"
 bind -n M-h set-option -gF @atelier_outer "#{client_name}" \; run-shell "%[1]s home --switch"
 # M-q detaches atelier — back to the shell that spawned it.
 bind -n M-q detach-client
-`, self(), rgbSetting()+syncSetting(), usageJob(), title, pollJob(), ui.MaitreBorderStyle())
+`, self(), rgbSetting()+syncSetting(), usageJob(), title, pollJob())
 }
 
 func execTmux(args ...string) error {
-	bin, err := exec.LookPath("tmux")
+	bin, err := exec.LookPath(tmux.Binary())
 	if err != nil {
 		return err
 	}

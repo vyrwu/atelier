@@ -129,6 +129,7 @@ func runtimePaths() map[string]string {
 	env["XDG_CONFIG_HOME"] = filepath.Dir(filepath.Dir(core.ConfigPath()))
 	env["ATELIER_ROOT"] = core.AteliersRoot()
 	env["ATELIER_SOCKET"] = core.LoadConfig().Socket
+	env["ATELIER_TMUX"] = os.Getenv("ATELIER_TMUX")
 	return env
 }
 

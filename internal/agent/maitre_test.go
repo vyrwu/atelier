@@ -16,8 +16,9 @@ func TestMCPArgsAndMaitreEnv(t *testing.T) {
 		t.Fatal("wrong tool set")
 	}
 	t.Setenv("ATELIER_SOCKET", "isolated-maitre")
+	t.Setenv("ATELIER_TMUX", "/pinned/tmux")
 	t.Setenv("CODEX_HOME", "/custom/codex")
-	if env := mcpEnv(core.MaitreSlug); env["ATELIER_SOCKET"] != "isolated-maitre" || env["CODEX_HOME"] != "/custom/codex" {
+	if env := mcpEnv(core.MaitreSlug); env["ATELIER_SOCKET"] != "isolated-maitre" || env["ATELIER_TMUX"] != "/pinned/tmux" || env["CODEX_HOME"] != "/custom/codex" {
 		t.Fatal(env)
 	}
 	if Env(core.MaitreSlug, Claude)["MCP_TOOL_TIMEOUT"] != "600000" || Env("space", Claude)["MCP_TOOL_TIMEOUT"] != "" {

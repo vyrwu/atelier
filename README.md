@@ -136,8 +136,8 @@ The splash (`M-h`) lists them all.
 | `M-h` | home | `M-p` | pull requests |
 | `M-q` | detach | `M-w` | worktrees |
 
-Maître uses the same size and rounded frame as the other overlays, with a
-shortcut legend below the agent. `Esc` or `M-m` hides it while the agent keeps
+Maître runs in a Bubble Tea popup using the same frame and shortcut legend
+as the other overlays. `Esc` or `M-m` hides it while the agent keeps
 working, `M-r` starts a fresh conversation, and `M-x` swaps agents. Other
 atelier shortcuts pass through to the agent. Ask Maître to take you to a space
 to leave the popup and focus it.

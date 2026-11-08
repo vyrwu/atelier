@@ -484,20 +484,23 @@ func (m Model) View() string {
 	case scrConfirm:
 		body = m.viewConfirm()
 	}
-	footer := m.screenFooter()
+	return overlayFrame(m.w, m.h, body, m.screenFooter())
+}
+
+func overlayFrame(w, h int, body, footer string) string {
 	// Fixed-size frame with the footer pinned to the bottom. The rounded frame is
 	// the only border — the tmux popup border is disabled (-B).
-	contentW := m.w - 4
-	innerH := m.h - 2
+	contentW := w - 4
+	innerH := h - 2
 	if footer == "" {
 		inner := lipgloss.NewStyle().Width(contentW).Height(innerH).Render(body)
-		return frameStyle.Width(m.w - 2).Height(innerH).Render(inner)
+		return frameStyle.Width(w - 2).Height(innerH).Render(inner)
 	}
 	footer = lipgloss.NewStyle().Width(contentW).Render(footer)
 	fh := lipgloss.Height(footer)
 	bodyBox := lipgloss.NewStyle().Width(contentW).Height(innerH - fh - 1).Render(body)
 	inner := bodyBox + "\n" + dimStyle.Render(strings.Repeat("─", contentW)) + "\n" + footer
-	return frameStyle.Width(m.w - 2).Height(innerH).Render(inner)
+	return frameStyle.Width(w - 2).Height(innerH).Render(inner)
 }
 
 // screenFooter is the shortcut bar under the current screen. The lists size
@@ -525,6 +528,10 @@ func (m Model) screenFooter() string {
 // its own legend and nothing more.
 func (m Model) footer(verb string, extras ...string) string {
 	parts := append([]string{"↵ " + verb}, extras...)
+	return shortcutFooter(parts...)
+}
+
+func shortcutFooter(parts ...string) string {
 	return hintStyle.Render(strings.Join(parts, "  ·  "))
 }
 

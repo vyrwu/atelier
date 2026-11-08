@@ -41,7 +41,7 @@ func runInput(input io.Reader, args ...string) ([]byte, error) {
 	defer cancel()
 	full := append([]string{"-L", socket()}, args...)
 	// #nosec G204 G702 -- Fixed tmux binary and argument array; shell commands are quoted by their builders.
-	cmd := exec.CommandContext(ctx, "tmux", full...)
+	cmd := exec.CommandContext(ctx, Binary(), full...)
 	cmd.Stdin = input
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -304,7 +304,7 @@ func Flash(msg string, seconds int) error {
 		return err
 	}
 	_ = RefreshStatus()
-	clear := fmt.Sprintf("tmux -L %s set -g @atelier_spin ''; tmux -L %s refresh-client -S", socket(), socket())
+	clear := fmt.Sprintf("%s -L %s set -g @atelier_spin ''; %s -L %s refresh-client -S", shquote(Binary()), shquote(socket()), shquote(Binary()), shquote(socket()))
 	_, err := Run("run-shell", "-b", "-d", fmt.Sprintf("%d", seconds), clear)
 	return err
 }
