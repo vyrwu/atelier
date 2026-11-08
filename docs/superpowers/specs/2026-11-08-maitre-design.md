@@ -137,7 +137,6 @@ approvals, because the guard lives in atelier, not in the agent.
   agent pane, using the shared overlay palette from `internal/ui`.
 - `Esc` or `M-m` inside Maître (the client's session is `maitre`): `detach-client`,
   which closes the popup. Maître keeps running.
-- `M-Esc` sends Escape to the native agent, for its own prompts and menus.
 - `M-r` inside Maître: `atelier maitre --restart` respawns its agent window with
   a fresh conversation, the same path as a swap to the same agent. Elsewhere
   `M-r` passes through (readline's revert-line).
@@ -145,11 +144,11 @@ approvals, because the guard lives in atelier, not in the agent.
 - The overlay keys (`M-n`, `M-s`, `M-t`, `M-p`, `M-w`, `M-h`) do nothing inside
   Maître. They'd act on the popup's nested client, not yours; `focus` is how
   Maître moves you. Mechanism: Maître's session sets tmux's `key-table` to
-  `maitre`, which binds `Esc`, `M-Esc`, `M-m`, `M-r`, and `M-x`; every other key goes to
+  `maitre`, which binds `Esc`, `M-m`, `M-r`, and `M-x`; every other key goes to
   Maître's agent. `M-m` records the opening client in `@atelier_maitre_outer`
   (not `@atelier_outer`, which `M-x` inside the popup overwrites).
-- Splash keymap: `M-m Maître` under "Anywhere", with close, restart, swap and
-  agent Escape shortcuts in the Maître group.
+- Splash keymap: `M-m Maître` under "Anywhere", with close, restart and
+  swap shortcuts in the Maître group.
 
 ## Documentation changes
 

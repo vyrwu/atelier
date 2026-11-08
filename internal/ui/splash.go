@@ -37,7 +37,7 @@ var splashKeys = []keyGroup{
 	{"in a space", [][2]string{
 		{"M-a", "agent"}, {"M-x", "swap agent"}, {"M-c", "command line"}, {"M-p", "pull requests"}, {"M-w", "worktrees"},
 	}},
-	{"in maître", [][2]string{{"esc", "close"}, {"M-r", "restart"}, {"M-x", "swap agent"}, {"M-Esc", "agent escape"}}},
+	{"in maître", [][2]string{{"esc", "close"}, {"M-r", "restart"}, {"M-x", "swap agent"}}},
 }
 
 // RunHome shows the landing splash: the wordmark, which external tools are

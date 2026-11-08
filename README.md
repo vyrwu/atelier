@@ -138,9 +138,9 @@ The splash (`M-h`) lists them all.
 
 Maître uses the same size and rounded frame as the other overlays, with a
 shortcut legend below the agent. `Esc` or `M-m` hides it while the agent keeps
-working, `M-r` starts a fresh conversation, and `M-x` swaps agents. `M-Esc`
-(Alt+Esc) sends Escape to the agent itself. Other atelier shortcuts pass through
-to the agent. Ask Maître to take you to a space to leave the popup and focus it.
+working, `M-r` starts a fresh conversation, and `M-x` swaps agents. Other
+atelier shortcuts pass through to the agent. Ask Maître to take you to a space
+to leave the popup and focus it.
 
 In the overlays, type to filter, `Up`/`Down` to move, `Esc` to close.
 

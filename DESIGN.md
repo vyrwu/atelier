@@ -445,8 +445,7 @@ What is wanted next is in the README's [Roadmap](README.md#roadmap).
 11. **Maître is a single meta-session.** The popup is only a viewport. `Esc` or
     `M-m` hides it, `M-r` starts fresh, and `M-x` reuses the existing handoff. A
     session-specific key table leaves other shortcuts to the agent. The outer
-    client is kept separately from the swap popup's client. `M-Esc` sends Escape
-    to the agent, preserving access to its own prompts and menus.
+    client is kept separately from the swap popup's client.
 12. **Agents communicate through their screens.** Operator commands capture
     the agent window and send literal text or a bounded set of keys. No model
     backend or harness-specific message transport is built into atelier.

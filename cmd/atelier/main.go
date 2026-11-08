@@ -393,9 +393,10 @@ bind -n M-n set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -
 # Maître is one background session, viewed through a nested popup client.
 # Keep its opener separate from @atelier_outer, which its swap popup replaces.
 bind -n M-m set-option -gF @atelier_maitre_outer "#{client_name}" \; display-popup -b rounded -S "%[6]s" -s "bg=default" -w 70%% -h 70%% -T " Maître " -E "%[1]s maitre"
+# Replace this owned table so upgrades remove obsolete bindings as well.
+unbind -q -a -T maitre
 bind -T maitre M-m detach-client
 bind -T maitre Escape detach-client
-bind -T maitre M-Escape send-keys Escape
 bind -T maitre M-r run-shell -b "%[1]s maitre --restart"
 bind -T maitre M-x set-option -gF @atelier_outer "#{client_name}" \; display-popup -B -w 46 -h 11 -E "%[1]s open --swap"
 # Intra-workspace window nav (run-shell DOES expand #{session_name}). M-a brings

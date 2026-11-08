@@ -24,8 +24,7 @@ func ConfigureMaitreView() error {
 		{"status-style", fmt.Sprintf("fg=colour%s,bg=default", cDim)},
 		{"status-format[0]", "#[align=left] " + strings.Repeat("─", 1024) + "#[align=right] "},
 		{"status-format[1]", "#{?#{e|<:#{client_width},46}, esc close · M-r restart · M-x swap, esc close  ·  M-r restart  ·  M-x swap agent}"},
-		{"status-format[2]", " M-m hide  ·  M-Esc send Esc to agent"},
-		{"status", "3"},
+		{"status", "2"},
 	}
 	for _, option := range options {
 		if err := tmux.SetSessionOption(core.MaitreSlug, option[0], option[1]); err != nil {

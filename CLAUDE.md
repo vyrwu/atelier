@@ -32,8 +32,8 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - Maître is the reserved `maitre` space: one meta-session per instance, hidden
   from ordinary listings and cleanup, still counted in attention. `M-m`
   attaches a nested popup client; hiding it leaves the agent running. Its
-  `maitre` key table binds `Esc`/`M-m` close, `M-r` restart, `M-x` swap and
-  `M-Esc` to send Escape to the agent. The viewport shares the 70% size and
+  `maitre` key table binds `Esc`/`M-m` close, `M-r` restart and `M-x` swap.
+  The viewport shares the 70% size and
   rounded grey frame of the overlays; `internal/ui/maitre.go` uses the shared
   palette for its native border and persistent bottom shortcut legend.
   `@atelier_maitre_outer` retains the real outer client when the swap overlay
