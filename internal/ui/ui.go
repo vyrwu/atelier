@@ -9,13 +9,11 @@
 package ui
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -27,6 +25,7 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 	"github.com/vyrwu/atelier/internal/gc"
 	"github.com/vyrwu/atelier/internal/git"
+	"github.com/vyrwu/atelier/internal/operator"
 	"github.com/vyrwu/atelier/internal/tmux"
 )
 
@@ -611,8 +610,7 @@ func (m *Model) askSwap(w *core.Workspace) {
 // disk, restorable from Trash, M-t), and refresh the list.
 func (m *Model) deactivate(w core.Workspace) {
 	m.moveOuterOff(w.Session)
-	_ = tmux.KillSession(w.Session)
-	if err := setRetired(w.Slug, true); err != nil {
+	if err := operator.Retire(w.Slug); err != nil {
 		m.err = err.Error()
 	}
 	agent.RefreshAttention() // a killed session may have been blocked
@@ -651,43 +649,12 @@ func (m Model) fallbackSession(exclude string) string {
 
 // reactivate restores a retired workspace and switches into it (resuming its agent).
 func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
-	if err := setRetired(w.Slug, false); err != nil {
+	if err := operator.SetRetired(w.Slug, false); err != nil {
 		m.err = err.Error()
 		m.load()
 		return m, nil
 	}
 	return m.switchTo(w.Session)
-}
-
-func setRetired(slug string, retired bool) error {
-	found := false
-	var statusErr error
-	err := core.Update(func(s *core.State) {
-		if w := s.Find(slug); w != nil {
-			found = true
-			if !retired {
-				if statusErr = agent.SetStatus(w.Session, core.StatusIdle); statusErr != nil {
-					return
-				}
-			}
-			w.Retired = retired
-			if retired {
-				w.RetiredAt = time.Now()
-			} else {
-				w.RetiredAt = time.Time{}
-			}
-		}
-	})
-	if err != nil {
-		return err
-	}
-	if statusErr != nil {
-		return statusErr
-	}
-	if !found {
-		return fmt.Errorf("space %q no longer exists", slug)
-	}
-	return nil
 }
 
 // deleteWorkspace deletes w for good (gc.Delete), then refreshes the list in
