@@ -30,7 +30,7 @@ func ConfirmMenu(client, prompt string, timeout time.Duration) (bool, error) {
 	}
 	defer func() { _, _ = Run("set-option", "-gu", option) }()
 	choose := func(answer string) string {
-		return "if-shell -F '#{==:#{" + option + "},pending}' 'set-option -g " + option + " " + answer + "'"
+		return "if-shell -F '" + EscapeText("#{==:#{"+option+"},pending}") + "' 'set-option -g " + option + " " + answer + "'"
 	}
 	// #nosec G204 G702 -- Fixed tmux binary, literal prompt argument and generated callback commands; no user text enters a command.
 	out, err := exec.CommandContext(ctx, "tmux", "-L", socket(), "display-menu", "-c", client, "-T", EscapeText(prompt), "Yes", "y", choose("yes"), "No", "n", choose("no")).CombinedOutput()

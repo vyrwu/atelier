@@ -128,3 +128,13 @@ func TestEnsureMaitreGuideKeepsEdits(t *testing.T) {
 		t.Fatal(string(data))
 	}
 }
+
+func TestBlockedMaitreCountsForAttention(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	if err := SetStatus(core.MaitreSlug, core.StatusBlocked); err != nil {
+		t.Fatal(err)
+	}
+	if got := BlockedCount([]string{core.MaitreSlug}); got != 1 {
+		t.Fatal(got)
+	}
+}

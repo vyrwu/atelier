@@ -93,7 +93,19 @@ func FormatTable(out io.Writer, spaces []Space) error {
 			prs = append(prs, fmt.Sprintf("%s#%d:%s/%s", p.Repo, p.Number, p.State, p.CI))
 		}
 		// State may contain an old multiline generated title; keep one row per space.
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%ds\t%s\t%s\n", s.Slug, s.Status, s.Agent, s.IdleSeconds, strings.Join(prs, ","), strings.Join(strings.Fields(s.Title), " "))
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", s.Slug, s.Status, s.Agent, FormatAge(time.Duration(s.IdleSeconds)*time.Second), strings.Join(prs, ","), strings.Join(strings.Fields(s.Title), " "))
 	}
 	return tw.Flush()
+}
+
+// FormatAge renders idle age compactly for the CLI tables.
+func FormatAge(d time.Duration) string {
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }

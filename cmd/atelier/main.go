@@ -558,14 +558,11 @@ func createWorkspace(args []string) error {
 	title := w.Title
 	if cfg.Naming {
 		if ttl := agent.GenerateTitle(k, intent, cfg.NamingModel); ttl != "" {
-			title = ttl
-			_ = core.Update(func(s *core.State) {
-				if x := s.FindBySession(slug); x != nil {
-					x.Title = ttl
-				}
-			})
-			_ = tmux.SetTitle(slug, ttl)
-			_ = tmux.RefreshStatus()
+			if changed, err := setGeneratedTitle(slug, w.Title, ttl); err == nil && changed {
+				title = ttl
+				_ = tmux.SetTitle(slug, ttl)
+				_ = tmux.RefreshStatus()
+			}
 		}
 	}
 	// Resolve the spinner into a green check-mark with the final name, held in the
@@ -688,4 +685,16 @@ func deterministicTitle(intent string) string {
 		s = strings.TrimSpace(string(r[:60])) + "…"
 	}
 	return s
+}
+
+// A rename while async naming runs is intentional and must win over its result.
+func setGeneratedTitle(slug, expected, title string) (bool, error) {
+	changed := false
+	err := core.Update(func(s *core.State) {
+		if w := s.Find(slug); w != nil && w.Title == expected {
+			w.Title = title
+			changed = true
+		}
+	})
+	return changed, err
 }

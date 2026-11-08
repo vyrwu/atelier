@@ -141,7 +141,11 @@ func purge(args []string) error {
 		}
 	}
 	if len(kept) > 0 {
-		fmt.Printf("Keeping %d with running sessions or unsaved work (--force deletes them too):\n", len(kept))
+		hint := "--force deletes them too"
+		if operator.FromMaitre() {
+			hint = "retire running spaces and save their work first"
+		}
+		fmt.Printf("Keeping %d with running sessions or unsaved work (%s):\n", len(kept), hint)
 		for _, c := range kept {
 			if c.Running {
 				c.Unsaved = append(c.Unsaved, "session is running; retire first")
@@ -294,15 +298,7 @@ func since(now, t time.Time) string {
 	return days(now.Sub(t))
 }
 
-func days(d time.Duration) string {
-	switch {
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
-}
+func days(d time.Duration) string { return operator.FormatAge(d) }
 
 // clip cuts s to n runes.
 func clip(s string, n int) string {
