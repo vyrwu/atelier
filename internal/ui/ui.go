@@ -216,6 +216,9 @@ func (m *Model) rebuild() {
 	m.rows = m.rows[:0]
 	for i := range m.all {
 		w := &m.all[i]
+		if w.IsMaitre() {
+			continue
+		}
 		// Spaces shows the working set; Trash shows only retired.
 		if m.screen == scrActive && w.Retired {
 			continue
@@ -636,7 +639,7 @@ func (m Model) moveOuterOff(session string) {
 func (m Model) fallbackSession(exclude string) string {
 	for i := range m.all {
 		w := &m.all[i]
-		if w.Session == exclude || w.Retired {
+		if w.Session == exclude || w.Retired || w.IsMaitre() {
 			continue
 		}
 		if m.status[w.Session] != core.StatusGone {

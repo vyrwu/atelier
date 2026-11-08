@@ -586,3 +586,32 @@ func TestSweepPrunesSourceRepos(t *testing.T) {
 		t.Errorf("worktree list after prune:\n%s", out)
 	}
 }
+
+func TestPolicyNeverSelectsMaitre(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	p := Policy{Active: true, Force: true}
+	if p.selects(core.Workspace{Slug: core.MaitreSlug, Session: core.MaitreSlug}, time.Now()) {
+		t.Fatal("selected Maître")
+	}
+	if !p.selects(core.Workspace{Slug: "ordinary", Session: "ordinary"}, time.Now()) {
+		t.Fatal("did not select ordinary space")
+	}
+}
+
+func TestTriageDoesNotAdoptMaitreDir(t *testing.T) {
+	root := sandbox(t)
+	for _, slug := range []string{core.MaitreSlug, "spry-otter"} {
+		dir := filepath.Join(root, slug)
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// Even an accidentally replaced guide must not make Maître an ordinary space.
+		if err := os.Symlink(core.WorkspaceGuidePath(), filepath.Join(dir, "CLAUDE.md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, adopted, _ := triage(&core.State{}, root, true, nil, time.Now())
+	if len(adopted) != 1 || adopted[0] != "spry-otter" {
+		t.Fatalf("adopted: %v", adopted)
+	}
+}

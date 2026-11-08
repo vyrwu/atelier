@@ -133,3 +133,25 @@ func splitOnce(s string, sep byte) []string {
 	}
 	return []string{s}
 }
+
+func TestEnsureMaitreIsIdempotent(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	a, err := EnsureMaitre("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.IsMaitre() || a.Session != MaitreSlug || a.Title != MaitreTitle || a.Agent != "codex" || a.Created.IsZero() {
+		t.Fatalf("bad record: %+v", a)
+	}
+	b, err := EnsureMaitre("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Agent != a.Agent || !b.Created.Equal(a.Created) || len(Load().Workspaces) != 1 {
+		t.Fatalf("changed record: %+v", b)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "/config")
+	if MaitreGuidePath() != "/config/atelier/MAITRE.md" {
+		t.Fatal(MaitreGuidePath())
+	}
+}

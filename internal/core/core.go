@@ -90,6 +90,16 @@ type Workspace struct {
 	SwappedAt time.Time `json:"swapped_at,omitempty"`
 }
 
+const MaitreSlug = "maitre"
+const MaitreTitle = "Maître"
+
+// IsMaitre identifies the instance-wide operator, which is never an ordinary space.
+func (w Workspace) IsMaitre() bool { return w.Slug == MaitreSlug }
+
+func MaitreGuidePath() string {
+	return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "atelier", "MAITRE.md")
+}
+
 // Root is the workspace directory path (~/ateliers/<slug>).
 func (w Workspace) Root() string { return filepath.Join(AteliersRoot(), w.Slug) }
 

@@ -44,7 +44,7 @@ var splashKeys = []keyGroup{
 // attaching to atelier lands on a real screen, not a bare shell, and M-h brings
 // you back to it from anywhere.
 func RunHome() error {
-	m := splashModel{count: len(core.Load().Workspaces), deps: checkDeps()}
+	m := splashModel{count: spaceCount(core.Load().Workspaces), deps: checkDeps()}
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
@@ -68,7 +68,7 @@ func (m splashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the workspaces stay live for the next attach.
 			_ = tmux.DetachClient()
 		case "r":
-			m.count = len(core.Load().Workspaces)
+			m.count = spaceCount(core.Load().Workspaces)
 			m.deps = checkDeps()
 		}
 	}
@@ -282,4 +282,14 @@ func found(bin string) bool {
 	}
 	b, _ := exec.Command("gh", "extension", "list").Output()
 	return strings.Contains(string(b), "gh-enhance")
+}
+
+func spaceCount(ws []core.Workspace) int {
+	n := 0
+	for _, w := range ws {
+		if !w.IsMaitre() {
+			n++
+		}
+	}
+	return n
 }

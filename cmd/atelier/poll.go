@@ -58,7 +58,7 @@ func poll(args []string) error {
 func dueSpaces(ws []core.Workspace, focused string, now time.Time) []core.Workspace {
 	var out []core.Workspace
 	for _, w := range ws {
-		if w.Retired {
+		if w.Retired || w.IsMaitre() {
 			continue
 		}
 		every := otherEvery

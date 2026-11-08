@@ -220,7 +220,7 @@ func (p Policy) Plan(s *core.State, now time.Time) ([]Candidate, error) {
 }
 
 func (p Policy) selects(w core.Workspace, now time.Time) bool {
-	return !slices.Contains(p.Keep, w.Slug) && (w.Retired || p.Active) && now.Sub(LastActive(w)) >= p.Age
+	return !w.IsMaitre() && !slices.Contains(p.Keep, w.Slug) && (w.Retired || p.Active) && now.Sub(LastActive(w)) >= p.Age
 }
 
 // Purge deletes the space slug if p still selects it. Its record and worktrees
@@ -335,7 +335,7 @@ func triage(s *core.State, root string, rootOK bool, live map[string]bool, now t
 		if rootOK && !live[w.Session] && now.Sub(w.Created) > grace && !exists(w.Root()) {
 			records = append(records, w.Slug)
 		}
-		if w.Retired && live[w.Session] {
+		if !w.IsMaitre() && w.Retired && live[w.Session] {
 			sessions = append(sessions, w.Slug)
 		}
 	}
@@ -344,7 +344,7 @@ func triage(s *core.State, root string, rootOK bool, live map[string]bool, now t
 	}
 	entries, _ := os.ReadDir(root)
 	for _, e := range entries {
-		if e.IsDir() && core.ValidSpaceName(e.Name()) && s.Find(e.Name()) == nil && isSpaceDir(filepath.Join(root, e.Name())) {
+		if e.Name() != core.MaitreSlug && e.IsDir() && core.ValidSpaceName(e.Name()) && s.Find(e.Name()) == nil && isSpaceDir(filepath.Join(root, e.Name())) {
 			adopted = append(adopted, e.Name())
 		}
 	}

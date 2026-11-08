@@ -73,7 +73,7 @@ func list(args []string) error {
 	now := time.Now()
 	var spaces []core.Workspace
 	for _, w := range st.Workspaces {
-		if (!trash || w.Retired) && now.Sub(gc.LastActive(w)) >= time.Duration(age) {
+		if !w.IsMaitre() && (!trash || w.Retired) && now.Sub(gc.LastActive(w)) >= time.Duration(age) {
 			spaces = append(spaces, w)
 		}
 	}
