@@ -44,8 +44,10 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   `-c` (without one it can attach to an app-server daemon lacking the space's
   env). Each agent's hooks are guarded on `$ATELIER_AGENT` and use the launching
   binary through `$ATELIER_BIN`. Launches pin the instance paths and socket,
-  and repeat provider preparation on restore. Grok titles use the deterministic
-  fallback; its CLI cannot isolate all config for an auxiliary title call.
+  and repeat provider preparation on restore. Grok titles use the same async
+  naming flow as the other agents, through `grok -p` in a scratch directory
+  without the space's identity. Built-in tools are disabled and all tool calls
+  denied; native user settings and headless session persistence still apply.
   Grok launches set GROK_THEME=terminal and GROK_TERMINAL_THEME=1 so the TUI
   inherits the terminal canvas instead of painting its own dark background.
 - Allowances: `atelier usage` is tmux's asynchronous status job. It renders

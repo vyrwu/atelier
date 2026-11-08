@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,12 +138,10 @@ const askTimeout = 5 * time.Minute
 // it, and returns its answer. It runs from a scratch directory without a
 // space's identity, so it cannot load its guide, become its resumed conversation,
 // or rewrite its status. Claude and Codex disable tools/config and persistence;
-// Grok uses the deterministic title fallback until a fully isolated run exists.
+// Grok disables built-in tools and denies tool calls, including MCP tools.
+// Grok's native user settings and headless session persistence still apply.
 // model applies to Claude only; other agents use their configured default.
 func (k Kind) Ask(prompt, input, model string) (string, error) {
-	if k == Grok {
-		return "", fmt.Errorf("grok: does not provide an isolated title command")
-	}
 	dir, err := os.MkdirTemp("", "atelier-ask-")
 	if err != nil {
 		return "", err
@@ -155,6 +152,10 @@ func (k Kind) Ask(prompt, input, model string) (string, error) {
 	answer := filepath.Join(dir, "answer.md")
 	var cmd *exec.Cmd
 	switch k {
+	case Grok:
+		// #nosec G204 G702 -- Fixed CLI and separate prompt argument in a private scratch directory.
+		cmd = exec.CommandContext(ctx, "grok", "-p", prompt+"\n"+input, "--tools", "", "--deny", "*",
+			"--permission-mode", "dontAsk", "--no-subagents", "--disable-web-search", "--max-turns", "1", "--output-format", "plain")
 	case Codex:
 		// #nosec G204 G702 -- Runs a fixed agent binary with separate arguments in a private scratch directory.
 		cmd = exec.CommandContext(ctx, "codex", "exec", "-C", dir, "--skip-git-repo-check", "--ephemeral",

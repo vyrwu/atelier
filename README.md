@@ -109,7 +109,9 @@ no API key is required in atelier.
 Choose Grok Build with `Tab` in the new-space or swap dialog, or use
 `atelier create "Fix the tests" --agent grok` and `atelier swap <space> --to grok`.
 Grok receives project-local hooks and atelier's MCP tools automatically.
-Its space titles use the task text without an extra model call. Atelier launches
+Its space titles are generated asynchronously through `grok -p`, using your
+configured Grok model. As with the other agents, `naming = false` disables this
+call and keeps the task text as the title. Atelier launches
 Grok with its native `terminal` theme so your terminal background and cursor
 colors stay intact. Its logo uses the **Atelier Logos** fallback font
 (U+100001), installed and configured for WezTerm by `nix-config`; other terminal

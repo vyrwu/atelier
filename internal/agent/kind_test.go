@@ -111,12 +111,6 @@ func TestWithoutSpace(t *testing.T) {
 	}
 }
 
-func TestGrokTitleFallsBackWithoutLaunching(t *testing.T) {
-	if title := GenerateTitle(Grok, "Fix the status collector", ""); title != "" {
-		t.Fatalf("unexpected model title: %s", title)
-	}
-}
-
 func TestRuntimePathsPinInstance(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "/test/cache")
 	t.Setenv("XDG_STATE_HOME", "/test/state")

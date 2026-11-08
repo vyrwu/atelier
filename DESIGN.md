@@ -141,7 +141,8 @@ when they land.
 **NFR-P2 — Workspace creation never makes you wait.** Enter closes the popup
 and hands the work to a detached builder. It reserves the handle, lays out the
 directory, and launches the agent before asking it for a title, so the one
-slow call is off everyone's path.
+slow call is off everyone's path. All agents share this naming flow; Grok uses
+its single-prompt CLI mode with tools disabled and tool calls denied.
 
 **NFR-P3 — Views render instantly from local state.** The overlay runs fresh
 in the popup each time — small and local, so it draws at once — rather than as a
@@ -296,9 +297,9 @@ a swap works for workspaces older than the feature and before any hook is
 trusted. Grok reads `summary.json` plus `updates.jsonl`; headless runs and
 subagents are excluded. Grok needs no additional session bookkeeping.
 
-Grok quota refresh uses native `grok usage --json` when the runtime supports it.
-Unsupported runtimes and team-managed billing render unknown. No model call or token count estimates an account
-balance, and credentials remain owned by the provider CLI.
+Grok quota refresh uses its native ACP billing endpoint, also used by `/usage`.
+Missing or expired quota data renders unknown. No model call or token count
+estimates an account balance, and credentials remain owned by the provider CLI.
 
 ### 4.3 Interfaces
 
