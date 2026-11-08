@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0](https://github.com/vyrwu/atelier/compare/v1.1.0...v1.2.0) (2026-11-08)
+
+
+### Features
+
+* **agent:** add Grok Build provider ([#115](https://github.com/vyrwu/atelier/issues/115)) ([d341b42](https://github.com/vyrwu/atelier/commit/d341b42a5b24fea4e22b8b7a5ec714a0d9d1540a))
+* List, purge, and garbage-collect spaces ([#112](https://github.com/vyrwu/atelier/issues/112)) ([6780a35](https://github.com/vyrwu/atelier/commit/6780a35b8cda1936722187d3ec4d25354efd44b3))
+* Poll PR status from a tmux status job ([#110](https://github.com/vyrwu/atelier/issues/110)) ([eca0fe2](https://github.com/vyrwu/atelier/commit/eca0fe298c41a253c21d50a6a20af6896255dad1))
+* **ui:** Mark merge-queued PRs in M-p ([#109](https://github.com/vyrwu/atelier/issues/109)) ([2472f89](https://github.com/vyrwu/atelier/commit/2472f89eb764a95b1525a319bd8d0ab54014a98f))
+
+
+### Bug fixes
+
+* **security:** Harden supply chain and release automation ([#113](https://github.com/vyrwu/atelier/issues/113)) ([9d366a4](https://github.com/vyrwu/atelier/commit/9d366a45969446e3d3239188cc3a86a8708d4a44))
+
 ## [1.1.0](https://github.com/vyrwu/atelier/compare/v1.0.1...v1.1.0) (2026-11-04)
 
 
