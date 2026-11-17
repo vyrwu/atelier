@@ -229,13 +229,17 @@ func (m *Model) rebuild() {
 		m.rows = append(m.rows, row{ws: w})
 	}
 	// Trash is newest-closed first (§ sort direction). Spaces is the exception:
-	// it orders by attention, then newest first within a rank. EXPERIMENT — one
-	// revert restores plain creation order.
+	// pinned spaces first, then by attention, then newest first within a rank.
+	// EXPERIMENT (the attention rank) — reverting it leaves pins, then plain
+	// creation order.
 	sort.SliceStable(m.rows, func(i, j int) bool {
 		if m.screen == scrTrash {
 			return m.rows[i].ws.RetiredAt.After(m.rows[j].ws.RetiredAt)
 		}
 		if m.screen == scrActive {
+			if pi, pj := m.rows[i].ws.Pinned, m.rows[j].ws.Pinned; pi != pj {
+				return pi
+			}
 			ri, rj := m.attentionRank(m.rows[i].ws), m.attentionRank(m.rows[j].ws)
 			if ri != rj {
 				return ri < rj
@@ -255,7 +259,8 @@ func (m *Model) rebuild() {
 // asks for you now, idle has finished and is waiting to be closed out, working
 // needs nothing, and a dead session is last. Ordering is computed once per
 // overlay open (statuses are read at load and nothing polls), so rows never
-// shuffle under the cursor while you are looking at them.
+// shuffle under the cursor while you are looking at them — only a pin, which
+// the cursor follows, moves one.
 func (m Model) attentionRank(w *core.Workspace) int {
 	switch m.status[w.Session] {
 	case core.StatusBlocked:
@@ -502,7 +507,9 @@ func (m Model) View() string {
 func (m Model) screenFooter() string {
 	switch m.screen {
 	case scrActive:
-		return m.footer("open", "M-x swap agent", "M-d delete")
+		// One label for both ways: a footer that changed with the row could wrap
+		// on one row and not the next, and the list's height would jump with it.
+		return m.footer("open", "M-f pin", "M-x swap agent", "M-d delete")
 	case scrTrash:
 		return m.footer("restore", "M-d delete")
 	case scrNew:
@@ -654,6 +661,20 @@ func (m Model) reactivate(w core.Workspace) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.switchTo(w.Session)
+}
+
+// setPinned pins or unpins a space in the state file.
+func setPinned(slug string, pinned bool) error {
+	found := false
+	err := core.Update(func(s *core.State) {
+		if w := s.Find(slug); w != nil {
+			found, w.Pinned = true, pinned
+		}
+	})
+	if err == nil && !found {
+		err = fmt.Errorf("space %q no longer exists", slug)
+	}
+	return err
 }
 
 func setRetired(slug string, retired bool) error {

@@ -30,6 +30,12 @@ func (m Model) updateActive(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.switchTo(r.ws.Session)
 		}
 		return m, nil
+	case "alt+f":
+		// Not the filter's word-forward: pin or unpin the selection.
+		if r, ok := m.cur(); ok {
+			m.togglePin(r.ws)
+		}
+		return m, nil
 	case "esc":
 		if m.filter.Value() != "" {
 			m.filter.SetValue("")
@@ -42,6 +48,25 @@ func (m Model) updateActive(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filter, cmd = m.filter.Update(msg)
 		m.rebuild()
 		return m, cmd
+	}
+}
+
+// togglePin moves a space into the pinned section at the top of Spaces, or
+// back out of it, and keeps the cursor on it wherever it lands.
+func (m *Model) togglePin(w *core.Workspace) {
+	slug, pinned := w.Slug, !w.Pinned
+	if err := setPinned(slug, pinned); err != nil {
+		m.load() // it may be gone: don't leave its row to act on
+		m.err = err.Error()
+	} else {
+		m.err = ""
+		w.Pinned = pinned
+		m.rebuild()
+	}
+	for i, r := range m.rows {
+		if r.ws.Slug == slug {
+			m.sel = i
+		}
 	}
 }
 
@@ -89,15 +114,33 @@ func (m Model) workspaceList(title, empty string) string {
 	if len(m.rows) == 0 {
 		b.WriteString(dimStyle.Render("  " + empty + "\n"))
 	}
-	lines := make([]string, len(m.rows))
-	for i, r := range m.rows {
-		lines[i] = m.renderRow(r, i == m.sel)
-	}
-	writeList(&b, lines, m.sel, m.listHeight())
+	lines, selLine := m.spaceLines()
+	writeList(&b, lines, selLine, m.listHeight())
 	if m.err != "" {
 		b.WriteString("\n" + lipglossWarn(m.err))
 	}
 	return b.String()
+}
+
+// spaceLines renders the Spaces rows, and where the selection is among the
+// lines. When a row on show is pinned, the pinned rows (first, by rebuild)
+// go under a header, and any others under a second one.
+func (m Model) spaceLines() (lines []string, selLine int) {
+	sections := len(m.rows) > 0 && m.rows[0].ws.Pinned
+	for i, r := range m.rows {
+		if sections && (i == 0 || r.ws.Pinned != m.rows[i-1].ws.Pinned) {
+			head := "pinned"
+			if !r.ws.Pinned {
+				head = "others"
+			}
+			lines = append(lines, repoStyle.Render(head))
+		}
+		if i == m.sel {
+			selLine = len(lines)
+		}
+		lines = append(lines, m.renderRow(r, i == m.sel))
+	}
+	return lines, selLine
 }
 
 func (m Model) renderRow(r row, selected bool) string {

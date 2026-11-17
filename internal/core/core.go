@@ -88,6 +88,9 @@ type Workspace struct {
 	// SwappedAt is when the agent last changed. A handoff carries over only what
 	// the outgoing agent did since then; zero means since the space began.
 	SwappedAt time.Time `json:"swapped_at,omitempty"`
+	// Pinned keeps a space in its own section at the top of Spaces (M-f), for a
+	// stretch of work on a few of them. Zero value = unpinned, no migration.
+	Pinned bool `json:"pinned,omitempty"`
 }
 
 // Root is the workspace directory path (~/ateliers/<slug>).

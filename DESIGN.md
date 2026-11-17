@@ -366,7 +366,7 @@ Deferred deliberately. Each needs the three-times rule to return.
   more)
 - CI failure triage (atelier opens a PR's logs in gh-enhance; it does not read
   them)
-- Workspace rename, tagging, or grouping
+- Workspace rename, tagging, or grouping (beyond pinning a few to the top of Spaces)
 - Any summary or recap of what an agent did
 - Repository indexing, caching, or search
 - Concurrent agents in one workspace, or multi-forge support

@@ -110,7 +110,10 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   overlay); the keymap, version, and dependency doctor live there — there is no
   Help screen. `M-p` and `M-w` are scoped to the current space (off one they
   toast and close). In-space: `M-a` agent · `M-x` swap agent · `M-c` shell.
-  `M-n`: `Tab` picks the agent. `M-q` detaches. Leader is `M-`
+  `M-n`: `Tab` picks the agent. In Spaces, `M-f` pins or unpins a row
+  (`Workspace.Pinned`, in state): pinned spaces sort first, under a `pinned`
+  header with the rest under `others`, each section in the usual order; with
+  no pinned row on show there are no headers. `M-q` detaches. Leader is `M-`
   (Alt), hardcoded. New spaces build via a detached `atelier create`; feedback is
   a status-line spinner (`@atelier_spin`) that resolves into a check-mark.
 - PR view: `↵` opens the diff as a window, `M-e` its checks, `M-b` the
