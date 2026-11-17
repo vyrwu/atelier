@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/vyrwu/atelier/compare/v1.2.0...v1.3.0) (2026-11-17)
+
+
+### Features
+
+* **cli:** Administer a space's windows ([#120](https://github.com/vyrwu/atelier/issues/120)) ([d2001a8](https://github.com/vyrwu/atelier/commit/d2001a83015b3086e01a4202a9b09b1e13998bc2))
+
 ## [1.2.0](https://github.com/vyrwu/atelier/compare/v1.1.0...v1.2.0) (2026-11-08)
 
 
