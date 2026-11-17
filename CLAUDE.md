@@ -23,7 +23,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   up what deleted spaces leave behind
 - `cmd/atelier` — one binary: `up` / `open` / `home` / `create` / `swap` /
   `handoff` / `win` / `hook` / `usage` / `poll` / `mcp` / `install` / `ls` /
-  `purge` / `gc` / `version`
+  `purge` / `gc` / `help` / `version`
 
 ## Model & bindings
 
@@ -91,6 +91,20 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   when the root is missing. Swap lock files are retained to preserve locking
   across concurrent openers. Unknown session-query results abort cleanup;
   failed stops are errors and leave the workspace on disk.
+- Windows from a shell: `atelier win ls|restart|kill [--space S]` (default: the
+  caller's space — its pane's session, then `$ATELIER_SLUG`, then the cwd).
+  Names match whole and the window is then addressed by id, since a tmux name
+  target also takes a prefix. What a pane runs is its process group plus its
+  tty's foreground group (a shell's job leads its own), never a background or
+  nohup job; after tmux's hangup it gets 2s, SIGTERM, 1s, SIGKILL. `restart`
+  is `respawn-pane -k` with no command (tmux re-runs the window's own, in its
+  start directory, without selecting it); the agent instead goes through
+  `agent.RunAgent` and resumes, revived only inside a running atelier — in one
+  step, like a swap, so the old agent is reaped after the new one starts.
+  Both verbs refuse the agent's window during a swap (state and windows read
+  under the swap lock) and set its status idle, since a killed agent fires no
+  hook. Only `win <session> agent|shell|diff|checks [window]` is the
+  keys' form, and it alone re-syncs bindings.
 - Overlays: `M-s` spaces · `M-p` PRs · `M-w` worktrees · `M-t` trash · `M-n` new
   (background). `M-h` switches to the home splash (a session switch, not an
   overlay); the keymap, version, and dependency doctor live there — there is no

@@ -59,9 +59,8 @@ func run(cmd string, args []string) error {
 		return swapAgent(args)
 	case "handoff": // atelier handoff <slug> <agent> — the swap itself, run in the space's agent window
 		return handoff(arg(args, 0), arg(args, 1), arg(args, 2))
-	case "win": // atelier win <session> <agent|shell|diff|checks> [window] — intra-workspace window nav
-		refreshBindings()
-		return winNav(arg(args, 0), arg(args, 1), arg(args, 2))
+	case "win": // atelier win ls|restart|kill — a space's windows; the keys' own form is winNav's
+		return win(args)
 	case "hook": // atelier hook <working|blocked|idle>
 		return hook(arg(args, 0))
 	case "usage": // tmux quota status job, or native Claude status-line input
@@ -78,11 +77,14 @@ func run(cmd string, args []string) error {
 		return mcp.Serve()
 	case "install":
 		return install()
+	case "help", "--help", "-h":
+		fmt.Print(usageText)
+		return nil
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q", cmd)
+		return fmt.Errorf("unknown command %q (see `atelier help`)", cmd)
 	}
 }
 

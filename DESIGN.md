@@ -306,14 +306,18 @@ estimates an account balance, and credentials remain owned by the provider CLI.
 | Interface | Purpose | Consumers |
 |---|---|---|
 | **UI** | Everything the user sees and does | The user |
-| **CLI** | `hook`, `usage`, `poll`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `ls`, `purge`, `gc`, `version` | Agent hooks, tmux bindings, the agents (MCP), the user |
+| **CLI** | `hook`, `usage`, `poll`, `open`, `create`, `swap`, `handoff`, `win`, `home`, `mcp`, `install`, `ls`, `purge`, `gc`, `help`, `version` | Agent hooks, tmux bindings, the agents (MCP), the user |
 | **MCP** | `create_worktree`, `create_pr`, `register_pr` | The agent |
 | **tmux fragment** | Bindings and options, generated and sourced into atelier's own server | atelier itself |
 
 The CLI exists so hooks and bindings have something fast to call. The status
 line calls nothing; it renders options the hooks push. Users run only
-`atelier`, `atelier install`, `atelier version`, and the housekeeping trio:
-`ls`, `purge`, and `gc`.
+`atelier`, `atelier install`, `atelier help`, `atelier version`, `create` and
+`swap` (what `M-n` and `M-x` do), the housekeeping trio (`ls`, `purge`, and
+`gc`), and `win ls|restart|kill` — a hung window is restarted or closed by
+name, without reaching for tmux on atelier's socket. That is the whole of it:
+atelier lists, restarts, and closes a space's windows, and does not drive
+what runs in them.
 
 ---
 

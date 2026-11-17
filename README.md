@@ -145,6 +145,33 @@ In the overlays, type to filter, `Up`/`Down` to move, `Esc` to close.
 In a PR's diff window, `M-e` opens its checks; in its checks window, `M-d` goes
 back to the diff.
 
+## Windows
+
+A space's windows — its agent, its command line, a shell per worktree, a PR's
+diff and checks — can be listed, restarted, and closed from any shell, for when
+one hangs:
+
+```sh
+atelier win ls               # this space's windows: what each runs, how long it has been quiet
+atelier win restart shell    # kill what the command line runs; a fresh one takes its place
+atelier win restart agent    # restart the agent, resuming its conversation
+atelier win kill pr-atelier-128
+atelier win ls --all         # every space's windows
+```
+
+The space is the one you are in — the window you typed in, else the space the
+agent runs in, else the directory — or the one named with `--space <slug>`. A
+window goes by the name `ls` shows, whole. `restart` runs again what the window
+was opened with, where it was opened, and leaves you in the window you were in
+(in a split window, it restarts the focused pane; the agent's window restarts
+whole). What the window ran, and the job in its foreground, get two seconds to
+exit after the hangup, then are terminated, and killed a second later if they
+still haven't; a job started with `nohup`, or disowned, is left running.
+Closing a space's last window ends its
+session; the space stays, and opening it starts the agent again. The agent's
+window can't be restarted or closed in the middle of a swap. `atelier help`
+lists the commands.
+
 ## Cleaning up
 
 Spaces you retire wait in the Trash until you delete them. To clear out old
