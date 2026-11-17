@@ -133,9 +133,14 @@ The splash (`M-h`) lists them all.
 
 In the overlays, type to filter, `Up`/`Down` to move, `Esc` to close.
 
+`M-P` (Alt-Shift-p) in Spaces puts a space in focus: focused spaces sit in their
+own section at the top of the list, so the few you are working on are always
+first without typing a filter. `M-P` again takes it out. Focus stays until
+then, or until the space is deleted, and survives a trip through the Trash.
+
 | View | Keys |
 |---|---|
-| Spaces | `Enter` open · `M-x` swap agent · `M-d` retire to Trash |
+| Spaces | `Enter` open · `M-P` focus or unfocus · `M-x` swap agent · `M-d` retire to Trash |
 | Trash | `Enter` restore · `M-d` delete permanently |
 | Pull requests | `Enter` diff · `M-e` checks · `M-b` browser · `M-o` reopen or ready · `M-c` close · `M-y` copy link |
 | Worktrees | `Enter` shell in the worktree |
