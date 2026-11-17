@@ -439,6 +439,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if msg.String() == "alt+P" && m.screen != scrActive {
+			// M-P focuses a Spaces row; anywhere else a text field would type "P".
+			return m, nil
+		}
 		switch m.screen {
 		case scrActive:
 			return m.updateActive(msg)
@@ -509,7 +513,7 @@ func (m Model) screenFooter() string {
 	case scrActive:
 		// One label for both ways: a footer that changed with the row could wrap
 		// on one row and not the next, and the list's height would jump with it.
-		return m.footer("open", "M-f pin", "M-x swap agent", "M-d delete")
+		return m.footer("open", "M-P focus", "M-x swap agent", "M-d delete")
 	case scrTrash:
 		return m.footer("restore", "M-d delete")
 	case scrNew:

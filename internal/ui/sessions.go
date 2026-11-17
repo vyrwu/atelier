@@ -30,8 +30,9 @@ func (m Model) updateActive(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.switchTo(r.ws.Session)
 		}
 		return m, nil
-	case "alt+f":
-		// Not the filter's word-forward: pin or unpin the selection.
+	case "alt+P":
+		// Focus or unfocus the selection (a pin). Not M-f: window managers take
+		// Option-f (AeroSpace's fullscreen), and it never reaches the terminal.
 		if r, ok := m.cur(); ok {
 			m.togglePin(r.ws)
 		}
@@ -129,7 +130,7 @@ func (m Model) spaceLines() (lines []string, selLine int) {
 	sections := len(m.rows) > 0 && m.rows[0].ws.Pinned
 	for i, r := range m.rows {
 		if sections && (i == 0 || r.ws.Pinned != m.rows[i-1].ws.Pinned) {
-			head := "pinned"
+			head := "focus"
 			if !r.ws.Pinned {
 				head = "others"
 			}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/vyrwu/atelier/internal/core"
@@ -48,8 +49,8 @@ func TestSpaceLinesSections(t *testing.T) {
 	for _, l := range lines {
 		plain = append(plain, strings.TrimSpace(ansiRe.ReplaceAllString(l, "")))
 	}
-	if len(plain) != 5 || plain[0] != "pinned" || plain[2] != "others" {
-		t.Fatalf("lines = %q; want pinned, Alpha, others, Beta, Gamma", plain)
+	if len(plain) != 5 || plain[0] != "focus" || plain[2] != "others" {
+		t.Fatalf("lines = %q; want focus, Alpha, others, Beta, Gamma", plain)
 	}
 	if !strings.Contains(plain[sel], "Beta") {
 		t.Errorf("selection on line %d (%q); want Beta's", sel, plain[sel])
@@ -69,9 +70,9 @@ func TestSpaceLinesSections(t *testing.T) {
 	}
 }
 
-// M-f on a row pins it — in the state file, not only on screen — and the
-// cursor follows it into its new place; M-f again unpins it.
-func TestAltFTogglesPin(t *testing.T) {
+// M-P on a row pins it — in the state file, not only on screen — and the
+// cursor follows it into its new place; M-P again unpins it.
+func TestAltShiftPTogglesPin(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	base := time.Now()
 	ws := []core.Workspace{
@@ -84,12 +85,12 @@ func TestAltFTogglesPin(t *testing.T) {
 	m := spacesModel(core.Load().Workspaces, map[string]core.AgentStatus{})
 	m.rebuild()
 	m.sel = 1 // older
-	alt := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f"), Alt: true}
+	alt := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P"), Alt: true}
 
 	next, _ := m.Update(alt)
 	got := next.(Model)
 	if o := order(&got); !eq(o, []string{"older", "newest"}) || got.sel != 0 {
-		t.Fatalf("after M-f: order %v, sel %d; want older pinned on top and selected", o, got.sel)
+		t.Fatalf("after M-P: order %v, sel %d; want older pinned on top and selected", o, got.sel)
 	}
 	if w := core.Load().Find("older"); w == nil || !w.Pinned {
 		t.Fatal("pin not saved")
@@ -112,5 +113,24 @@ func TestSetPinnedOnAMissingSpace(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if err := setPinned("gone", true); err == nil || !strings.Contains(err.Error(), "no longer exists") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// Off Spaces, M-P does nothing: not a "P" in a filter or in a new space's task.
+func TestAltShiftPOffSpacesTypesNothing(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := *spacesModel([]core.Workspace{{Slug: "a", Session: "a", Retired: true}}, map[string]core.AgentStatus{})
+	m.filter.Focus()
+	m.intent = textarea.New()
+	m.intent.Focus()
+	alt := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P"), Alt: true}
+	for _, s := range []screen{scrTrash, scrPRs, scrWorktrees, scrNew} {
+		m.screen = s
+		m.rebuild()
+		next, _ := m.Update(alt)
+		got := next.(Model)
+		if got.filter.Value() != "" || got.intent.Value() != "" || got.all[0].Pinned {
+			t.Errorf("screen %d: filter %q, intent %q, pinned %v", s, got.filter.Value(), got.intent.Value(), got.all[0].Pinned)
+		}
 	}
 }
