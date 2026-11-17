@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -400,5 +401,70 @@ func RestartHome(cwd, cmd string) error {
 	// "=home:" — the session's current window and pane; a bare "=home" does not
 	// resolve as a pane target.
 	_, err := Run("respawn-pane", "-k", "-c", cwd, "-t", "="+HomeSession+":", wrap(nil, cmd))
+	return err
+}
+
+// Window is one window of a session, described by its active pane.
+type Window struct {
+	Session, ID, Name string
+	Active, Dead      bool
+	PID               int
+	Activity          time.Time // when it last printed anything
+	Command, TTY      string
+	Path              string
+}
+
+// The path comes last: it is the one field that can hold a tab.
+const windowFormat = "#{session_name}\t#{window_id}\t#{window_name}\t#{window_active}\t#{pane_dead}\t#{pane_pid}\t#{window_activity}\t#{pane_current_command}\t#{pane_tty}\t#{pane_current_path}"
+
+// Windows lists session's windows, or every session's when session is "". No
+// server means no windows.
+func Windows(session string) ([]Window, error) {
+	args := []string{"list-windows", "-F", windowFormat}
+	if session == "" {
+		args = append(args, "-a")
+	} else {
+		args = append(args, "-t", "="+session)
+	}
+	out, err := Run(args...)
+	if err != nil {
+		if serverAbsent(string(out)) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return parseWindows(string(out)), nil
+}
+
+func parseWindows(out string) []Window {
+	var ws []Window
+	for _, ln := range strings.Split(out, "\n") {
+		f := strings.SplitN(ln, "\t", 10)
+		if len(f) < 10 {
+			continue
+		}
+		pid, _ := strconv.Atoi(f[5])
+		w := Window{Session: f[0], ID: f[1], Name: f[2], Active: f[3] == "1", Dead: f[4] == "1", PID: pid, Command: f[7], TTY: f[8], Path: f[9]}
+		if ts, err := strconv.ParseInt(f[6], 10, 64); err == nil {
+			w.Activity = time.Unix(ts, 0)
+		}
+		ws = append(ws, w)
+	}
+	return ws
+}
+
+// KillWindow closes the window with the given id (a Window.ID). Ids, unlike
+// names, are never prefix- or pattern-matched: a name target of "pr" would
+// close "pr-atelier-128".
+func KillWindow(id string) error {
+	_, err := Run("kill-window", "-t", id)
+	return err
+}
+
+// RestartWindow kills what the window's active pane runs (in a split window,
+// that pane alone) and starts the command it was created with again, in the
+// directory it was created in, without selecting the window.
+func RestartWindow(id string) error {
+	_, err := Run("respawn-pane", "-k", "-t", id)
 	return err
 }

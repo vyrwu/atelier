@@ -189,8 +189,10 @@ func purge(args []string) error {
 }
 
 // Protect the enclosing space and cwd independently: a shell in A can cd to B.
+// Most certain first — the pane's own session, what the environment says, then
+// the directory — which is the order `atelier win` picks its default space in.
 func currentSpaces(st *core.State) []string {
-	spaces := []string{os.Getenv("ATELIER_SLUG"), cwdSpace()}
+	var spaces []string
 	if pane := os.Getenv("TMUX_PANE"); pane != "" && insideOwnServer() {
 		if out, err := tmux.Run("display-message", "-t", pane, "-p", "#{session_name}"); err == nil {
 			if w := st.FindBySession(strings.TrimSpace(string(out))); w != nil {
@@ -198,7 +200,7 @@ func currentSpaces(st *core.State) []string {
 			}
 		}
 	}
-	return spaces
+	return append(spaces, os.Getenv("ATELIER_SLUG"), cwdSpace())
 }
 
 func cwdSpace() string {
