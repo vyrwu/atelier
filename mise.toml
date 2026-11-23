@@ -1,10 +1,10 @@
 [tools]
-go = "1.27.3"
-goreleaser = "2.20.0"
+go = "1.27.4"
+goreleaser = "2.20.3"
 golangci-lint = "2.15.0"
 actionlint = "1.7.12"
-zizmor = "1.32.0"
-"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
+zizmor = "1.33.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.10.0"
 
 # `mise run ci` is exactly what CI runs on every pull request. Run it before you push;
 # `mise run hooks` makes git do that for you.
