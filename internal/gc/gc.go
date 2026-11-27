@@ -91,6 +91,9 @@ func Unsaved(w core.Workspace) []string {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)
+		if rel == ".agents/mcp_config.json" && d.Type().IsRegular() && agent.GeneratedAntigravityMCP(root) {
+			return nil
+		}
 		if !d.IsDir() && (rel == ".grok/config.toml" || rel == ".grok/hooks/atelier.json") {
 			return nil
 		}

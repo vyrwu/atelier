@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,13 +14,14 @@ import (
 type Kind string
 
 const (
-	Claude Kind = "claude"
-	Codex  Kind = "codex"
-	Grok   Kind = "grok"
+	Claude      Kind = "claude"
+	Codex       Kind = "codex"
+	Grok        Kind = "grok"
+	Antigravity Kind = "antigravity"
 )
 
 // Kinds is the stable order used by the new-space and swap pickers.
-func Kinds() []Kind { return []Kind{Claude, Codex, Grok} }
+func Kinds() []Kind { return []Kind{Claude, Codex, Grok, Antigravity} }
 
 // Valid distinguishes an explicit CLI choice from legacy empty state.
 func Valid(name string) bool {
@@ -56,13 +58,20 @@ func (k Kind) Label() string {
 		return "Codex"
 	case Grok:
 		return "Grok Build"
+	case Antigravity:
+		return "Antigravity"
 	default:
 		return "Claude Code"
 	}
 }
 
 // Bin is the native CLI that runs the agent.
-func (k Kind) Bin() string { return string(k) }
+func (k Kind) Bin() string {
+	if k == Antigravity {
+		return "agy"
+	}
+	return string(k)
+}
 
 // codexFlags go on every interactive Codex launch. Codex runs unsandboxed and
 // without approval prompts: a worktree's git data lives in its source repo,
@@ -78,6 +87,9 @@ const grokCommand = "env GROK_TERMINAL_THEME=1 GROK_THEME=terminal grok --trust"
 // LaunchCmd is the shell command that starts the agent fresh in a space with
 // prompt as its opening message.
 func (k Kind) LaunchCmd(prompt string) string {
+	if k == Antigravity {
+		return antigravityCmd("", prompt)
+	}
 	if k == Grok {
 		return grokCommand + codexArg(prompt)
 	}
@@ -91,6 +103,13 @@ func (k Kind) LaunchCmd(prompt string) string {
 // prompt (if any) as its next message — or, with no id or one that no longer
 // resumes, starts the agent fresh with it.
 func (k Kind) ResumeCmd(id, prompt string) string {
+	if k == Antigravity {
+		fresh := k.LaunchCmd(prompt)
+		if id == "" {
+			return fresh
+		}
+		return antigravityCmd(id, prompt) + " || " + fresh
+	}
 	if k == Grok {
 		fresh := k.LaunchCmd(prompt)
 		if id == "" {
@@ -142,6 +161,10 @@ const askTimeout = 5 * time.Minute
 // Grok's native user settings and headless session persistence still apply.
 // model applies to Claude only; other agents use their configured default.
 func (k Kind) Ask(prompt, input, model string) (string, error) {
+	if k == Antigravity {
+		// agy has no tool-free naming mode. Keep the title derived from the task.
+		return "", errors.New("antigravity does not support isolated title generation")
+	}
 	dir, err := os.MkdirTemp("", "atelier-ask-")
 	if err != nil {
 		return "", err
@@ -201,6 +224,9 @@ func withoutSpace(env []string) []string {
 // Prepare readies dir for agent k: folder trust and atelier's MCP server, so it
 // starts without a trust prompt and with create_worktree and create_pr to hand.
 func (k Kind) Prepare(dir, slug string) error {
+	if k == Antigravity {
+		return prepareAntigravity(dir, slug)
+	}
 	if k == Grok {
 		return prepareGrok(dir, slug)
 	}

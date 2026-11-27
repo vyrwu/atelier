@@ -16,35 +16,22 @@ import (
 )
 
 // usage is the asynchronous tmux status job, an agent's refresh after a turn
-// (see hook), or Claude's status-line capture. Rendering never waits on the
+// (see hook), or a native status-line capture. Rendering never waits on the
 // network: tmux sees the cache immediately, and fresh readings replace it when
 // the metadata fetches finish.
 func usage(args []string) error {
 	if arg(args, 0) == "refresh" { // atelier usage refresh <agent>
 		return agent.RefreshUsage(agent.Of(arg(args, 1)))
 	}
-	if arg(args, 0) == "claude" {
-		data, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20))
-		if err != nil {
-			return err
-		}
-		_ = agent.CaptureClaudeUsage(data, time.Now())
-		if original := arg(args, 1); original != "" {
-			decoded, err := base64.StdEncoding.DecodeString(original)
-			if err != nil {
-				return err
-			}
-			// #nosec G204 G702 -- Intentionally runs the owner's existing statusLine command, passed by the installed hook.
-			cmd := exec.Command("/bin/sh", "-c", string(decoded))
-			cmd.Stdin = bytes.NewReader(data)
-			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-			return cmd.Run()
-		}
-		return nil
+	if provider := arg(args, 0); provider == "claude" || provider == "antigravity" {
+		return captureStatusLine(args)
 	}
 	kinds := []agent.Kind{agent.Claude, agent.Codex}
-	if _, err := exec.LookPath(agent.Grok.Bin()); err == nil || agent.Of(core.LoadConfig().Agent) == agent.Grok {
-		kinds = append(kinds, agent.Grok)
+	selected := agent.Of(core.LoadConfig().Agent)
+	for _, k := range []agent.Kind{agent.Grok, agent.Antigravity} {
+		if _, err := exec.LookPath(k.Bin()); err == nil || selected == k {
+			kinds = append(kinds, k)
+		}
 	}
 	status := func() string {
 		readings := map[agent.Kind]agent.Usage{}
@@ -59,7 +46,7 @@ func usage(args []string) error {
 	// has gone stale without one, by each agent's own measure of stale.
 	var refresh sync.WaitGroup
 	for _, k := range kinds {
-		if time.Since(agent.LoadUsage(k).Observed) > agent.UsageStale(k) {
+		if k != agent.Antigravity && time.Since(agent.LoadUsage(k).Observed) > agent.UsageStale(k) {
 			refresh.Go(func() { _ = agent.RefreshUsage(k) })
 		}
 	}
@@ -68,6 +55,37 @@ func usage(args []string) error {
 		fmt.Println(current)
 	}
 	return nil
+}
+
+func captureStatusLine(args []string) error {
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20))
+	if err != nil {
+		return err
+	}
+	original := arg(args, 1)
+	if args[0] == "antigravity" {
+		if os.Getenv("ATELIER_SESSION") != "" && os.Getenv("ATELIER_AGENT") == args[0] {
+			status, _ := agent.CaptureAntigravity(data, arg(args, 1), time.Now())
+			if status != "" {
+				_ = hook(status)
+			}
+		}
+		original = arg(args, 2)
+	} else {
+		_ = agent.CaptureClaudeUsage(data, time.Now())
+	}
+	if original == "" {
+		return nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(original)
+	if err != nil {
+		return err
+	}
+	// #nosec G204 G702 -- Runs the owner's existing statusLine command with its native input.
+	cmd := exec.Command("/bin/sh", "-c", string(decoded))
+	cmd.Stdin = bytes.NewReader(data)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 // Existing Claude sessions reload a changed project-local status command.

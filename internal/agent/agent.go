@@ -252,6 +252,12 @@ func Status(session string, live bool) core.AgentStatus {
 	return st
 }
 
+// RecordedStatus returns the last reported state before display defaults and stale decay.
+func RecordedStatus(session string) core.AgentStatus {
+	st, _ := readStatus(session)
+	return st
+}
+
 // readStatus parses a session's status file ("<status>\n<unix-ts>"). It returns
 // an empty status when the file is missing or blank, and a zero time when no
 // parsable timestamp is present.

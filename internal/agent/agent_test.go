@@ -26,6 +26,9 @@ func writeStatus(t *testing.T, session, body string) {
 func TestStatus(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
+	if got := RecordedStatus("never-seen"); got != "" {
+		t.Errorf("unreported event = %q", got)
+	}
 	if got := Status("never-seen", false); got != core.StatusGone {
 		t.Errorf("dead session = %q, want gone", got)
 	}
@@ -59,6 +62,9 @@ func TestStatusStaleWorkingDecays(t *testing.T) {
 
 	stale := time.Now().Add(-workingStaleAfter - time.Minute).Unix()
 	writeStatus(t, "stale", fmt.Sprintf("working\n%d\n", stale))
+	if got := RecordedStatus("stale"); got != core.StatusWorking {
+		t.Errorf("last reported event = %q, want working", got)
+	}
 	if got := Status("stale", true); got != core.StatusIdle {
 		t.Errorf("stale working = %q, want it decayed to idle", got)
 	}

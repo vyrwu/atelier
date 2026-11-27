@@ -18,7 +18,7 @@ import (
 // than reaching the text.
 func TestNewSpaceTabCyclesAgents(t *testing.T) {
 	m := Model{newAgent: agent.Claude, intent: textarea.New()}
-	for _, want := range []agent.Kind{agent.Codex, agent.Grok, agent.Claude} {
+	for _, want := range []agent.Kind{agent.Codex, agent.Grok, agent.Antigravity, agent.Claude} {
 		next, _ := m.updateNew(tea.KeyMsg{Type: tea.KeyTab})
 		m = next.(Model)
 		if m.newAgent != want {
@@ -34,7 +34,7 @@ func TestNewSpaceTabCyclesAgents(t *testing.T) {
 // a choice runs Claude.
 func TestRowShowsTheAgent(t *testing.T) {
 	m := Model{w: 120}
-	for a, glyph := range map[string]string{"": glyphClaude, "claude": glyphClaude, "codex": glyphCodex, "grok": glyphGrok} {
+	for a, glyph := range map[string]string{"": glyphClaude, "claude": glyphClaude, "codex": glyphCodex, "grok": glyphGrok, "antigravity": glyphAntigravity} {
 		ws := &core.Workspace{Slug: "brave-otter", Agent: a, Created: time.Now()}
 		if line := m.renderRow(row{ws: ws}, false); !strings.Contains(line, glyph) {
 			t.Errorf("agent %q: row %q lacks %s", a, line, glyph)
@@ -75,6 +75,11 @@ func TestSwapDialogTabTogglesTheTarget(t *testing.T) {
 	got := next.(Model)
 	if got.swapTo != agent.Grok {
 		t.Fatalf("target = %s, want Grok", got.swapTo)
+	}
+	next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
+	got = next.(Model)
+	if got.swapTo != agent.Antigravity {
+		t.Fatalf("target = %s, want Antigravity", got.swapTo)
 	}
 	next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyTab})
 	got = next.(Model)

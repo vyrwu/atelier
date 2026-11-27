@@ -47,6 +47,8 @@ func usagePath(k Kind) string {
 		dir = settingsPath()
 	case Grok:
 		dir = grokHome()
+	case Antigravity:
+		dir = antigravityDir()
 	}
 	hash := sha256.Sum256([]byte(dir))
 	return filepath.Join(core.CacheDir(), "usage", fmt.Sprintf("%s-%x.json", k, hash[:6]))
@@ -202,6 +204,8 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 		glyph, color = "\uec81", 39
 	case Grok:
 		glyph, color = "\U00100001", 252 // Atelier Logos: Grok (U+100001)
+	case Antigravity:
+		glyph, color = "A", 75
 	}
 	text := fmt.Sprintf("#[fg=colour%d]%s", color, glyph) + usageDim
 	if len(u.Buckets) == 0 {
@@ -210,7 +214,7 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 		}
 		return text + " —"
 	}
-	if (k == Claude && u.Source != "native") || now.Sub(u.Observed) > UsageStale(k)+time.Minute {
+	if ((k == Claude || k == Antigravity) && u.Source != "native") || now.Sub(u.Observed) > UsageStale(k)+time.Minute {
 		text += "~"
 	}
 	for _, b := range u.Buckets {
@@ -224,7 +228,7 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 				b.Secondary = &UsageWindow{Minutes: 10080}
 			}
 		}
-		if len(u.Buckets) > 1 {
+		if len(u.Buckets) > 1 || k == Antigravity {
 			name := b.Name
 			if name == "" {
 				name = b.ID
