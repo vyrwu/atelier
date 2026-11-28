@@ -9,6 +9,7 @@
 package agent
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -97,6 +98,9 @@ func Env(slug string, k Kind) map[string]string {
 	env := runtimePaths()
 	env["ATELIER_WORKSPACE"] = filepath.Join(core.AteliersRoot(), slug)
 	env["ATELIER_SESSION"], env["ATELIER_SLUG"], env["ATELIER_AGENT"] = slug, slug, string(k)
+	if k == Antigravity {
+		env[antigravityInstance] = rand.Text()
+	}
 	if g := GitConfigGlobal(); g != "" {
 		env["GIT_CONFIG_GLOBAL"] = g
 	}
@@ -249,6 +253,12 @@ func Status(session string, live bool) core.AgentStatus {
 	if st == core.StatusWorking && !ts.IsZero() && time.Since(ts) > workingStaleAfter {
 		return core.StatusIdle
 	}
+	return st
+}
+
+// RecordedStatus returns the last reported state before display defaults and stale decay.
+func RecordedStatus(session string) core.AgentStatus {
+	st, _ := readStatus(session)
 	return st
 }
 

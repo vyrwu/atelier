@@ -8,7 +8,7 @@ import (
 // State and config written before there was a choice of agent say nothing, and
 // mean Claude; so does anything unrecognised.
 func TestOfDefaultsToClaude(t *testing.T) {
-	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude, "grok": Grok, "cursor": Claude} {
+	for name, want := range map[string]Kind{"": Claude, "claude": Claude, "codex": Codex, "gpt": Claude, "grok": Grok, "antigravity": Antigravity, "cursor": Claude} {
 		if got := Of(name); got != want {
 			t.Errorf("Of(%q) = %q, want %q", name, got, want)
 		}
@@ -17,7 +17,7 @@ func TestOfDefaultsToClaude(t *testing.T) {
 		t.Fatal("Cursor must not be an available provider")
 	}
 	k := Claude
-	for _, want := range []Kind{Codex, Grok, Claude} {
+	for _, want := range []Kind{Codex, Grok, Antigravity, Claude} {
 		k = k.Next()
 		if k != want {
 			t.Fatalf("next = %s, want %s", k, want)

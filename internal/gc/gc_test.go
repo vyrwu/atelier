@@ -586,3 +586,27 @@ func TestSweepPrunesSourceRepos(t *testing.T) {
 		t.Errorf("worktree list after prune:\n%s", out)
 	}
 }
+
+func TestUnsavedAntigravityMetadata(t *testing.T) {
+	root := sandbox(t)
+	t.Setenv("HOME", t.TempDir())
+	ws := core.Workspace{Slug: "antigravity"}
+	dir := filepath.Join(root, ws.Slug)
+	if err := agent.Antigravity.Prepare(dir, ws.Slug); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	if got := Unsaved(ws); len(got) != 0 {
+		t.Fatalf("generated config counts as work: %v", got)
+	}
+	path := filepath.Join(dir, ".agents", "mcp_config.json")
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"atelier":{"disabledTools":["create_pr"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.Antigravity.Prepare(dir, ws.Slug); err != nil {
+		t.Fatal(err)
+	}
+	if got := Unsaved(ws); len(got) != 1 || !strings.Contains(got[0], "mcp_config.json") {
+		t.Fatalf("merged config hidden: %v", got)
+	}
+}

@@ -233,6 +233,7 @@ func checkDeps() []dep {
 		{"claude", []string{"--version"}, selected != agent.Claude, agent.Claude},
 		{"codex", []string{"--version"}, selected != agent.Codex, agent.Codex},
 		{"grok", []string{"--version"}, selected != agent.Grok, agent.Grok},
+		{agent.Antigravity.Bin(), []string{"--version"}, selected != agent.Antigravity, agent.Antigravity},
 		{"git", []string{"--version"}, false, ""},
 		{"gh", []string{"--version"}, false, ""},
 		{"tmux", []string{"-V"}, false, ""},

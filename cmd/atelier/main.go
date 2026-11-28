@@ -167,9 +167,18 @@ func hook(status string) error {
 	session := os.Getenv("ATELIER_SESSION")
 	// Read the prior status before interpreting native events or recording,
 	// so a delayed idle reminder cannot clear a failure's attention badge.
+	antigravity := os.Getenv("ATELIER_AGENT") == string(agent.Antigravity)
 	prior := ""
 	if session != "" {
-		prior = string(agent.Status(session, true))
+		if antigravity && status != string(core.StatusWorking) {
+			// An idle repaint counts only after the first real transition.
+			prior = string(agent.RecordedStatus(session))
+			if status == prior {
+				return nil
+			}
+		} else {
+			prior = string(agent.Status(session, true))
+		}
 	}
 	if status == "grok" {
 		if session == "" || os.Getenv("ATELIER_AGENT") != status {
@@ -193,7 +202,7 @@ func hook(status string) error {
 	}
 	// A turn ending (or cut off by a usage limit) is when an agent's allowance
 	// moves. Refresh it detached, so the hook never holds up the agent.
-	if session != "" && status != string(core.StatusWorking) {
+	if session != "" && status != string(core.StatusWorking) && !antigravity {
 		detach("usage", "refresh", os.Getenv("ATELIER_AGENT"))
 	}
 	return nil
@@ -489,7 +498,7 @@ func createWorkspace(args []string) error {
 	k := agent.Of(cfg.Agent)
 	if a := flagVal(args, "--agent"); a != "" {
 		if !agent.Valid(a) {
-			return fmt.Errorf("--agent %q: want claude, codex, or grok", a)
+			return fmt.Errorf("--agent %q: want claude, codex, grok, or antigravity", a)
 		}
 		k = agent.Of(a)
 	}

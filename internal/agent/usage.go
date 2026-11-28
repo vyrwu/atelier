@@ -19,9 +19,10 @@ import (
 // Usage is an account observation, shared across spaces using the same agent
 // config. It contains only quota metadata, never credentials or conversations.
 type Usage struct {
-	Observed time.Time     `json:"observed"`
-	Source   string        `json:"source,omitempty"`
-	Buckets  []UsageBucket `json:"buckets"`
+	Observed    time.Time              `json:"observed"`
+	Source      string                 `json:"source,omitempty"`
+	Buckets     []UsageBucket          `json:"buckets"`
+	Antigravity *antigravityQuotaCache `json:"antigravity,omitempty"`
 }
 
 type UsageBucket struct {
@@ -47,6 +48,8 @@ func usagePath(k Kind) string {
 		dir = settingsPath()
 	case Grok:
 		dir = grokHome()
+	case Antigravity:
+		dir = antigravityDir()
 	}
 	hash := sha256.Sum256([]byte(dir))
 	return filepath.Join(core.CacheDir(), "usage", fmt.Sprintf("%s-%x.json", k, hash[:6]))
@@ -196,21 +199,23 @@ func UsageStatus(readings map[Kind]Usage, now time.Time) string {
 }
 
 func renderUsage(k Kind, u Usage, now time.Time) string {
-	glyph, color := "\uec82", 209
+	color := 209
 	switch k {
 	case Codex:
-		glyph, color = "\uec81", 39
+		color = 39
 	case Grok:
-		glyph, color = "\U00100001", 252 // Atelier Logos: Grok (U+100001)
+		color = 252
+	case Antigravity:
+		color = 75
 	}
-	text := fmt.Sprintf("#[fg=colour%d]%s", color, glyph) + usageDim
+	text := fmt.Sprintf("#[fg=colour%d]%s", color, k.Glyph()) + usageDim
 	if len(u.Buckets) == 0 {
 		if k == Claude {
 			return text + " 5h — 7d —"
 		}
 		return text + " —"
 	}
-	if (k == Claude && u.Source != "native") || now.Sub(u.Observed) > UsageStale(k)+time.Minute {
+	if ((k == Claude || k == Antigravity) && u.Source != "native") || now.Sub(u.Observed) > UsageStale(k)+time.Minute {
 		text += "~"
 	}
 	for _, b := range u.Buckets {
@@ -224,7 +229,7 @@ func renderUsage(k Kind, u Usage, now time.Time) string {
 				b.Secondary = &UsageWindow{Minutes: 10080}
 			}
 		}
-		if len(u.Buckets) > 1 {
+		if len(u.Buckets) > 1 || k == Antigravity {
 			name := b.Name
 			if name == "" {
 				name = b.ID

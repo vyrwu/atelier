@@ -45,7 +45,7 @@ atelier is **not**:
   gh-enhance) rather than drawing its own
 - a general-purpose terminal multiplexer
 
-It supports **Claude Code, Codex, and Grok Build**, one agent
+It supports **Claude Code, Codex, Grok Build, and Antigravity CLI**, one agent
 live per workspace, and **one forge** (GitHub). A workspace can hand its work
 from one agent to another — when one runs out of quota, say — which is
 sequential, not orchestration. This is a design decision, not a limitation to be worked around.
@@ -62,7 +62,7 @@ Four entities. Everything in the system is one of these.
 |---|---|---|---|
 | **Workspace** | One task. A directory, a title, a tmux session, and an agent. Either **active** or **retired**. | Immutable slug (directory name) | Until deleted |
 | **Worktree** | A git worktree belonging to a workspace, living inside its directory. | `<repo>/<branch>` path under the workspace root | Until removed |
-| **Agent session** | The workspace's agent — Claude Code or Codex — in its session's `claude` window (the name predates Codex). | tmux session + window name | Until the process exits |
+| **Agent session** | The workspace's selected coding agent in its session's `claude` window (the name predates Codex). | tmux session + window name | Until the process exits |
 | **Pull request** | A GitHub PR whose head branch matches one of the workspace's worktrees, or that the agent registered. | `owner/repo#number` | Owned by GitHub |
 
 One workspace has one agent session, N worktrees, and N pull requests. A
@@ -141,7 +141,7 @@ when they land.
 **NFR-P2 — Workspace creation never makes you wait.** Enter closes the popup
 and hands the work to a detached builder. It reserves the handle, lays out the
 directory, and launches the agent before asking it for a title, so the one
-slow call is off everyone's path. All agents share this naming flow; Grok uses
+slow call is off everyone's path. Antigravity keeps the title derived from the task. Grok uses
 its single-prompt CLI mode with tools disabled and tool calls denied.
 
 **NFR-P3 — Views render instantly from local state.** The overlay runs fresh
@@ -220,7 +220,7 @@ or complete an action, it says why and what to do. Beyond the splash's
 dependency check, there is no diagnostic subsystem.
 
 **NFR-O2 — Platforms:** macOS and Linux. Requires tmux 3.3+, git, the GitHub
-CLI, and Claude Code or Codex — whichever new workspaces start with — on `PATH`.
+CLI, and the selected agent’s CLI on `PATH`.
 
 ---
 
@@ -290,16 +290,18 @@ the workspace. Subagent events never settle the main session. Grok honours
 Every agent launch carries all providers' config and history paths and pins them
 in the tmux session, so later popups and handoffs use the same accounts and history.
 
-**Handoffs never depend on hooks.** Which conversation an agent had in a
-workspace is read off its own transcripts on disk (NFR-R2) — the newest
-interactive one in the workspace's directory, no older than the workspace — so
-a swap works for workspaces older than the feature and before any hook is
-trusted. Grok reads `summary.json` plus `updates.jsonl`; headless runs and
-subagents are excluded. Grok needs no additional session bookkeeping.
+**Handoffs read native transcripts.** Claude, Codex, and Grok identify the
+workspace in their native history (NFR-R2). Atelier selects the latest
+interactive conversation since the workspace was created. Grok records these
+updates in `summary.json` and `updates.jsonl`. Antigravity's TUI identifies its native transcript in its status line.
+Atelier saves the path under `.atelier/antigravity/` on the first report so a
+swap or restore can find the conversation.
 
 Grok quota refresh uses its native ACP billing endpoint, also used by `/usage`.
 Missing or expired quota data renders unknown. No model call or token count
 estimates an account balance, and credentials remain owned by the provider CLI.
+Antigravity reports quota and runtime status through a session-only settings
+overlay. A pending tool confirmation marks the space blocked.
 
 ### 4.3 Interfaces
 
@@ -326,8 +328,8 @@ what runs in them.
 Tripwires, not sentiments. Every one exists because its absence has a
 predictable failure mode. They are enforced in review.
 
-- **Few agents, one forge, one renderer** — Claude Code, Codex, and Grok Build, GitHub, Bubble Tea. An agent joins only with launch, resume,
-  handoff, hooks, and explicit usage availability; a second forge or renderer means
+- **Few agents, one forge, one renderer** — Claude Code, Codex, Grok Build, and Antigravity CLI, GitHub, Bubble Tea. An agent joins only with launch, resume,
+  handoff, status reporting, and explicit usage availability; a second forge or renderer means
   deleting the first.
 - **Extract an interface only when a second real implementation exists and is in
   production.** Never for a mock, never for a hypothetical.

@@ -15,9 +15,8 @@ import (
 )
 
 // LatestSession is the id of the conversation agent k last had in the space at
-// root, or "" if it has none. It is read off the agent's own transcripts rather
-// than recorded, so it holds for spaces made before atelier knew about agents and
-// needs no hook to have fired (NFR-R2). Transcripts older than since — the
+// root, or "" if it has none. Antigravity reports its native transcript path through its
+// status line. Other agents identify the space in their history. Transcripts older than since — the
 // space's creation — belong to an earlier space that had the same name.
 func LatestSession(k Kind, root string, since time.Time) string {
 	id, _ := latestSession(k, root, since)
@@ -46,6 +45,9 @@ func RecentKind(root string, fallback Kind) Kind {
 }
 
 func latestSession(k Kind, root string, since time.Time) (id, path string) {
+	if k == Antigravity {
+		return latestAntigravitySession(root, since)
+	}
 	if k == Grok {
 		return latestGrokSession(filepath.Join(grokHome(), "sessions"), root, since)
 	}
@@ -219,6 +221,8 @@ func Export(k Kind, path string, since time.Time) (string, error) {
 		err = exportCodex(f, since, w)
 	case Grok:
 		err = exportGrok(f, since, w)
+	case Antigravity:
+		err = exportAntigravity(f, since, w)
 	default:
 		err = exportClaude(f, since, w)
 	}

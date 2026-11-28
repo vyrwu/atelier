@@ -1,6 +1,6 @@
 # CLAUDE.md — atelier
 
-A workshop for parallel coding agents (Claude Code, Codex, and Grok Build): a terminal-based agentic development environment, where
+A workshop for parallel coding agents (Claude Code, Codex, Grok Build, and Antigravity CLI): a terminal-based agentic development environment, where
 reviewing a PR should be as easy as making the change by hand.
 The design, its principles (`NFR-*`, cited in code), and the rules (§5) are in
 DESIGN.md, imported below. User-facing behaviour is README.md; contributor
@@ -14,7 +14,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
 - `internal/tmux` — tmux CLI wrapper (dedicated socket)
 - `internal/git` — worktree derivation + git queries
 - `internal/forge` — `gh` PR queries + open-in-browser
-- `internal/agent` — the coding agents (Claude Code, Codex, Grok Build): launch/resume, finding
+- `internal/agent` — the coding agents (Claude Code, Codex, Grok Build, Antigravity): launch/resume, finding
   and exporting their conversations for a handoff, per-session status, hooks,
   their config (trust + MCP registration), the per-workspace guide
 - `internal/mcp` — stdio MCP server (`register_pr`, `create_worktree`, `create_pr`)
@@ -36,7 +36,7 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   with `atelier handoff`, which exports the outgoing agent's conversation since
   `SwappedAt` to `.atelier/handoff/`, records the swap, then execs into the
   incoming agent at once — resuming its latest conversation in the space
-  (derived from its transcripts, never recorded), or starting one; a swap to
+  (Antigravity retains a native transcript pointer under `.atelier/antigravity/`), or starting one; a swap to
   the same agent (`Tab` in the confirm, `--to`) always starts one.
   A launch reservation covers the gap before the handoff owns the per-space
   lock; abandoned launches expire after 30 seconds. Exports are owner-only.
@@ -48,6 +48,9 @@ workflow is CONTRIBUTING.md — keep all three in step with the code.
   naming flow as the other agents, through `grok -p` in a scratch directory
   without the space's identity. Built-in tools are disabled and all tool calls
   denied; native user settings and headless session persistence still apply.
+  Antigravity uses the task text for titles. Its session-only `--settings`
+  overlay collects native status and quota and preserves custom status output.
+  Workspace MCP registration lives in `.agents/mcp_config.json`.
   Grok launches set GROK_THEME=terminal and GROK_TERMINAL_THEME=1 so the TUI
   inherits the terminal canvas instead of painting its own dark background.
 - Allowances: `atelier usage` is tmux's asynchronous status job. It renders

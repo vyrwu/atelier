@@ -35,7 +35,8 @@ own task, and tells you which one needs you. Describe a task and it becomes a
 requests your agents open come to you, with their diff and CI one key away.
 
 **Supported agents:** [Claude Code](https://claude.com/claude-code),
-[Codex](https://developers.openai.com/codex), and [Grok Build](https://docs.x.ai/build/overview).
+[Codex](https://developers.openai.com/codex), [Grok Build](https://docs.x.ai/build/overview),
+and [Antigravity CLI](https://antigravity.google/docs/cli/reference/).
 
 ## Highlights
 
@@ -60,7 +61,7 @@ requests your agents open come to you, with their diff and CI one key away.
 |---|---|
 | [tmux](https://github.com/tmux/tmux) 3.3+, git | atelier runs its own tmux server |
 | [GitHub CLI](https://cli.github.com) | run `gh auth login` first |
-| Claude Code, Codex, or Grok Build | at least the agent new spaces start with |
+| Claude Code, Codex, Grok Build, or Antigravity CLI | at least the agent new spaces start with |
 | A [Nerd Font](https://www.nerdfonts.com) 3.5.0+ | for the GitHub and agent icons |
 
 Optional: [diffnav](https://github.com/dlvhdr/diffnav) or
@@ -113,11 +114,19 @@ Its space titles are generated asynchronously through `grok -p`, using your
 configured Grok model. As with the other agents, `naming = false` disables this
 call and keeps the task text as the title. Atelier launches
 Grok with its native `terminal` theme so your terminal background and cursor
-colors stay intact. Its logo uses the **Atelier Logos** fallback font
-(U+100001), installed and configured for WezTerm by `nix-config`; other terminal
-profiles need that font in their fallback list.
+colors stay intact. Its logo uses U+100001 in the **Atelier Logos** fallback font.
 Its normal tool approval and sandbox settings still apply; allow access to the
 source repository's git directory when committing from a worktree.
+
+For Antigravity, install `agy` and sign in. Choose **Antigravity** with `Tab`,
+start a space with `atelier create "Fix the tests" --agent antigravity`, or
+switch with `atelier swap <space> --to antigravity`. Atelier registers its MCP
+tools in the space’s `.agents/mcp_config.json`. The CLI uses your model and
+permission settings. The space title comes from the task text.
+
+The Antigravity logo uses U+100002 in **Atelier Logos 1.1**. Apply the updated
+`nix-config` and restart WezTerm to load it. For other terminals, add Atelier
+Logos to the font fallback list.
 
 ## Keys
 
@@ -216,7 +225,7 @@ Optional, in `~/.config/atelier/config.toml`:
 ```toml
 root         = "~/ateliers"  # where spaces live
 socket       = "atelier"     # atelier's tmux socket
-agent        = "claude"      # "claude", "codex", or "grok"
+agent        = "claude"      # "claude", "codex", "grok", or "antigravity"
 naming       = true          # let the agent title new spaces
 naming_model = "sonnet"      # the model Claude titles them with
 ```
@@ -237,16 +246,20 @@ tmux -L atelier               atelier's own server; your tmux is untouched
     └── pr-atelier-128        a PR diff, opened from M-p
 ```
 
-- **Status** comes from hooks atelier installs into each agent's config. They do
-  nothing outside atelier.
+- **Status** comes from agent hooks or, for Antigravity, a session-only status-line
+  command that also runs your existing status line.
 - **Swapping** saves the outgoing agent's conversation to `.atelier/handoff/`
   in the space. The incoming agent starts at once with it, resuming its own
-  earlier conversation there if it had one. Grok reads its native session updates.
+  earlier conversation there if it had one. Grok reads its native session updates. Antigravity records
+  the native transcript path in `.atelier/antigravity/` when its TUI reports it.
 - **Usage** is each provider's own reading: Codex's every minute, Claude's
   after each turn or every 15 minutes. `~` marks a reading that may be out of
   date; `—` means unknown. Grok reads the account balance behind its native `/usage` view once a
   minute through the CLI's ACP billing endpoint, including on Grok Build 1.0.70.
-  Missing authentication or unavailable account quotas show `—`.
+  Antigravity shows the percentage spent for each reported quota window. At 90%
+  spent, it also shows the time until reset. Readings come from a running `agy`
+  session and switch when it reports a different account. Unknown or expired
+  windows show `—`.
   Token counts are never treated as subscription quotas.
 - **Codex runs without its sandbox and approval prompts.** A worktree's git
   data lives in its source repository, outside the space, so the sandbox
