@@ -188,7 +188,7 @@ func TestAntigravityCaptureAndResume(t *testing.T) {
 		t.Fatalf("quota = %+v", u)
 	}
 	rendered := renderUsage(Antigravity, u, now)
-	if !strings.Contains(rendered, "20%") || !strings.Contains(rendered, "~") || strings.Contains(rendered, "0m") {
+	if !strings.Contains(rendered, "\U00100002") || !strings.Contains(rendered, "20%") || !strings.Contains(rendered, "~") || strings.Contains(rendered, "0m") {
 		t.Fatalf("quota display = %s", rendered)
 	}
 	if strings.Contains(renderUsage(Antigravity, u, now.Add(2*time.Hour)), "%") {
@@ -240,6 +240,71 @@ func TestAntigravityCaptureAndResume(t *testing.T) {
 	if id, _ := latestSession(Antigravity, root, time.Time{}); id != "" {
 		t.Fatal("resumed a missing transcript")
 	}
+}
+
+func TestAntigravityQuotaAcrossAccountsAndConversations(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	root := t.TempDir()
+	now := time.Now().UTC().Truncate(time.Second)
+	reset := now.Add(time.Hour)
+	const conversation = "resumed-native-conversation"
+	report := func(email, instance string, window map[string]any) Usage {
+		t.Helper()
+		t.Setenv(antigravityInstance, instance)
+		now = now.Add(time.Second)
+		payload := map[string]any{"product": "antigravity", "workspace": map[string]string{"current_dir": root}, "agent_state": "idle", "email": email, "conversation_id": conversation}
+		if window != nil {
+			payload["quota"] = map[string]any{"weekly": window}
+		}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := CaptureAntigravity(data, root, now); err != nil {
+			t.Fatal(err)
+		}
+		return LoadUsage(Antigravity)
+	}
+	remaining := func(f float64, until time.Time) map[string]any {
+		return map[string]any{"remaining_fraction": f, "reset_time": until}
+	}
+	expectUsed := func(u Usage, percent float64) {
+		t.Helper()
+		if len(u.Buckets) != 1 || u.Buckets[0].Primary == nil || u.Buckets[0].Primary.Used == nil || *u.Buckets[0].Primary.Used != percent {
+			t.Fatalf("wanted %v%% spent, got %+v", percent, u)
+		}
+	}
+	expectHidden := func(u Usage) {
+		t.Helper()
+		if len(u.Buckets) != 0 {
+			t.Fatalf("expected unavailable quota, got %+v", u)
+		}
+	}
+	const a = "first@example.invalid"
+	const b = "second@example.invalid"
+	expectUsed(report(a, "old", remaining(0.05, reset)), 95)
+	expectUsed(report(b, "current", remaining(0.9, reset)), 10)
+	expectUsed(report(a, "old", remaining(0.05, reset)), 10)
+	expectUsed(report(b, "other", remaining(0.8, reset)), 20)
+	expectHidden(report(b, "current", map[string]any{"disabled": true}))
+	data, err := os.ReadFile(usagePath(Antigravity))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), a) || strings.Contains(string(data), b) || strings.Contains(string(data), conversation) {
+		t.Fatal("quota cache exposed a raw account or conversation identifier")
+	}
+	expectHidden(report(b, "other", remaining(0.8, reset)))
+	expectHidden(report(b, "other", map[string]any{"disabled": true}))
+	expectUsed(report(b, "current", remaining(0.7, reset)), 30)
+	expectUsed(report(b, "other", map[string]any{"disabled": true}), 30)
+	expectHidden(report(b, "current", map[string]any{"disabled": true, "reset_time": reset}))
+	next := reset.Add(time.Hour)
+	expectUsed(report(b, "other", remaining(0.9, next)), 10)
+	expectUsed(report(b, "current", map[string]any{"disabled": true, "reset_time": reset}), 10)
+	expectHidden(report("", "gateway", nil))
+	expectHidden(report(b, "other", remaining(0.9, next)))
+	expectUsed(report(a, Env("space", Antigravity)[antigravityInstance], remaining(0.8, next)), 20)
 }
 
 func TestAntigravityExport(t *testing.T) {

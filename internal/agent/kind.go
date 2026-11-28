@@ -65,6 +65,20 @@ func (k Kind) Label() string {
 	}
 }
 
+// Glyph is the terminal logo used by the pickers, workspace list, and quota bar.
+func (k Kind) Glyph() string {
+	switch k {
+	case Codex:
+		return "\uec81" // nf-cod-openai
+	case Grok:
+		return "\U00100001" // Atelier Logos
+	case Antigravity:
+		return "\U00100002" // Atelier Logos 1.1
+	default:
+		return "\uec82" // nf-cod-claude
+	}
+}
+
 // Bin is the native CLI that runs the agent.
 func (k Kind) Bin() string {
 	if k == Antigravity {

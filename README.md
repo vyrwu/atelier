@@ -114,9 +114,7 @@ Its space titles are generated asynchronously through `grok -p`, using your
 configured Grok model. As with the other agents, `naming = false` disables this
 call and keeps the task text as the title. Atelier launches
 Grok with its native `terminal` theme so your terminal background and cursor
-colors stay intact. Its logo uses the **Atelier Logos** fallback font
-(U+100001), installed and configured for WezTerm by `nix-config`; other terminal
-profiles need that font in their fallback list.
+colors stay intact. Its logo uses U+100001 in the **Atelier Logos** fallback font.
 Its normal tool approval and sandbox settings still apply; allow access to the
 source repository's git directory when committing from a worktree.
 
@@ -125,6 +123,10 @@ start a space with `atelier create "Fix the tests" --agent antigravity`, or
 switch with `atelier swap <space> --to antigravity`. Atelier registers its MCP
 tools in the space’s `.agents/mcp_config.json`. The CLI uses your model and
 permission settings. The space title comes from the task text.
+
+The Antigravity logo uses U+100002 in **Atelier Logos 1.1**. Apply the updated
+`nix-config` and restart WezTerm to load it. For other terminals, add Atelier
+Logos to the font fallback list.
 
 ## Keys
 
@@ -254,8 +256,10 @@ tmux -L atelier               atelier's own server; your tmux is untouched
   after each turn or every 15 minutes. `~` marks a reading that may be out of
   date; `—` means unknown. Grok reads the account balance behind its native `/usage` view once a
   minute through the CLI's ACP billing endpoint, including on Grok Build 1.0.70.
-  Antigravity displays the last remaining fraction reported by its running CLI as
-  percentage spent. Missing or expired quota windows show `—`.
+  Antigravity shows the percentage spent for each reported quota window. At 90%
+  spent, it also shows the time until reset. Readings come from a running `agy`
+  session and switch when it reports a different account. Unknown or expired
+  windows show `—`.
   Token counts are never treated as subscription quotas.
 - **Codex runs without its sandbox and approval prompts.** A worktree's git
   data lives in its source repository, outside the space, so the sandbox

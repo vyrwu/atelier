@@ -20,6 +20,7 @@ import (
 	"time"
 )
 
+const antigravityInstance = "ATELIER_ANTIGRAVITY_INSTANCE"
 const antigravitySettings = ".atelier/antigravity-settings.json"
 const antigravityMCP = ".agents/mcp_config.json"
 const antigravityMCPHash = ".atelier/antigravity-mcp.sha256"
@@ -237,7 +238,20 @@ type antigravitySession struct {
 
 var antigravityID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
+type antigravityQuotaCache struct {
+	Account  string           `json:"account,omitempty"`
+	Disabled map[string]int64 `json:"disabled,omitempty"`
+}
+
+func quotaFingerprint(value string) string {
+	if value == "" {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
+}
+
 type antigravityReport struct {
+	Email        string `json:"email"`
 	Product      string `json:"product"`
 	ID           string `json:"conversation_id"`
 	Transcript   string `json:"transcript_path"`
@@ -274,13 +288,12 @@ func CaptureAntigravity(data []byte, root string, now time.Time) (string, error)
 	if validAntigravitySession(s) {
 		refErr = writeAntigravityJSON(root, filepath.Join(".atelier", "antigravity", s.ID+".json"), s)
 	}
-	return input.status(), errors.Join(refErr, input.saveQuota(now))
+	return input.status(), errors.Join(refErr, input.saveQuota(root, now))
 }
 
-func (input antigravityReport) saveQuota(now time.Time) error {
-	// Startup and gateway accounts can omit the snapshot. An explicit disabled
-	// bucket, however, invalidates its previous percentage immediately.
-	if len(input.Quota) == 0 {
+func (input antigravityReport) saveQuota(root string, now time.Time) error {
+	// Initial status can precede authentication and contain neither an identity nor a reading.
+	if len(input.Quota) == 0 && input.Email == "" && (input.State == "" || input.State == "initializing" || input.State == "authenticating") {
 		return nil
 	}
 	unlock, err := lockConfig(usagePath(Antigravity))
@@ -292,35 +305,131 @@ func (input antigravityReport) saveQuota(now time.Time) error {
 	if cached.Observed.After(now) {
 		return nil
 	}
+
+	space, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = space.Close() }()
+	// Keep each TUI's last account and disabled windows beside its transcript
+	// pointer. A repaint from an older session is not a new sign-in or a new disable.
+	instance := os.Getenv(antigravityInstance)
+	if instance == "" {
+		instance = input.ID
+	}
+	receipt := filepath.Join(".atelier", "antigravity-quota", fmt.Sprintf("%x.json", sha256.Sum256([]byte(instance))))
+	var previous *antigravityQuotaCache
+	data, err := space.ReadFile(receipt)
+	if err == nil {
+		if err := json.Unmarshal(data, &previous); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	account := quotaFingerprint(strings.ToLower(strings.TrimSpace(input.Email)))
+	fromSameAccount := previous != nil && previous.Account == account
+	sameAccount := cached.Antigravity != nil && cached.Antigravity.Account == account
+	if cached.Antigravity != nil && !sameAccount && fromSameAccount {
+		return nil
+	}
+	local := antigravityQuotaCache{Account: account, Disabled: map[string]int64{}}
+	if fromSameAccount {
+		maps.Copy(local.Disabled, previous.Disabled)
+	}
+	u := input.mergeQuota(cached, sameAccount, &local, now)
+	changed := !reflect.DeepEqual(cached.Buckets, u.Buckets) || !reflect.DeepEqual(cached.Antigravity, u.Antigravity)
+	if !sameAccount || (len(input.Quota) > 0 && (changed || now.Sub(cached.Observed) >= time.Minute)) {
+		if err := saveUsage(Antigravity, u); err != nil {
+			return err
+		}
+	}
+	if len(local.Disabled) == 0 {
+		local.Disabled = nil
+	}
+	if reflect.DeepEqual(previous, &local) {
+		return nil
+	}
+	data, err = json.Marshal(local)
+	if err != nil {
+		return err
+	}
+	return writeAntigravityFile(space, receipt, data)
+}
+
+func (input antigravityReport) mergeQuota(cached Usage, sameAccount bool, local *antigravityQuotaCache, now time.Time) Usage {
+	disabled := map[string]int64{}
 	buckets := map[string]UsageBucket{}
-	for _, b := range cached.Buckets {
-		if b.Primary != nil && b.Primary.Reset > now.Unix() && b.Primary.Used != nil {
-			buckets[b.ID] = b
+	if sameAccount {
+		for key, reset := range cached.Antigravity.Disabled {
+			if reset > now.Unix() {
+				disabled[key] = reset
+			}
+		}
+		for _, b := range cached.Buckets {
+			if b.Primary != nil && b.Primary.Reset > now.Unix() && b.Primary.Used != nil {
+				buckets[b.ID] = b
+			}
 		}
 	}
 	for key, q := range input.Quota {
-		if q == nil || q.Disabled || q.Remaining == nil || *q.Remaining < 0 || *q.Remaining > 1 {
+		if q == nil {
 			delete(buckets, key)
 			continue
 		}
-		used := math.Round((1-*q.Remaining)*1e6) / 1e4
+		old := buckets[key].Primary
+		lastReset := disabled[key]
+		if old != nil {
+			lastReset = old.Reset
+		}
 		reset := q.Reset.Unix()
-		// Another space can repaint a previous snapshot of the same account.
-		if old := buckets[key].Primary; old != nil && (old.Reset > reset || (old.Reset == reset && *old.Used > used)) {
+		if !q.Reset.IsZero() && reset < lastReset {
 			continue
 		}
-		if reset > now.Unix() {
-			buckets[key] = UsageBucket{ID: key, Name: key, Primary: &UsageWindow{Used: &used, Reset: reset}}
+		priorDisable, sawDisable := local.Disabled[key]
+		if q.Disabled {
+			if sawDisable && priorDisable == reset {
+				continue
+			}
+			local.Disabled[key] = reset
+			if q.Reset.IsZero() {
+				reset = lastReset
+			}
+			if reset > now.Unix() {
+				disabled[key] = reset
+			}
+			delete(buckets, key)
+			continue
 		}
+		if q.Remaining == nil || *q.Remaining < 0 || *q.Remaining > 1 {
+			delete(buckets, key)
+			continue
+		}
+		if reset <= now.Unix() {
+			continue
+		}
+		// A peer may still be reporting the last enabled sample. A TUI which
+		// observed this disable can report a genuine re-enable in the same window.
+		if disabled[key] == reset && (!sawDisable || (priorDisable > 0 && priorDisable != reset)) {
+			continue
+		}
+		delete(local.Disabled, key)
+		used := math.Round((1-*q.Remaining)*1e6) / 1e4
+		if old != nil && old.Reset == reset && *old.Used > used {
+			continue
+		}
+		delete(disabled, key)
+		buckets[key] = UsageBucket{ID: key, Name: key, Primary: &UsageWindow{Used: &used, Reset: reset}}
 	}
-	u := Usage{Observed: now, Source: "statusline"}
+	state := &antigravityQuotaCache{Account: local.Account}
+	if len(disabled) > 0 {
+		state.Disabled = disabled
+	}
+	u := Usage{Observed: now, Source: "statusline", Antigravity: state}
 	for _, key := range slices.Sorted(maps.Keys(buckets)) {
 		u.Buckets = append(u.Buckets, buckets[key])
 	}
-	if now.Sub(cached.Observed) < time.Minute && reflect.DeepEqual(u.Buckets, cached.Buckets) {
-		return nil
-	}
-	return saveUsage(Antigravity, u)
+	return u
 }
 
 func (input antigravityReport) status() string {

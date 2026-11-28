@@ -34,7 +34,7 @@ func TestNewSpaceTabCyclesAgents(t *testing.T) {
 // a choice runs Claude.
 func TestRowShowsTheAgent(t *testing.T) {
 	m := Model{w: 120}
-	for a, glyph := range map[string]string{"": glyphClaude, "claude": glyphClaude, "codex": glyphCodex, "grok": glyphGrok, "antigravity": glyphAntigravity} {
+	for a, glyph := range map[string]string{"": "\uec82", "claude": "\uec82", "codex": "\uec81", "grok": "\U00100001", "antigravity": "\U00100002"} {
 		ws := &core.Workspace{Slug: "brave-otter", Agent: a, Created: time.Now()}
 		if line := m.renderRow(row{ws: ws}, false); !strings.Contains(line, glyph) {
 			t.Errorf("agent %q: row %q lacks %s", a, line, glyph)
@@ -53,7 +53,7 @@ func TestSwapAsksFromASpacesRow(t *testing.T) {
 	if got.screen != scrConfirm || !got.confirmSwap {
 		t.Fatalf("M-x on a row: screen %v, confirmSwap %v; want the swap confirm", got.screen, got.confirmSwap)
 	}
-	if v := ansiRe.ReplaceAllString(got.View(), ""); !strings.Contains(v, "Swap to "+glyphGrok+" Grok Build?") {
+	if v := ansiRe.ReplaceAllString(got.View(), ""); !strings.Contains(v, "Swap to \U00100001 Grok Build?") {
 		t.Errorf("confirm = %q, want it to name the agent it swaps to", v)
 	}
 	next, _ = got.updateConfirm(tea.KeyMsg{Type: tea.KeyEsc})
