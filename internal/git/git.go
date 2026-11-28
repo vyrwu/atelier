@@ -1,7 +1,8 @@
 // Package git derives a workspace's worktrees from the filesystem and answers
 // git queries via the "git" command. The workspace directory is the record:
-// each linked worktree is a directory containing a `.git` FILE (git's marker
-// for a linked worktree, versus a `.git` directory in a normal clone).
+// each linked worktree is a directory containing a `.git` FILE pointing at its
+// git directory (git's marker for a linked worktree, versus a `.git` directory
+// in a normal clone).
 package git
 
 import (
@@ -17,33 +18,19 @@ import (
 	"github.com/vyrwu/atelier/internal/core"
 )
 
-// Worktrees walks workspaceRoot and returns every git worktree found beneath it.
-// A worktree is any directory that directly contains a regular `.git` file. For
-// each, Path is the absolute directory, Branch is its current branch (falling
-// back to the directory's base name), and Repo is the first path segment under
-// workspaceRoot (the <repo> directory). The result is sorted by Repo then
-// Branch. Best-effort: returns nil on any error or a missing root, and does not
-// recurse into a worktree once one is found.
+// Worktrees walks workspaceRoot and returns every git worktree found beneath it
+// (see walkWorktrees). For each, Path is the absolute directory, Branch is its
+// current branch (falling back to the directory's base name), and Repo is the
+// first path segment under workspaceRoot (the <repo> directory). The result is
+// sorted by Repo then Branch. Best-effort: returns nil on any error or a missing
+// root.
 func Worktrees(workspaceRoot string) []core.Worktree {
 	root, err := filepath.Abs(workspaceRoot)
 	if err != nil {
 		return nil
 	}
 	var out []core.Worktree
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			// One unreadable directory skips itself, not the rest of the space.
-			if path == root {
-				return err
-			}
-			return filepath.SkipDir
-		}
-		if !d.IsDir() || path == root {
-			return nil
-		}
-		if !isWorktreeDir(path) {
-			return nil
-		}
+	walkWorktrees(root, func(path string) {
 		branch := CurrentBranch(path)
 		if branch == "" {
 			branch = filepath.Base(path)
@@ -58,7 +45,6 @@ func Worktrees(workspaceRoot string) []core.Worktree {
 			Path:    path,
 			Created: created,
 		})
-		return filepath.SkipDir // don't recurse into a worktree
 	})
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Repo != out[j].Repo {
@@ -69,10 +55,58 @@ func Worktrees(workspaceRoot string) []core.Worktree {
 	return out
 }
 
-// isWorktreeDir reports whether dir directly contains a regular `.git` file.
+// walkWorktrees calls fn with every worktree under root (see isWorktreeDir),
+// without recursing into a worktree once one is found.
+func walkWorktrees(root string, fn func(path string)) {
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			// One unreadable directory skips itself, not the rest of the space.
+			if path == root {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		if !d.IsDir() || path == root {
+			return nil
+		}
+		if !isWorktreeDir(path) {
+			return nil
+		}
+		fn(path)
+		return filepath.SkipDir
+	})
+}
+
+// isWorktreeDir reports whether dir directly contains a regular `.git` file
+// pointing at a git directory, as a linked worktree's does. Some caches mark
+// themselves with an empty `.git` file (uv's does), which is no worktree.
 func isWorktreeDir(dir string) bool {
 	info, err := os.Lstat(filepath.Join(dir, ".git"))
-	return err == nil && info.Mode().IsRegular()
+	return err == nil && info.Mode().IsRegular() && gitFileDir(dir) != ""
+}
+
+// gitFileDir is the git directory the `.git` file in path points at
+// ("gitdir: <dir>"), or "" when path has no such file. A relative pointer
+// (worktree.useRelativePaths) is resolved from path's real location, as git
+// resolves it, not through a symlink on the way there.
+func gitFileDir(path string) string {
+	// #nosec G304 -- Reads the .git metadata of a directory in the owner's space.
+	data, err := os.ReadFile(filepath.Join(path, ".git"))
+	if err != nil {
+		return ""
+	}
+	dir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: ")
+	if !ok {
+		return ""
+	}
+	if !filepath.IsAbs(dir) {
+		real, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(real, dir)
+	}
+	return dir
 }
 
 // repoSegment returns the first path segment of path relative to root — the
@@ -89,14 +123,81 @@ func repoSegment(root, path string) string {
 }
 
 // CurrentBranch returns the abbreviated current branch of the git worktree at
-// path, or "" on error (e.g. detached HEAD or not a repo).
+// path, "HEAD" when it is detached, or "" on error. A linked worktree's HEAD file
+// is read directly: a git process per worktree cost a space with dozens of them
+// over a second before its popup drew. Anything that file can't settle (a clone,
+// the reftable backend's placeholder) is asked of git.
 func CurrentBranch(path string) string {
+	if b := readHead(path); b != "" {
+		return b
+	}
 	// #nosec G204 G702 -- Fixed git operations; repository paths and refs are separate arguments, without a shell.
 	out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// readHead is the branch the HEAD file of the linked worktree at path names, or
+// "HEAD" when it is detached, as `git rev-parse --abbrev-ref HEAD` would print
+// them — except that git qualifies a name another ref shares (heads/x) and
+// errs on a branch with no commits yet, where this names the branch. "" when
+// it isn't a linked worktree or the file names neither a branch nor a commit.
+func readHead(path string) string {
+	dir := gitFileDir(path)
+	if dir == "" {
+		return ""
+	}
+	// A symlinked HEAD (core.preferSymlinkRefs) is a ref, not its contents.
+	file := filepath.Join(dir, "HEAD")
+	if fi, err := os.Lstat(file); err != nil || !fi.Mode().IsRegular() {
+		return ""
+	}
+	// #nosec G304 G703 -- Reads the HEAD of the owner's worktree, found from its .git file.
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return ""
+	}
+	head := strings.TrimSpace(string(data))
+	if b, ok := strings.CutPrefix(head, "ref: refs/heads/"); ok {
+		if b == ".invalid" || !plainRefName(b) {
+			return ""
+		}
+		return b
+	}
+	if objectID(head) {
+		return "HEAD"
+	}
+	return ""
+}
+
+// plainRefName rejects what git never allows in a ref name and a list row must
+// not print: control characters, spaces, and ".." among them. git is asked
+// about anything else odd.
+func plainRefName(s string) bool {
+	if s == "" || strings.Contains(s, "..") || strings.ContainsAny(s, " ~^:?*[\\") {
+		return false
+	}
+	for _, c := range s {
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// objectID reports whether s is a full SHA-1 or SHA-256 object name.
+func objectID(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // AheadBehind reports how many commits the worktree at path is ahead of and
@@ -267,18 +368,7 @@ func unsavedSubmodules(path string) string {
 // without running git — the file outlives a source repo that has since moved.
 // "" if path isn't a linked worktree.
 func SourceGitDir(path string) string {
-	// #nosec G304 -- Reads the .git metadata of the owner's worktree to locate its source repository.
-	data, err := os.ReadFile(filepath.Join(path, ".git"))
-	if err != nil {
-		return ""
-	}
-	dir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: ")
-	if !ok {
-		return ""
-	}
-	if !filepath.IsAbs(dir) { // worktree.useRelativePaths
-		dir = filepath.Join(path, dir)
-	}
+	dir := gitFileDir(path)
 	if filepath.Base(filepath.Dir(dir)) != "worktrees" {
 		return ""
 	}
@@ -332,34 +422,17 @@ func RemoveWorktree(path string) error {
 }
 
 // CountWorktrees counts the worktrees under workspaceRoot without resolving any
-// branch names. Worktrees() spends a `git rev-parse` per worktree purely to fill
-// in Branch, which the space lists never show — they show how many there are.
+// branch names, which the space lists never show — they show how many there are.
 func CountWorktrees(workspaceRoot string) int { return len(WorktreeDirs(workspaceRoot)) }
 
 // WorktreeDirs is the path of every worktree under workspaceRoot, found the way
-// Worktrees finds them but without running git.
+// Worktrees finds them but without reading their branches.
 func WorktreeDirs(workspaceRoot string) []string {
 	root, err := filepath.Abs(workspaceRoot)
 	if err != nil {
 		return nil
 	}
 	var dirs []string
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			// One unreadable directory skips itself, not the rest of the space.
-			if path == root {
-				return err
-			}
-			return filepath.SkipDir
-		}
-		if !d.IsDir() || path == root {
-			return nil
-		}
-		if !isWorktreeDir(path) {
-			return nil
-		}
-		dirs = append(dirs, path)
-		return filepath.SkipDir
-	})
+	walkWorktrees(root, func(path string) { dirs = append(dirs, path) })
 	return dirs
 }

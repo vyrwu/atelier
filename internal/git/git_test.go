@@ -1,9 +1,11 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,12 +100,20 @@ func TestIsWorktreeDir(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(clone, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	emptyGit := filepath.Join(root, "cache")
+	if err := os.MkdirAll(emptyGit, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(emptyGit, ".git"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cases := map[string]struct {
 		dir  string
 		want bool
 	}{
 		"worktree":    {wt, true},
+		"empty .git":  {emptyGit, false},
 		"clone":       {clone, false},
 		"plain-dir":   {root, false},
 		"nonexistent": {filepath.Join(root, "nope"), false},
@@ -253,5 +263,197 @@ func TestWorktreesSurvivesAnUnreadableDirectory(t *testing.T) {
 	}
 	if got := CountWorktrees(root); got != 1 {
 		t.Errorf("counted %d worktrees past an unreadable directory, want 1", got)
+	}
+}
+
+// A worktree's `.git` file points at its git directory. An empty one (uv marks
+// its cache with one) is no worktree, while a repository whose name starts with
+// '.' (an org's .github) still holds real ones.
+func TestWorktreesNeedAGitdirPointer(t *testing.T) {
+	root := t.TempDir()
+	cache := filepath.Join(root, ".uv-cache", "sdists-v9")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, ".git"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkWorktree(t, root, ".github", "feat-x")
+
+	if got := Worktrees(root); len(got) != 1 || got[0].Repo != ".github" {
+		t.Errorf("worktrees = %+v, want only .github's", got)
+	}
+	if got := CountWorktrees(root); got != 1 {
+		t.Errorf("counted %d worktrees, want 1", got)
+	}
+}
+
+// Listing a space's worktrees spent a git process per worktree on its branch,
+// over a second before the popup drew for a space with 60. A linked worktree's
+// HEAD file names it; anything else is still asked of git.
+func TestCurrentBranchReadsTheWorktreesHEAD(t *testing.T) {
+	run := func(dir string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	src := t.TempDir()
+	run(src, "init", "-q", "-b", "main")
+	run(src, "commit", "-q", "--allow-empty", "-m", "x")
+	wt := filepath.Join(t.TempDir(), "src", "feat", "x")
+	run(src, "worktree", "add", "-q", "-b", "feat/x", wt)
+
+	if got := readHead(wt); got != "feat/x" {
+		t.Errorf("readHead = %q, want feat/x", got)
+	}
+	// A tag of the same name makes git answer heads/feat/x; the HEAD file
+	// doesn't, which shows CurrentBranch read it rather than ran git.
+	run(src, "tag", "feat/x")
+	if got := CurrentBranch(wt); got != "feat/x" {
+		t.Errorf("CurrentBranch = %q, want feat/x", got)
+	}
+
+	run(wt, "checkout", "-q", "--detach")
+	if got := readHead(wt); got != "HEAD" {
+		t.Errorf("detached readHead = %q, want HEAD", got)
+	}
+	if got := CurrentBranch(wt); got != "HEAD" {
+		t.Errorf("detached CurrentBranch = %q, want HEAD", got)
+	}
+
+	// Not a linked worktree: git answers.
+	if got := readHead(src); got != "" {
+		t.Errorf("clone readHead = %q, want it left to git", got)
+	}
+	if got := CurrentBranch(src); got != "main" {
+		t.Errorf("clone CurrentBranch = %q, want main", got)
+	}
+}
+
+// A HEAD file names whatever it was written with; a name git would refuse, and
+// a list row must not print, is left to git.
+func TestReadHeadRefusesWhatGitWould(t *testing.T) {
+	gitdir := t.TempDir()
+	wt := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a\x1b[31mb", "a b", "a..b", "a\nb", "a:b", ""} {
+		if err := os.WriteFile(filepath.Join(gitdir, "HEAD"), []byte("ref: refs/heads/"+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := readHead(wt); got != "" {
+			t.Errorf("readHead(%q) = %q, want it left to git", name, got)
+		}
+	}
+	// A symlinked HEAD is a ref to follow, which git does.
+	ref := filepath.Join(gitdir, "other")
+	if err := os.WriteFile(ref, []byte(strings.Repeat("a", 40)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(filepath.Join(gitdir, "HEAD"))
+	if err := os.Symlink(ref, filepath.Join(gitdir, "HEAD")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readHead(wt); got != "" {
+		t.Errorf("symlinked readHead = %q, want it left to git", got)
+	}
+}
+
+// The reftable backend leaves a placeholder HEAD naming refs/heads/.invalid,
+// which git sees past and the file can't; a SHA-256 repository's detached HEAD
+// is a longer object name.
+func TestReadHeadAcrossRepositoryFormats(t *testing.T) {
+	run := func(dir string, args ...string) error {
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %v: %v\n%s", args, err, out)
+		}
+		return nil
+	}
+	setup := func(t *testing.T, format string) string {
+		t.Helper()
+		src := t.TempDir()
+		if err := run(src, "init", "-q", "-b", "main", format); err != nil {
+			t.Skipf("git can't make this repository: %v", err)
+		}
+		wt := filepath.Join(t.TempDir(), "wt")
+		for _, args := range [][]string{{"commit", "-q", "--allow-empty", "-m", "x"}, {"worktree", "add", "-q", "-b", "feat", wt}} {
+			if err := run(src, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return wt
+	}
+	t.Run("reftable", func(t *testing.T) {
+		wt := setup(t, "--ref-format=reftable")
+		if got := readHead(wt); got != "" {
+			t.Errorf("readHead = %q, want it left to git", got)
+		}
+		if got := CurrentBranch(wt); got != "feat" {
+			t.Errorf("CurrentBranch = %q, want feat", got)
+		}
+	})
+	t.Run("sha256", func(t *testing.T) {
+		wt := setup(t, "--object-format=sha256")
+		if err := run(wt, "checkout", "-q", "--detach"); err != nil {
+			t.Fatal(err)
+		}
+		if got := readHead(wt); got != "HEAD" {
+			t.Errorf("detached readHead = %q, want HEAD", got)
+		}
+	})
+}
+
+// git resolves a relative gitdir (worktree.useRelativePaths) from the
+// worktree's real location, so must atelier when the spaces root is a symlink:
+// joined onto the symlinked path, the pointer would climb somewhere else.
+func TestRelativeGitdirThroughASymlinkedRoot(t *testing.T) {
+	run := func(dir string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(base, "src")
+	if err := os.Mkdir(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(src, "init", "-q", "-b", "main")
+	run(src, "commit", "-q", "--allow-empty", "-m", "x")
+	real := filepath.Join(base, "spaces", "calm-heron")
+	wt := filepath.Join(real, "src", "feat")
+	run(src, "worktree", "add", "-q", "-b", "feat", wt)
+	rel, err := filepath.Rel(wt, filepath.Join(src, ".git", "worktrees", "feat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+rel+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "spaces")
+	if err := os.Symlink(filepath.Dir(real), link); err != nil {
+		t.Fatal(err)
+	}
+
+	via := filepath.Join(link, "calm-heron", "src", "feat")
+	if got := readHead(via); got != "feat" {
+		t.Errorf("readHead = %q, want feat", got)
+	}
+	if got := SourceGitDir(via); got != filepath.Join(src, ".git") {
+		t.Errorf("SourceGitDir = %q, want %q", got, filepath.Join(src, ".git"))
+	}
+	if got := CountWorktrees(filepath.Join(link, "calm-heron")); got != 1 {
+		t.Errorf("counted %d worktrees, want 1", got)
 	}
 }

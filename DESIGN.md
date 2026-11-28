@@ -110,7 +110,8 @@ the instant the workspace is created; the agent's title arrives later, lives in
 state, and may change freely.
 
 **The directory is the record of its worktrees.** A `.git` *file* (not
-directory) marks one. Nothing else tracks them.
+directory) pointing at a git directory (`gitdir: …`) marks one. Nothing else
+tracks them.
 
 ```
 ~/ateliers/<slug>/          workspace root — the agent's cwd

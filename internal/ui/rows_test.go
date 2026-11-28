@@ -1,9 +1,14 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/vyrwu/atelier/internal/core"
 )
@@ -216,5 +221,64 @@ func TestBadgeColumnsLineUpAcrossCounts(t *testing.T) {
 	}
 	if a, b := col("a", 1), col("b", 9); a != b {
 		t.Errorf("worktree icon at %d vs %d — counts of different width shift the column", a, b)
+	}
+}
+
+// Counting worktrees walks a space's directory, so only the spaces a list shows
+// are counted: Spaces before it draws and never the Trash, which can run to
+// hundreds and fills its badges in once counted off the draw path.
+func TestListsCountOnlyTheirSpaces(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ATELIER_ROOT", root)
+	for _, p := range []string{"live-otter/repo/feat", "old-heron/repo/fix"} {
+		dir := filepath.Join(root, p)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /x/.git/worktrees/y\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := Model{
+		all:      []core.Workspace{{Slug: "live-otter"}, {Slug: "old-heron", Retired: true}},
+		wtCount:  map[string]int{},
+		counting: map[string]bool{},
+		filter:   textinput.New(),
+	}
+
+	m.rebuild()
+	if _, ok := m.wtCount["old-heron"]; ok || m.wtCount["live-otter"] != 1 {
+		t.Errorf("Spaces counted %v, want only live-otter's one worktree", m.wtCount)
+	}
+	if m.countCmd() != nil {
+		t.Error("Spaces started a count off the draw path")
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}, Alt: true})
+	m = next.(Model)
+	if _, ok := m.wtCount["old-heron"]; ok || m.screen != scrTrash {
+		t.Fatal("Trash counted before it drew")
+	}
+	if cmd == nil {
+		t.Fatal("opening Trash started no count")
+	}
+	if m.countCmd() != nil {
+		t.Error("a second count started while the first was in flight")
+	}
+	msg, ok := cmd().(countsMsg)
+	if !ok {
+		t.Fatalf("opening Trash ran %T, want the count", msg)
+	}
+	next, _ = m.Update(msg)
+	if got := next.(Model).wtCount["old-heron"]; got != 1 {
+		t.Errorf("Trash count = %d, want old-heron's one worktree", got)
+	}
+	if next.(Model).countCmd() != nil {
+		t.Error("a count started for a space already counted")
+	}
+	// A count nobody is waiting for (a delete dropped it) is not applied.
+	next, _ = next.(Model).Update(countsMsg{"old-heron": 5})
+	if got := next.(Model).wtCount["old-heron"]; got != 1 {
+		t.Errorf("a stale count landed: %d", got)
 	}
 }
