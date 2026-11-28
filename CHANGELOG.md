@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/vyrwu/atelier/compare/v1.2.0...v1.3.0) (2026-11-28)
+
+
+### Features
+
+* **agent:** Restore Antigravity CLI support ([#124](https://github.com/vyrwu/atelier/issues/124)) ([514ecc7](https://github.com/vyrwu/atelier/commit/514ecc75efd661d3a255c494a6fc60c0b4fddb98))
+* **cli:** Administer a space's windows ([#120](https://github.com/vyrwu/atelier/issues/120)) ([d2001a8](https://github.com/vyrwu/atelier/commit/d2001a83015b3086e01a4202a9b09b1e13998bc2))
+* **ui:** Focus spaces at the top of M-s ([#119](https://github.com/vyrwu/atelier/issues/119)) ([0b24aa1](https://github.com/vyrwu/atelier/commit/0b24aa1ca90ebd1227108768b9d30ade4ef2030d))
+
+
+### Performance
+
+* **ui:** Draw popups without walking the Trash ([#126](https://github.com/vyrwu/atelier/issues/126)) ([db51a4b](https://github.com/vyrwu/atelier/commit/db51a4bf5360163576a246583b2a262cc47750db))
+
 ## [1.2.0](https://github.com/vyrwu/atelier/compare/v1.1.0...v1.2.0) (2026-11-08)
 
 
