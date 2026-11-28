@@ -69,7 +69,7 @@ jobs:
         run: |
           mkdir "$RUNNER_TEMP/tools"
           cp mise.toml mise.lock "$RUNNER_TEMP/tools/"
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         env:
           MISE_TRUSTED_CONFIG_PATHS: ${{ runner.temp }}/tools
           MISE_LOCKED: "1"
@@ -137,7 +137,7 @@ jobs:
           path: cask
       - name: Mint a tap-only token
         id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           client-id: ${{ vars.HOMEBREW_TAP_CLIENT_ID }}
           private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
