@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -60,11 +61,13 @@ type Model struct {
 	// data (loaded locally — NFR-P1)
 	all []core.Workspace
 	// wt holds the CURRENT space's worktrees, with branches — the only place a
-	// branch name is shown. wtCount is every space's worktree tally, which is all
-	// the lists need, and costs a directory walk instead of a git process each.
-	wt      map[string][]core.Worktree
-	wtCount map[string]int
-	status  map[string]core.AgentStatus
+	// branch name is shown. wtCount is the worktree tally of each space a list
+	// has shown, which is all the lists need; counting is the spaces it lacks
+	// that Trash is counting (countCmd).
+	wt       map[string][]core.Worktree
+	wtCount  map[string]int
+	counting map[string]bool
+	status   map[string]core.AgentStatus
 
 	// curWS is the space the overlay was launched from (the outer client's
 	// session), or nil from the home splash. The space-scoped views (PRs,
@@ -101,16 +104,10 @@ type Model struct {
 // Run shows the UI in the popup's pty. outer is the client that opened the popup
 // (from @atelier_outer). start names the screen to open on.
 func Run(outer, start string) error {
-	m := newModel(outer)
+	first := map[string]screen{"trash": scrTrash, "new": scrNew, "prs": scrPRs,
+		"worktrees": scrWorktrees, "swap": scrConfirm}[start]
+	m := newModel(outer, first)
 	switch start {
-	case "trash":
-		m.screen = scrTrash
-	case "new":
-		m.screen = scrNew
-	case "prs":
-		m.screen = scrPRs
-	case "worktrees":
-		m.screen = scrWorktrees
 	case "swap":
 		// M-x: straight onto the swap confirm for the space it was pressed in.
 		if m.curWS == nil {
@@ -140,7 +137,9 @@ func Run(outer, start string) error {
 	return err
 }
 
-func newModel(outer string) Model {
+// newModel loads the model for the screen it opens on, so a view that lists no
+// spaces doesn't count their worktrees.
+func newModel(outer string, first screen) Model {
 	fi := textinput.New()
 	fi.Prompt = ""
 	fi.Placeholder = "filter…"
@@ -164,8 +163,10 @@ func newModel(outer string) Model {
 		spin:      sp,
 		wt:        map[string][]core.Worktree{},
 		wtCount:   map[string]int{},
+		counting:  map[string]bool{},
 		status:    map[string]core.AgentStatus{},
 		prPending: map[string]bool{},
+		screen:    first,
 	}
 	m.load()
 	// Resolve the current space from the client that opened the overlay, and cache
@@ -189,13 +190,8 @@ func (m *Model) load() {
 		live[s] = true
 	}
 	m.wt = map[string][]core.Worktree{}
-	m.wtCount = map[string]int{}
 	m.status = map[string]core.AgentStatus{}
 	for _, w := range m.all {
-		// Counting walks the directory; naming the branches would spawn a git
-		// process per worktree, and across every space that was seconds of blank
-		// popup before the first frame.
-		m.wtCount[w.Slug] = git.CountWorktrees(w.Root())
 		m.status[w.Session] = agent.Status(w.Session, live[w.Session])
 	}
 	// load() re-allocates m.all, so re-resolve the current space into the fresh
@@ -247,6 +243,21 @@ func (m *Model) rebuild() {
 		}
 		return m.rows[i].ws.Created.After(m.rows[j].ws.Created)
 	})
+	// Spaces counts its rows' worktrees before it draws: they are few, and its
+	// badges never pop in. Trash, which can run to hundreds, counts its own off
+	// the draw path (countCmd). Counting walks the directory and reads no
+	// branches. A count lasts the popup: only a delete here removes worktrees,
+	// and it drops its space's.
+	if m.screen == scrActive {
+		if m.wtCount == nil {
+			m.wtCount = map[string]int{}
+		}
+		for _, r := range m.rows {
+			if _, ok := m.wtCount[r.ws.Slug]; !ok {
+				m.wtCount[r.ws.Slug] = git.CountWorktrees(r.ws.Root())
+			}
+		}
+	}
 	if m.sel >= len(m.rows) {
 		m.sel = len(m.rows) - 1
 	}
@@ -302,14 +313,77 @@ func (m Model) Init() tea.Cmd {
 	if m.screen == scrWorktrees {
 		return tea.Batch(textarea.Blink, cacheTickCmd(), m.spin.Tick, m.freshnessCmd())
 	}
-	return tea.Batch(textarea.Blink, cacheTickCmd())
+	return tea.Batch(textarea.Blink, cacheTickCmd(), m.countCmd())
+}
+
+// countsMsg is worktree counts by space, counted off the draw path.
+type countsMsg map[string]int
+
+// countCmd counts the worktrees of the Trash rows not counted yet, so Trash
+// draws at once and its badges fill in: counting a Trash of hundreds in turn
+// took most of a second. The walks wait on the filesystem, so several run at
+// once.
+func (m Model) countCmd() tea.Cmd {
+	if m.screen != scrTrash || m.counting == nil {
+		return nil
+	}
+	roots := map[string]string{}
+	for _, r := range m.rows {
+		if _, ok := m.wtCount[r.ws.Slug]; !ok && !m.counting[r.ws.Slug] {
+			roots[r.ws.Slug] = r.ws.Root()
+			m.counting[r.ws.Slug] = true
+		}
+	}
+	if len(roots) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		out := countsMsg{}
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 8)
+		for slug, root := range roots {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				n := git.CountWorktrees(root)
+				<-sem
+				mu.Lock()
+				out[slug] = n
+				mu.Unlock()
+			}()
+		}
+		wg.Wait()
+		return out
+	}
 }
 
 // loading reports whether anything the current view is waiting on is still in
 // flight — what keeps the spinner ticking, and what stops it.
 func (m Model) loading() bool { return m.wtLoading }
 
+// Update handles msg, then has Trash count any rows it lacks, whichever path
+// (opening, filtering, a delete or restore) put them on the list.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if counts, ok := msg.(countsMsg); ok {
+		// A count a delete has since dropped (counting cleared) is stale.
+		for slug, n := range counts {
+			if m.counting[slug] {
+				m.wtCount[slug] = n
+				delete(m.counting, slug)
+			}
+		}
+		return m, nil
+	}
+	next, cmd := m.update(msg)
+	if nm, ok := next.(Model); ok {
+		return nm, tea.Batch(cmd, nm.countCmd())
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -716,6 +790,9 @@ func setRetired(slug string, retired bool) error {
 // place.
 func (m *Model) deleteWorkspace(w core.Workspace) {
 	m.moveOuterOff(w.Session)
+	// A delete that fails partway leaves fewer worktrees: count them again.
+	delete(m.wtCount, w.Slug)
+	delete(m.counting, w.Slug)
 	if err := gc.Delete(w); err != nil {
 		m.err = "delete " + w.Slug + ": " + err.Error()
 	}

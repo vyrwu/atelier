@@ -22,7 +22,7 @@ type wtFresh struct {
 
 // loadCurrentWorktrees derives the current space's worktrees, branches included,
 // and builds its rows. Scoped to one space on purpose: this is the only view
-// that names a branch, and the cost is a git process per worktree.
+// that names a branch, and the cost is reading each one's HEAD.
 func (m *Model) loadCurrentWorktrees() {
 	if m.curWS == nil {
 		return

@@ -102,7 +102,8 @@ func ValidSpaceName(s string) bool {
 }
 
 // Worktree is a git worktree belonging to a workspace, derived from the
-// filesystem (a `.git` *file* marks it). Never stored.
+// filesystem (a `.git` *file* pointing at its git directory marks it). Never
+// stored.
 type Worktree struct {
 	Repo    string    // "owner/repo" — the directory under the workspace root
 	Branch  string    // the checked-out branch
